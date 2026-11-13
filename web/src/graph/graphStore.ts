@@ -1,7 +1,7 @@
 // Client state for the relationship graph. Server data is in TanStack Query. This store holds only what the user has built on screen.
 import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange } from '@xyflow/react'
 import { create } from 'zustand'
-import type { RelationsResponse } from '../api/types'
+import type { GraphEdge, RelationsResponse } from '../api/types'
 import { nameOf, schemaOf } from './format'
 import { computeLayout } from './layout'
 import { nodeSize, viaMap } from './derive'
@@ -9,6 +9,19 @@ import type { DiagramPayload } from './diagram'
 import type { EdgeFilters, FlowEdge, FlowNode, Selection } from './types'
 
 export const DEFAULT_STALE_DAYS = 7
+
+export const DEFAULT_FILTERS: EdgeFilters = {
+  lineage: true,
+  fk: true,
+  view_dep: true,
+  join_mined: true,
+  manual: true,
+  sketch: true,
+  concept_link: true,
+  ontology: true,
+  showStale: true,
+  showRejected: false,
+}
 
 interface GraphState {
   nodes: FlowNode[]
@@ -31,8 +44,10 @@ interface GraphState {
   setHover: (id: string | null) => void
   setStaleDays: (days: number) => void
   setFilter: (key: keyof EdgeFilters, value: boolean) => void
+  /** Changes fields of one edge's info (status, note) after the server accepted the change. */
+  updateEdgeInfo: (id: string, patch: Partial<GraphEdge>) => void
   setFocusSchema: (schema: string | null) => void
-  /** Adds the nodes and edges of one /api/relations response. Existing nodes and edges are kept. */
+  /** Adds the nodes and edges of one relationships response. Existing nodes and edges stay in place, but an edge already on screen takes the fresh info (status, note, evidence). */
   mergeRelations: (resp: RelationsResponse) => void
   clear: () => void
   requestLayout: () => void
@@ -48,7 +63,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   selection: null,
   hoverId: null,
   staleDays: DEFAULT_STALE_DAYS,
-  filters: { lineage: true, fk: true, view_dep: true, showStale: true },
+  filters: DEFAULT_FILTERS,
   status: { text: '', error: false },
   layoutPending: false,
   fitPending: false,
@@ -60,6 +75,10 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   setHover: (hoverId) => set({ hoverId }),
   setStaleDays: (staleDays) => set({ staleDays }),
   setFilter: (key, value) => set((s) => ({ filters: { ...s.filters, [key]: value } })),
+  updateEdgeInfo: (id, patch) =>
+    set((s) => ({
+      edges: s.edges.map((e) => (e.id === id ? { ...e, data: { ...e.data!, info: { ...e.data!.info, ...patch } } } : e)),
+    })),
   setFocusSchema: (focusSchema) => set({ focusSchema }),
 
   mergeRelations: (resp) =>
@@ -96,7 +115,8 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       }
 
       const edgeIds = new Set(s.edges.map((e) => e.id))
-      const edges = [...s.edges]
+      const fresh = new Map(resp.edges.map((e) => [e.id, e]))
+      const edges = s.edges.map((e) => (fresh.has(e.id) ? { ...e, data: { ...e.data!, info: fresh.get(e.id)! } } : e))
       for (const e of resp.edges) {
         if (edgeIds.has(e.id) || !indexById.has(e.source) || !indexById.has(e.target)) continue
         edges.push({ id: e.id, source: e.source, target: e.target, data: { info: e } })

@@ -94,8 +94,22 @@ export interface GraphNode {
   self_ref_last_seen?: string
 }
 
-export type GraphEdgeKind = 'fk' | 'view_dep' | 'lineage'
+/** Derived from Unity Catalog at read time: `fk`, `lineage`, `view_dep`. The rest are stored. */
+export type RelationshipKind =
+  | 'fk'
+  | 'lineage'
+  | 'view_dep'
+  | 'join_mined'
+  | 'manual'
+  | 'sketch'
+  | 'concept_link'
+  | 'ontology'
 
+export type GraphEdgeKind = RelationshipKind
+
+export type RelationshipStatus = 'derived' | 'proposed' | 'accepted' | 'rejected'
+
+/** What the graph draws and saves for one edge. The first group is the legacy shape, the second comes from /api/relationships. */
 export interface GraphEdge {
   id: string
   source: string
@@ -110,12 +124,97 @@ export interface GraphEdge {
   bidir?: boolean
   last_seen?: string
   last_seen_by_dir?: Record<string, string>
+  // relationship store. Absent on edges from a diagram saved by an older version: those are derived edges.
+  directed?: boolean
+  status?: RelationshipStatus
+  note?: string
+  provenance?: Provenance
+  evidence?: Evidence
+  /** Ids to send to PATCH /api/relationships/<id>: the underlying stored edges, or the derived edge ids. */
+  patch_ids?: string[]
 }
 
 export interface RelationsResponse {
   nodes: GraphNode[]
   edges: GraphEdge[]
   errors: string[]
+}
+
+// ---- Relationship store (GET /api/relationships and friends) --------------
+
+export interface Endpoint {
+  table: string
+  column?: string | null
+}
+
+export interface Provenance {
+  origin: string
+  source_ref?: string | null
+  fetched_at?: string | null
+}
+
+export interface Evidence {
+  runs?: number | null
+  users?: number | null
+  first_seen?: string | null
+  last_seen?: string | null
+  sample_refs: string[]
+}
+
+export interface ColumnPair {
+  source: string | null
+  target: string | null
+}
+
+/** One edge as the server returns it. At table level (the default) it is rolled up and has `columns` and `members`. */
+export interface Relationship {
+  id: string
+  kind: RelationshipKind
+  source: Endpoint
+  target: Endpoint
+  directed: boolean
+  provenance: Provenance
+  evidence: Evidence | null
+  status: RelationshipStatus
+  note: string
+  created_at: string
+  updated_at: string
+  columns?: ColumnPair[]
+  members?: string[]
+}
+
+export interface RelationshipsResponse {
+  table: string
+  level: 'table' | 'column'
+  nodes: GraphNode[]
+  edges: Relationship[]
+  errors: string[]
+}
+
+export interface RelationshipCreate {
+  source: Endpoint
+  target: Endpoint
+  directed?: boolean
+  note?: string
+}
+
+export interface RelationshipPatch {
+  status?: Exclude<RelationshipStatus, 'derived'>
+  note?: string
+}
+
+export interface RelationshipsExport {
+  version: 1
+  exported_at?: string
+  edges: Relationship[]
+  overlays: Array<{ kind: RelationshipKind; source: Endpoint; target: Endpoint; note: string; updated_at?: string }>
+}
+
+export interface ImportResult {
+  imported: number
+  created: number
+  updated: number
+  overlays: number
 }
 
 export type ProducerKind = 'job' | 'notebook' | 'pipeline' | 'dashboard' | 'query' | 'file'

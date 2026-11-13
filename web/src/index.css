@@ -956,3 +956,59 @@ tr.stale td {
   color: var(--muted, #57606a);
   white-space: nowrap;
 }
+
+/* ---- Relationship store: legend, edge review, connect handles (graph only) ---- */
+
+.legend-group {
+  margin: 6px 0 2px;
+  color: var(--muted, #57606a);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.graph-controls .kind-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lg-line {
+  flex: none;
+}
+
+.legend-note {
+  margin: 6px 0 0;
+}
+
+.edge-provenance,
+.edge-review {
+  margin-top: 8px;
+}
+
+.edge-status.status-accepted {
+  color: #2f855a;
+}
+
+.edge-status.status-rejected {
+  color: var(--error, #c53030);
+}
+
+.edge-note {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+}
+
+/* Source handles show as green dots while a node is hovered. Drag one onto another node to add a manual edge. */
+.tbl-node:hover .tbl-handle.source {
+  opacity: 1;
+  width: 10px;
+  height: 10px;
+  min-width: 10px;
+  min-height: 10px;
+  background: #2f855a;
+  border: 1px solid #fff;
+  cursor: crosshair;
+}

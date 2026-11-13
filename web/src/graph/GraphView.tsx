@@ -1,10 +1,12 @@
 import '@xyflow/react/dist/style.css'
 import {
+  ConnectionMode,
   Controls,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
   type NodeMouseHandler,
+  type OnConnectEnd,
   type EdgeMouseHandler,
   type NodeChange,
   type EdgeChange,
@@ -13,6 +15,7 @@ import { useEffect, useMemo } from 'react'
 import { useGraphActions } from './actions'
 import { deriveFlow } from './derive'
 import { EDGE_TYPES } from './edges'
+import { EDGE_COLORS } from './format'
 import { useGraphStore } from './graphStore'
 import { GraphToolbar } from './GraphToolbar'
 import { TableNode } from './TableNode'
@@ -21,6 +24,14 @@ import { useUiStore } from '../store/uiStore'
 
 // Defined at module scope so React Flow does not rebuild its node and edge types on every render.
 const NODE_TYPES = { table: TableNode }
+const CONNECTION_LINE_STYLE = { stroke: EDGE_COLORS.manual, strokeWidth: 2 }
+
+/** The table node under the pointer where a drag ended, if any. Dropping anywhere on a node connects to it. */
+function nodeIdAt(event: MouseEvent | TouchEvent): string | undefined {
+  const point = 'changedTouches' in event ? event.changedTouches[0] : event
+  const el = document.elementFromPoint(point.clientX, point.clientY)
+  return el?.closest('.react-flow__node')?.getAttribute('data-id') ?? undefined
+}
 
 /** Relationship graph. Toolbar on top, React Flow canvas below. */
 export function GraphView() {
@@ -81,6 +92,13 @@ function GraphCanvas() {
   const onNodeMouseEnter: NodeMouseHandler<FlowNode> = (_, node) => useGraphStore.getState().setHover(node.id)
   const onNodeMouseLeave = () => useGraphStore.getState().setHover(null)
 
+  // Drag from a node's green handle (shown on hover) onto another node to store a manual edge.
+  const onConnectEnd: OnConnectEnd = (event, state) => {
+    const from = state.fromNode?.id
+    const to = state.toNode?.id ?? nodeIdAt(event)
+    if (from && to && from !== to) void actions.connect(from, to)
+  }
+
   return (
     <ReactFlow<FlowNode, FlowEdge>
       nodes={flow.nodes}
@@ -94,7 +112,9 @@ function GraphCanvas() {
       onNodeDoubleClick={onNodeDoubleClick}
       onNodeMouseEnter={onNodeMouseEnter}
       onNodeMouseLeave={onNodeMouseLeave}
-      nodesConnectable={false}
+      onConnectEnd={onConnectEnd}
+      connectionMode={ConnectionMode.Loose}
+      connectionLineStyle={CONNECTION_LINE_STYLE}
       zoomOnDoubleClick={false}
       deleteKeyCode={null}
       minZoom={0.05}

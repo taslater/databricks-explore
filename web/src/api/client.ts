@@ -10,11 +10,17 @@ import type {
   DiagramBody,
   DiagramFile,
   EdgeDetailsResponse,
+  ImportResult,
   ObjectSummary,
   ProfilesResponse,
   QueryBody,
   QueryResult,
   QueryStatus,
+  Relationship,
+  RelationshipCreate,
+  RelationshipPatch,
+  RelationshipsExport,
+  RelationshipsResponse,
   RelationsResponse,
   SavedResponse,
   Schema,
@@ -75,6 +81,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 const get = <T>(path: string) => request<T>('GET', path)
 const post = <T>(path: string, body: unknown) => request<T>('POST', path, body)
+const patch = <T>(path: string, body: unknown) => request<T>('PATCH', path, body)
 const del = <T>(path: string) => request<T>('DELETE', path)
 const enc = encodeURIComponent
 
@@ -145,3 +152,23 @@ export const getCanvas = (name: string) => get<CanvasDoc>(`/api/canvases/${enc(n
 
 /** The server validates with pydantic models that mirror canvas.schema.json. Failures are 400 with an `error` message. */
 export const saveCanvas = (doc: CanvasDoc) => post<SavedResponse>('/api/canvases', doc)
+
+// ---- Relationships --------------------------------------------------------
+
+/** Derived and stored edges for one table. `level` is 'table' (rolled up, the default) or 'column'. */
+export const getRelationships = (table: string, refresh = false, level: 'table' | 'column' = 'table') =>
+  get<RelationshipsResponse>(`/api/relationships${qs({ table, refresh, level: level === 'table' ? null : level })}`)
+
+/** Creates a `manual` edge. 201 when new, 200 when the same edge existed (it is re-accepted). */
+export const createRelationship = (body: RelationshipCreate) => post<Relationship>('/api/relationships', body)
+
+/** `id` is a stored edge id or a derived edge id (a derived edge takes only a note). */
+export const patchRelationship = (id: string, body: RelationshipPatch) =>
+  patch<Relationship>(`/api/relationships/${enc(id)}`, body)
+
+export const deleteRelationship = (id: string) => del<{ deleted: string }>(`/api/relationships/${enc(id)}`)
+
+export const exportRelationships = () => get<RelationshipsExport>('/api/relationships/export')
+
+export const importRelationships = (file: RelationshipsExport) =>
+  post<ImportResult>('/api/relationships/import', file)

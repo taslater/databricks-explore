@@ -4,6 +4,11 @@ export const EDGE_COLORS: Record<string, string> = {
   lineage: '#2b6cb0',
   fk: '#c05621',
   view_dep: '#6b46c1',
+  join_mined: '#2c7a7b',
+  manual: '#2f855a',
+  sketch: '#b83280',
+  concept_link: '#b7791f',
+  ontology: '#4a5568',
   stale: '#bbb',
 }
 
@@ -19,11 +24,16 @@ const NODE_FILL: Record<string, string> = {
 
 export const nodeFill = (kind: string): string => NODE_FILL[kind] ?? '#eee'
 
-/** Full name "cat.sch.tbl" -> "cat.sch". */
-export const schemaOf = (fullName: string): string => fullName.split('.').slice(0, 2).join('.')
+/** A table that does not exist yet is `ph:<uuid>`. */
+export const isPlaceholder = (fullName: string): boolean => fullName.startsWith('ph:')
 
-/** Full name "cat.sch.tbl" -> "tbl". */
-export const nameOf = (fullName: string): string => fullName.split('.')[2] ?? fullName
+/** Full name "cat.sch.tbl" -> "cat.sch". A placeholder has no schema. */
+export const schemaOf = (fullName: string): string =>
+  isPlaceholder(fullName) ? 'placeholder' : fullName.split('.').slice(0, 2).join('.')
+
+/** Full name "cat.sch.tbl" -> "tbl". A placeholder shows the start of its uuid. */
+export const nameOf = (fullName: string): string =>
+  isPlaceholder(fullName) ? `new ${fullName.slice(3, 11)}` : (fullName.split('.')[2] ?? fullName)
 
 /** Last dotted part, used for the breadcrumbs in the details panel. */
 export const lastPart = (fullName: string): string => fullName.split('.').pop() ?? fullName

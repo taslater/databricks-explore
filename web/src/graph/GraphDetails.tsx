@@ -1,9 +1,12 @@
 import { useState, type ReactNode } from 'react'
+import * as api from '../api/client'
 import { useEdge, useObject } from '../api/hooks'
-import type { EdgeFlow, Producer } from '../api/types'
-import { sendToCanvas, useGraphActions } from './actions'
+import type { EdgeFlow, GraphEdge, Producer, RelationshipStatus } from '../api/types'
+import { messageOf, sendToCanvas, useGraphActions } from './actions'
+import { DERIVED_KINDS, KIND_LABEL, KIND_STYLE, STORED_KINDS } from './edgeStyles'
 import { ageDays, fmtAge, lastPart } from './format'
 import { DEFAULT_STALE_DAYS, useGraphStore } from './graphStore'
+import { canReview, patchIds } from './relationships'
 import type { FlowEdge, FlowNode } from './types'
 
 /** Right panel for the graph: visibility filters, actions, and details for the selected node or edge. */
@@ -27,21 +30,21 @@ export function GraphDetails() {
   return (
     <div className="details">
       <section className="graph-controls">
-        <label className="check">
-          <input type="checkbox" checked={filters.lineage} onChange={(e) => setFilter('lineage', e.target.checked)} />
-          <span className="lg-lineage">── lineage</span>
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={filters.fk} onChange={(e) => setFilter('fk', e.target.checked)} />
-          <span className="lg-fk">- - FK</span>
-        </label>
+        <div className="legend-group">From Unity Catalog</div>
+        {DERIVED_KINDS.map((kind) => (
+          <KindFilter key={kind} kind={kind} />
+        ))}
+        <div className="legend-group">Stored</div>
+        {STORED_KINDS.map((kind) => (
+          <KindFilter key={kind} kind={kind} />
+        ))}
         <label className="check">
           <input
             type="checkbox"
-            checked={filters.view_dep}
-            onChange={(e) => setFilter('view_dep', e.target.checked)}
+            checked={filters.showRejected}
+            onChange={(e) => setFilter('showRejected', e.target.checked)}
           />
-          <span className="lg-view">── view dep</span>
+          rejected edges
         </label>
         <label className="check">
           <input
@@ -63,6 +66,7 @@ export function GraphDetails() {
           />
           days)
         </label>
+        <p className="hint legend-note">Lighter lines are proposed, faint ones rejected. No arrowhead means undirected.</p>
         <div className="legend-kinds">
           <span className="k tbl">table</span> <span className="k view">view / MV</span>{' '}
           <span className="k st">streaming</span> <span className="k ext">other schema</span>{' '}
@@ -100,6 +104,30 @@ export function GraphDetails() {
         {selectedEdge && <EdgeDetails edge={selectedEdge} staleDays={staleDays} />}
       </div>
     </div>
+  )
+}
+
+/** A filter checkbox for one edge kind, with a sample of its line style as the legend. */
+function KindFilter({ kind }: { kind: GraphEdge['kind'] }) {
+  const checked = useGraphStore((s) => s.filters[kind])
+  const setFilter = useGraphStore((s) => s.setFilter)
+  const style = KIND_STYLE[kind]
+  return (
+    <label className="check kind-filter">
+      <input type="checkbox" checked={checked} onChange={(e) => setFilter(kind, e.target.checked)} />
+      <svg className="lg-line" width="34" height="8" aria-hidden="true">
+        <line
+          x1="1"
+          y1="4"
+          x2="33"
+          y2="4"
+          stroke={style.stroke}
+          strokeWidth={style.strokeWidth ?? 1.6}
+          strokeDasharray={style.strokeDasharray}
+        />
+      </svg>
+      {KIND_LABEL[kind]}
+    </label>
   )
 }
 
@@ -150,6 +178,16 @@ function NodeDetails({ id, node }: { id: string; node: FlowNode }) {
 
 function EdgeDetails({ edge, staleDays }: { edge: FlowEdge; staleDays: number }) {
   const info = edge.data!.info
+  return (
+    <div>
+      <EdgeBody info={info} staleDays={staleDays} />
+      <EdgeProvenance info={info} />
+      <EdgeReview key={edge.id} info={info} />
+    </div>
+  )
+}
+
+function EdgeBody({ info, staleDays }: { info: GraphEdge; staleDays: number }) {
   if (info.kind === 'fk') {
     const child = info.child_columns ?? []
     const parent = info.parent_columns ?? []
@@ -185,7 +223,115 @@ function EdgeDetails({ edge, staleDays }: { edge: FlowEdge; staleDays: number })
       </div>
     )
   }
-  return <LineageDetails source={info.source} target={info.target} bidir={!!info.bidir} staleDays={staleDays} />
+  if (info.kind === 'lineage') {
+    return <LineageDetails source={info.source} target={info.target} bidir={!!info.bidir} staleDays={staleDays} />
+  }
+  return (
+    <div>
+      <h3>{KIND_LABEL[info.kind]}</h3>
+      <p>
+        {info.source}
+        <br />
+        {info.directed === false ? '↔' : '→'} {info.target}
+      </p>
+    </div>
+  )
+}
+
+/** Where a stored or derived edge came from and how often it was seen. Hidden for edges from an old saved diagram. */
+function EdgeProvenance({ info }: { info: GraphEdge }) {
+  const p = info.provenance
+  const ev = info.evidence
+  if (!p) return null
+  const counts = ev ? [ev.runs != null && `${ev.runs} runs`, ev.users != null && `${ev.users} users`].filter(Boolean) : []
+  return (
+    <div className="edge-provenance">
+      <h4>Provenance</h4>
+      <div>
+        {p.origin}
+        {p.source_ref ? ` · ${p.source_ref}` : ''}
+      </div>
+      {p.fetched_at && <div className="hint">read {fmtAge(p.fetched_at)}</div>}
+      {ev && (
+        <>
+          <h4>Evidence</h4>
+          {counts.length > 0 && <div>{counts.join(' · ')}</div>}
+          {(ev.first_seen || ev.last_seen) && (
+            <div>
+              {ev.first_seen ? `first seen ${ev.first_seen}` : ''}
+              {ev.first_seen && ev.last_seen ? ' · ' : ''}
+              {ev.last_seen ? `last seen ${ev.last_seen}` : ''}
+            </div>
+          )}
+          {ev.sample_refs.length > 0 && <div className="hint">samples: {ev.sample_refs.join(', ')}</div>}
+        </>
+      )}
+    </div>
+  )
+}
+
+const STATUS_TEXT: Record<RelationshipStatus, string> = {
+  derived: 'derived from Unity Catalog',
+  proposed: 'proposed',
+  accepted: 'accepted',
+  rejected: 'rejected',
+}
+
+/**
+ * Status and note for the selected edge. A stored edge can be accepted or rejected and carries a note.
+ * A derived edge takes a note only. Changes go to every id the edge stands for (see patchIds).
+ */
+function EdgeReview({ info }: { info: GraphEdge }) {
+  const [note, setNote] = useState(info.note ?? '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const status: RelationshipStatus = info.status ?? 'derived'
+  const stored = canReview(info)
+
+  async function send(body: { status: 'accepted' | 'rejected' } | { note: string }) {
+    setBusy(true)
+    setError(null)
+    try {
+      await Promise.all(patchIds(info).map((id) => api.patchRelationship(id, body)))
+      useGraphStore.getState().updateEdgeInfo(info.id, body)
+    } catch (e) {
+      setError(messageOf(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="edge-review">
+      <h4>Status</h4>
+      <div className={`edge-status status-${status}`}>{STATUS_TEXT[status]}</div>
+      {stored && (
+        <div className="btns">
+          <button disabled={busy || status === 'accepted'} onClick={() => void send({ status: 'accepted' })}>
+            Accept
+          </button>
+          <button disabled={busy || status === 'rejected'} onClick={() => void send({ status: 'rejected' })}>
+            Reject
+          </button>
+        </div>
+      )}
+      <h4>Note</h4>
+      <textarea
+        className="edge-note"
+        rows={3}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        aria-label="Note"
+        placeholder={stored ? 'Why this edge is right or wrong' : 'A note on this derived edge'}
+      />
+      <div className="btns">
+        <button disabled={busy || note === (info.note ?? '')} onClick={() => void send({ note })}>
+          Save note
+        </button>
+      </div>
+      {error && <p className="error">{error}</p>}
+    </div>
+  )
 }
 
 function LineageDetails({

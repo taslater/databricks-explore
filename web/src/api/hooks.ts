@@ -102,15 +102,6 @@ export function useObject(name: string | null) {
   })
 }
 
-export function useRelations(name: string | null) {
-  const profile = useConnectedProfile()
-  return useQuery({
-    queryKey: ['relations', profile, name],
-    queryFn: () => api.getRelations(name!),
-    enabled: profile !== null && name !== null,
-  })
-}
-
 export function useEdge(src: string | null, tgt: string | null) {
   const profile = useConnectedProfile()
   return useQuery({

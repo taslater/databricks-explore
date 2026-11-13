@@ -1,4 +1,4 @@
-// Graph actions that talk to the server: expand a node, open an object, refresh the selected node.
+// Graph actions that talk to the server: expand a node, open an object, refresh the selected node, connect two tables.
 import { useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import * as api from '../api/client'
@@ -7,6 +7,7 @@ import { useUiStore } from '../store/uiStore'
 import type { CanvasWindow } from '../api/types'
 import { schemaOf } from './format'
 import { useGraphStore } from './graphStore'
+import { patchIds, toRelations } from './relationships'
 
 export function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -42,18 +43,23 @@ export function useGraphActions() {
   const qc = useQueryClient()
 
   return useMemo(() => {
-    /** Loads /api/relations for one object and merges it into the graph. `refresh` forces a Databricks re-read. */
+    /**
+     * Loads /api/relationships for one object (derived edges plus stored ones) and merges it into the graph.
+     * `refresh` forces a Databricks re-read of the derived part.
+     */
     async function expand(name: string, refresh = false) {
       const store = useGraphStore.getState()
       store.setStatus(`loading ${name}…`)
       try {
         const profile = useUiStore.getState().connectedProfile
-        const resp = await qc.fetchQuery({
-          queryKey: ['relations', profile, name],
-          queryFn: () => api.getRelations(name, refresh),
-          staleTime: 0,
-          retry: false,
-        })
+        const resp = toRelations(
+          await qc.fetchQuery({
+            queryKey: ['relationships', profile, name],
+            queryFn: () => api.getRelationships(name, refresh),
+            staleTime: 0,
+            retry: false,
+          }),
+        )
         useGraphStore.getState().mergeRelations(resp)
         // Errors stay visible. The legacy UI overwrote them with "loaded".
         if (resp.errors.length) useGraphStore.getState().setStatus(resp.errors.join(' | '), true)
@@ -76,6 +82,26 @@ export function useGraphActions() {
       if (sel?.kind === 'node') void expand(sel.id, true)
     }
 
-    return { expand, openObject, refreshSelected }
+    /**
+     * Drag from one table node to another: stores a `manual` edge, then re-reads the source table so
+     * the edge appears (or comes back, if it had been rejected) and selects it.
+     */
+    async function connect(source: string, target: string) {
+      if (source === target) return
+      const store = useGraphStore.getState()
+      store.setStatus(`connecting ${source} to ${target}…`)
+      try {
+        const created = await api.createRelationship({ source: { table: source }, target: { table: target } })
+        await expand(source)
+        const g = useGraphStore.getState()
+        const shown = g.edges.find((e) => patchIds(e.data!.info).includes(created.id))
+        if (shown) g.setSelection({ kind: 'edge', id: shown.id })
+        g.setStatus(`added a manual edge from ${source} to ${target}`)
+      } catch (e) {
+        useGraphStore.getState().setStatus(messageOf(e), true)
+      }
+    }
+
+    return { expand, openObject, refreshSelected, connect }
   }, [qc])
 }

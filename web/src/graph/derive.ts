@@ -75,10 +75,10 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
   for (const e of input.edges) {
     const info = e.data!.info
     const stale = info.kind === 'lineage' && (ageDays(info.last_seen, now) ?? -1) > input.staleDays
-    const kindShown =
-      info.kind === 'lineage' ? filters.lineage : info.kind === 'fk' ? filters.fk : info.kind === 'view_dep' ? filters.view_dep : false
+    const kindShown = filters[info.kind] ?? false
+    const rejected = info.status === 'rejected'
     edgeStale.set(e.id, stale)
-    edgeHidden.set(e.id, !kindShown || (stale && !filters.showStale))
+    edgeHidden.set(e.id, !kindShown || (stale && !filters.showStale) || (rejected && !filters.showRejected))
   }
 
   // Node visibility: a node is hidden when it has edges and all of them are hidden. The focus node always shows.
@@ -137,7 +137,8 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
       hidden: edgeHidden.get(e.id) === true,
       sourceHandle: handles.sourceHandle,
       targetHandle: handles.targetHandle,
-      markerEnd: { type: MarkerType.ArrowClosed, color },
+      // An undirected edge (directed === false) has no arrowheads.
+      markerEnd: info.directed === false ? undefined : { type: MarkerType.ArrowClosed, color },
       markerStart: info.bidir ? { type: MarkerType.ArrowClosed, color } : undefined,
       data: {
         ...e.data!,

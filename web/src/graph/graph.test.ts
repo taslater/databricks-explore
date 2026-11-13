@@ -4,10 +4,10 @@ import { fromDiagram, toDiagramBody } from './diagram'
 import { deriveFlow } from './derive'
 import { ageDays, parseTs, shortType } from './format'
 import { computeLayout, type LayoutEdge, type LayoutNode } from './layout'
-import { useGraphStore } from './graphStore'
+import { DEFAULT_FILTERS, useGraphStore } from './graphStore'
 import type { EdgeFilters, FlowEdge, FlowNode } from './types'
 
-const ALL_ON: EdgeFilters = { lineage: true, fk: true, view_dep: true, showStale: true }
+const ALL_ON: EdgeFilters = { ...DEFAULT_FILTERS }
 const NOW = Date.parse('2026-11-11T00:00:00Z')
 
 function flowNode(id: string, extra: Partial<FlowNode['data']> = {}): FlowNode {

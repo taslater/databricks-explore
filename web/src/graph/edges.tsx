@@ -1,21 +1,12 @@
 import { BaseEdge, getBezierPath, type EdgeProps } from '@xyflow/react'
-import { EDGE_COLORS } from './format'
+import type { GraphEdgeKind } from '../api/types'
+import { KIND_STYLE } from './edgeStyles'
 import type { FlowEdge } from './types'
 
-interface KindStyle {
-  stroke: string
-  strokeDasharray?: string
-}
+/** Rejected edges are barely there, proposed ones are lighter than accepted or derived ones. */
+const STATUS_OPACITY = { rejected: 0.3, proposed: 0.65 } as const
 
-// Legacy styles: lineage solid, FK dashed, view dependency solid in its own color, stale lineage dotted and gray.
-const KIND_STYLE: Record<'lineage' | 'fk' | 'view_dep' | 'stale', KindStyle> = {
-  lineage: { stroke: EDGE_COLORS.lineage },
-  fk: { stroke: EDGE_COLORS.fk, strokeDasharray: '6 4' },
-  view_dep: { stroke: EDGE_COLORS.view_dep },
-  stale: { stroke: EDGE_COLORS.stale, strokeDasharray: '2 3' },
-}
-
-function makeEdge(kind: keyof typeof KIND_STYLE) {
+function makeEdge(kind: GraphEdgeKind | 'stale') {
   const kindStyle = KIND_STYLE[kind]
   function Edge({
     sourceX,
@@ -30,15 +21,18 @@ function makeEdge(kind: keyof typeof KIND_STYLE) {
     data,
   }: EdgeProps<FlowEdge>) {
     const [path] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
+    const status = data?.info.status
+    const statusOpacity = status === 'rejected' || status === 'proposed' ? STATUS_OPACITY[status] : 1
     return (
       <BaseEdge
         path={path}
         markerStart={markerStart}
         markerEnd={markerEnd}
         style={{
+          strokeWidth: 1.6,
           ...kindStyle,
-          strokeWidth: selected ? 3.5 : 1.6,
-          opacity: data?.faded ? 0.2 : 1,
+          ...(selected ? { strokeWidth: 3.5 } : null),
+          opacity: data?.faded ? 0.2 : statusOpacity,
         }}
       />
     )
@@ -51,5 +45,10 @@ export const EDGE_TYPES = {
   lineage: makeEdge('lineage'),
   fk: makeEdge('fk'),
   view_dep: makeEdge('view_dep'),
+  join_mined: makeEdge('join_mined'),
+  manual: makeEdge('manual'),
+  sketch: makeEdge('sketch'),
+  concept_link: makeEdge('concept_link'),
+  ontology: makeEdge('ontology'),
   stale: makeEdge('stale'),
 }
