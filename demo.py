@@ -1,0 +1,346 @@
+"""Demo mode: a fake Databricks workspace with invented data, so every real route works offline.
+
+dbx.py swaps `WorkspaceClient` for `FakeWorkspaceClient` when EXPLORER_DEMO=1 (`python app.py --demo`).
+Nothing here talks to a network. Everything is invented and deterministic.
+
+Magic words in SQL (matched anywhere in the statement, case-insensitive):
+  demo_slow   stays RUNNING for DEMO_SLOW_SECONDS (to test Cancel)
+  demo_error  fails with a table-not-found message
+  demo_wide   a 60-column result
+  demo_big    50,000 rows, so the row cap and the truncated badge show up
+Otherwise the result follows the first demo table named in the SQL (orders when none is named).
+"""
+import json
+import random
+import re
+import time
+import zlib
+from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
+
+from databricks.sdk.service import catalog as uc
+from databricks.sdk.service import iam
+from databricks.sdk.service import sql as sqlsvc
+
+PROFILES = [{"name": "demo", "host": "https://demo.invalid", "auth_type": "demo"}]
+WAREHOUSES = [("demo-wh-1", "Demo Serverless", sqlsvc.State.RUNNING),
+              ("demo-wh-2", "Demo Pro (stopped)", sqlsvc.State.STOPPED)]
+
+NORMAL_DELAY = 0.5        # seconds an ordinary statement stays RUNNING, so the UI shows a timer
+SLOW_DELAY = 45.0         # seconds a `demo_slow` statement stays RUNNING
+CHUNK_ROWS = 1000         # rows per result chunk, so the chunked reader is exercised
+BIG_ROWS = 50_000
+
+
+class DemoError(Exception):
+    """A statement the fake warehouse rejects (surfaces as a FAILED statement)."""
+
+
+# ---------------------------------------------------------------- catalog
+
+CATALOGS = {"demo": "Invented demo data", "samples": "Invented sample datasets"}
+
+# name, type text, comment
+ORDERS = [("order_id", "bigint", "Primary key"), ("customer_id", "bigint", "Customer who placed the order"),
+          ("order_ts", "timestamp", None), ("order_date", "date", None), ("status", "string", None),
+          ("amount", "decimal(12,2)", "Order total in dollars"), ("discount_pct", "double", None),
+          ("is_gift", "boolean", None), ("notes", "string", "Free text, can be long"),
+          ("tags", "array<string>", None), ("shipping", "struct<city:string,zip:string>", None)]
+CUSTOMERS = [("customer_id", "bigint", "Primary key"), ("name", "string", None), ("email", "string", None),
+             ("country", "string", None), ("signup_date", "date", None), ("lifetime_value", "decimal(24,6)", None)]
+ITEMS = [("order_id", "bigint", None), ("line_no", "int", None), ("sku", "string", None),
+         ("qty", "int", None), ("unit_price", "decimal(10,2)", None)]
+REVENUE = [("order_date", "date", None), ("revenue", "decimal(14,2)", None), ("orders", "bigint", None)]
+EMPLOYEES = [("emp_id", "bigint", "Primary key"), ("name", "string", None), ("dept", "string", None),
+             ("salary", "decimal(10,2)", None), ("hired_at", "timestamp", None)]
+WIDE = [("id", "bigint", None), ("event_ts", "timestamp", None)] + [
+    (f"metric_{i:02d}_{['latency_ms', 'throughput_per_sec', 'error_rate', 'queue_depth'][i % 4]}",
+     ["double", "bigint", "decimal(18,6)", "int"][i % 4], None) for i in range(1, 59)]
+TRIPS = [("trip_id", "bigint", None), ("pickup_ts", "timestamp", None), ("dropoff_ts", "timestamp", None),
+         ("distance_mi", "double", None), ("fare", "decimal(8,2)", None), ("zone", "string", None)]
+
+# full name -> (table type, columns, comment, row count)
+TABLES = {
+    "demo.sales.orders": ("MANAGED", ORDERS, "Customer orders", 3000),
+    "demo.sales.customers": ("MANAGED", CUSTOMERS, "Customer master", 800),
+    "demo.sales.order_items": ("MANAGED", ITEMS, "Order lines", 4000),
+    "demo.sales.v_daily_revenue": ("VIEW", REVENUE, "Daily revenue rollup", 240),
+    "demo.hr.employees": ("MANAGED", EMPLOYEES, "Staff", 120),
+    "demo.metrics.wide_metrics": ("MANAGED", WIDE, "60-column telemetry table", 800),
+    "samples.nyctaxi.trips": ("EXTERNAL", TRIPS, "Sample trips", 2500),
+    "samples.tpch.lineitem": ("MANAGED", ITEMS, "Sample order lines", 3000),
+}
+# child table, parent table, child column, parent column
+FOREIGN_KEYS = [("demo.sales.orders", "demo.sales.customers", "customer_id", "customer_id"),
+                ("demo.sales.order_items", "demo.sales.orders", "order_id", "order_id")]
+VIEW_DEPS = {"demo.sales.v_daily_revenue": ["demo.sales.orders"]}
+# upstream table, downstream table, producing job id
+LINEAGE = [("demo.sales.orders", "demo.sales.v_daily_revenue", "1001"),
+           ("samples.nyctaxi.trips", "demo.metrics.wide_metrics", "1002")]
+LINEAGE_SEEN = "2026-11-10T08:00:00.000Z"
+
+
+def _type_name(type_text):
+    base = re.split(r"[(<]", type_text)[0].upper()
+    return {"BIGINT": "LONG"}.get(base, base)
+
+
+def _table_info(full_name):
+    if full_name not in TABLES:
+        raise LookupError(f"[TABLE_OR_VIEW_NOT_FOUND] {full_name}")
+    kind, cols, comment, _ = TABLES[full_name]
+    c, s, n = full_name.split(".")
+    constraints = [uc.TableConstraint(primary_key_constraint=uc.PrimaryKeyConstraint(
+        name=f"pk_{n}", child_columns=[cols[0][0]]))] if kind == "MANAGED" and n != "wide_metrics" else []
+    constraints += [uc.TableConstraint(foreign_key_constraint=uc.ForeignKeyConstraint(
+        name=f"fk_{cn}_{pn}", child_columns=[cc], parent_table=pt, parent_columns=[pc]))
+        for ct, pt, cc, pc in FOREIGN_KEYS if ct == full_name for cn, pn in [(n, pt.split(".")[2])]]
+    deps = VIEW_DEPS.get(full_name)
+    return uc.TableInfo(
+        name=n, catalog_name=c, schema_name=s, full_name=full_name, comment=comment,
+        table_type=uc.TableType.VIEW if kind == "VIEW" else uc.TableType[kind],
+        columns=[uc.ColumnInfo(name=cn, type_text=tt, type_name=uc.ColumnTypeName[_type_name(tt)],
+                               position=i, comment=cm, nullable=i > 0) for i, (cn, tt, cm) in enumerate(cols)],
+        table_constraints=constraints or None,
+        view_dependencies=uc.DependencyList(dependencies=[
+            uc.Dependency(table=uc.TableDependency(table_full_name=d)) for d in deps]) if deps else None)
+
+
+# ---------------------------------------------------------------- data
+
+STATUSES = ["shipped", "pending", "cancelled", "returned", "processing"]
+CITIES = ["Zurich", "Sao Paulo", "Reykjavik", "Portland", "Osaka", "Nairobi", "Hamburg"]
+COUNTRIES = ["US", "DE", "BR", "JP", "KE", "IS"]
+DEPTS = ["Finance", "Support", "Logistics", "Engineering", "Marketing"]
+NOTES = ["", "Leave at door", "Caller said: \"ring first\", then hung up.\nSecond line of the note.",
+         "Gift wrap, include a card that reads: happy birthday from everyone at the front desk. "
+         "Please sign for it on delivery between 9 and 5 and do not leave it in the lobby. " * 2,
+         "tab\tseparated\tnote", "O'Brien's order; 100% rush", "plain note"]
+BIG_DECIMAL = "99999999999999999999.123456789012"
+
+
+def _fmt_ts(dt):
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
+
+
+def _cell(name, type_text, i, r, first):
+    """One invented cell as the warehouse would return it: a string, or None for NULL."""
+    base = re.split(r"[(<]", type_text)[0].lower()
+    if not first and r.random() < 0.05:
+        return None
+    if base in ("bigint", "int"):
+        if first:
+            return str(100000 + i)
+        return str(r.randint(1, 800) if name.endswith("_id") else r.randint(-5, 5000))
+    if base == "decimal":
+        if name == "lifetime_value" and i == 7:
+            return BIG_DECIMAL
+        scale = int(type_text.split(",")[1].rstrip(")"))
+        return f"{r.lognormvariate(4.2, 1.1):.{scale}f}"
+    if base == "double":
+        return str(round(r.random() * 0.3, 4)) if "pct" in name else f"{r.gauss(100, 30):.6f}"
+    if base == "boolean":
+        return r.choice(["true", "false"])
+    if base == "date":
+        return (date(2026, 1, 1) + timedelta(days=r.randint(0, 300))).isoformat()
+    if base == "timestamp":
+        dt = datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=r.randint(0, 300 * 86400))
+        if r.random() < 0.4:
+            dt = dt.replace(microsecond=r.randint(0, 999) * 1000)
+        return _fmt_ts(dt)
+    if base == "array":
+        return json.dumps(r.sample(["a", "b", "vip", "promo"], r.randint(0, 3)))
+    if base == "struct":
+        return json.dumps({"city": r.choice(CITIES), "zip": str(r.randint(10000, 99999))})
+    if name == "status":
+        return r.choice(STATUSES)
+    if name == "notes":
+        return r.choice(NOTES)
+    if name == "email":
+        return f"user{i + 1}@example.invalid"
+    if name == "name":
+        return f"Customer {i + 1} {r.choice(['Holdings', 'Trading Co', 'and Sons', 'International Partners'])}"
+    if name == "country":
+        return r.choice(COUNTRIES)
+    if name == "dept":
+        return r.choice(DEPTS)
+    if name == "zone":
+        return r.choice(CITIES)
+    return f"{name}_{r.randint(1, 50)}"
+
+
+def table_rows(full_name, n):
+    """n invented rows of a demo table as (columns, rows). Deterministic per table."""
+    cols = TABLES[full_name][1]
+    r = random.Random(zlib.crc32(full_name.encode()))
+    rows = [[_cell(cn, tt, i, r, k == 0) for k, (cn, tt, _) in enumerate(cols)] for i in range(n)]
+    return [{"name": cn, "type": _type_name(tt)} for cn, tt, _ in cols], rows
+
+
+def _daily_revenue(n):
+    r = random.Random(1)
+    cols = [{"name": "order_date", "type": "DATE"}, {"name": "status", "type": "STRING"},
+            {"name": "revenue", "type": "DECIMAL"}, {"name": "orders", "type": "LONG"}]
+    rows = [[(date(2026, 7, 1) + timedelta(days=d)).isoformat(), st, f"{r.uniform(2000, 90000):.2f}",
+             str(r.randint(20, 400))] for d in range(120) for st in ("shipped", "pending", "returned")]
+    return cols, rows[:n]
+
+
+def result_for(statement, params=None):
+    """(columns, rows) for any SQL. Raises DemoError for the `demo_error` magic word."""
+    low = " ".join(statement.split()).lower()
+    if "demo_error" in low:
+        raise DemoError("[TABLE_OR_VIEW_NOT_FOUND] The table or view `demo_error` cannot be found. "
+                        "Verify the spelling and correctness of the schema and catalog. SQLSTATE: 42P01; line 1, pos 14")
+    limits = [int(x) for x in re.findall(r"\blimit\s+(\d+)", low)]
+    cap = min(limits) if limits else None
+    if "information_schema.tables" in low:
+        q = str((params or {}).get("q", "")).lower()
+        hits = [(f.split(".")[0], f.split(".")[1], f.split(".")[2], "VIEW" if v[0] == "VIEW" else "BASE TABLE")
+                for f, v in sorted(TABLES.items()) if q in f.split(".")[2]]
+        cols = [{"name": k, "type": "STRING"} for k in ("table_catalog", "table_schema", "table_name", "table_type")]
+        return cols, [list(h) for h in hits][: cap or 300]
+    if re.match(r"^(create|insert|drop|alter|use|set|optimize|vacuum|grant|merge|update|delete|truncate)\b", low):
+        return [], []
+    if re.match(r"^select\s+[\d'\"(]", low) and " from " not in low:
+        return ([{"name": "one", "type": "INT"}, {"name": "pi", "type": "DOUBLE"}, {"name": "s", "type": "STRING"}],
+                [["1", "3.14159", "hello"]])
+    if "demo_big" in low:
+        cols, rows = table_rows("demo.sales.orders", min(cap or BIG_ROWS, BIG_ROWS))
+        return cols, rows
+    if "demo_wide" in low:
+        return table_rows("demo.metrics.wide_metrics", min(cap or 800, 800))
+    if re.search(r"group\s+by|count\(", low):
+        cols, rows = _daily_revenue(cap or 360)
+        return cols, rows
+    table = next((t for t in TABLES if t in low), None) or next(
+        (t for t in TABLES if re.search(rf"\b{t.split('.')[2]}\b", low)), "demo.sales.orders")
+    return table_rows(table, min(cap or TABLES[table][3], TABLES[table][3]))
+
+
+# ---------------------------------------------------------------- fake SDK surface
+
+class _Statements:
+    """Stands in for WorkspaceClient().statement_execution, using the real SDK response types."""
+
+    def __init__(self):
+        self.stmts = {}
+
+    def _delay(self, statement):
+        return SLOW_DELAY if "demo_slow" in statement.lower() else NORMAL_DELAY
+
+    def _state(self, st):
+        if st["canceled"]:
+            return sqlsvc.StatementState.CANCELED
+        if time.monotonic() - st["t0"] < st["delay"]:
+            return sqlsvc.StatementState.RUNNING
+        return sqlsvc.StatementState.FAILED if st["error"] else sqlsvc.StatementState.SUCCEEDED
+
+    def _manifest(self, st):
+        cols = [sqlsvc.ColumnInfo(name=c["name"], position=i, type_name=sqlsvc.ColumnInfoTypeName[c["type"]],
+                                  type_text=c["type"].lower()) for i, c in enumerate(st["cols"])]
+        return sqlsvc.ResultManifest(schema=sqlsvc.ResultSchema(column_count=len(cols), columns=cols),
+                                     total_row_count=len(st["rows"]))
+
+    def _chunk(self, sid, i):
+        rows = self.stmts[sid]["rows"]
+        lo, hi = i * CHUNK_ROWS, min((i + 1) * CHUNK_ROWS, len(rows))
+        return sqlsvc.ResultData(chunk_index=i, data_array=rows[lo:hi], row_count=hi - lo, row_offset=lo,
+                                 next_chunk_index=i + 1 if hi < len(rows) else None)
+
+    def _response(self, sid):
+        st = self.stmts[sid]
+        state = self._state(st)
+        if state == sqlsvc.StatementState.FAILED:
+            return sqlsvc.StatementResponse(statement_id=sid, status=sqlsvc.StatementStatus(
+                state=state, error=sqlsvc.ServiceError(message=st["error"])))
+        if state != sqlsvc.StatementState.SUCCEEDED:
+            return sqlsvc.StatementResponse(statement_id=sid, status=sqlsvc.StatementStatus(state=state))
+        return sqlsvc.StatementResponse(statement_id=sid, status=sqlsvc.StatementStatus(state=state),
+                                        manifest=self._manifest(st), result=self._chunk(sid, 0))
+
+    def execute_statement(self, statement, warehouse_id, wait_timeout=None, parameters=None, **_):
+        params = {p.name: p.value for p in (parameters or [])}
+        try:
+            cols, rows, error = (*result_for(statement, params), None)
+        except DemoError as e:
+            cols, rows, error = [], [], str(e)
+        sid = f"demo-stmt-{len(self.stmts) + 1}"
+        self.stmts[sid] = {"cols": cols, "rows": rows, "error": error, "canceled": False,
+                           "t0": time.monotonic(), "delay": self._delay(statement)}
+        wait = float(re.sub(r"\D", "", wait_timeout or "0") or 0)
+        if wait:  # the real service holds the call open for up to wait_timeout
+            time.sleep(min(wait, self.stmts[sid]["delay"]))
+        return self._response(sid)
+
+    def get_statement(self, statement_id):
+        return self._response(statement_id)
+
+    def get_statement_result_chunk_n(self, statement_id, chunk_index):
+        return self._chunk(statement_id, chunk_index)
+
+    def cancel_execution(self, statement_id):
+        self.stmts[statement_id]["canceled"] = True
+
+
+class _Catalogs:
+    def list(self):
+        return [uc.CatalogInfo(name=n, comment=c, catalog_type=uc.CatalogType.MANAGED_CATALOG)
+                for n, c in CATALOGS.items()]
+
+
+class _Schemas:
+    def list(self, catalog_name):
+        names = sorted({f.split(".")[1] for f in TABLES if f.startswith(catalog_name + ".")})
+        return [uc.SchemaInfo(name=n, catalog_name=catalog_name, comment=f"Invented {n} schema") for n in names]
+
+
+class _Tables:
+    def list(self, catalog_name, schema_name):
+        return [_table_info(f) for f in sorted(TABLES) if f.startswith(f"{catalog_name}.{schema_name}.")]
+
+    def get(self, full_name):
+        return _table_info(full_name)
+
+
+class _Warehouses:
+    def list(self):
+        return [sqlsvc.EndpointInfo(id=i, name=n, state=s) for i, n, s in WAREHOUSES]
+
+
+class _CurrentUser:
+    def me(self):
+        return iam.User(user_name="demo.user@example.invalid")
+
+
+class _ApiClient:
+    def do(self, method, path, body=None, **_):
+        """Only the table-lineage endpoint exists."""
+        name = (body or {}).get("table_name")
+        ups, downs = [], []
+        for up, down, job in LINEAGE:
+            for target, other, bucket in ((down, up, ups), (up, down, downs)):
+                if name == target:
+                    c, s, n = other.split(".")
+                    bucket.append({"tableInfo": {"catalog_name": c, "schema_name": s, "name": n,
+                                                 "table_type": TABLES[other][0], "lineage_timestamp": LINEAGE_SEEN},
+                                   "jobInfos": [{"job_id": job, "workspace_id": "1111111111",
+                                                 "lineage_timestamp": LINEAGE_SEEN}]})
+        return {"upstreams": ups, "downstreams": downs}
+
+
+class FakeWorkspaceClient:
+    """Stands in for databricks.sdk.WorkspaceClient. The profile name is ignored."""
+
+    def __init__(self, profile=None):
+        self.config = SimpleNamespace(host=PROFILES[0]["host"])
+        self.current_user = _CurrentUser()
+        self.warehouses = _Warehouses()
+        self.catalogs = _Catalogs()
+        self.schemas = _Schemas()
+        self.tables = _Tables()
+        self.api_client = _ApiClient()
+        self.statement_execution = _Statements()
+
+    def get_workspace_id(self):
+        return 1111111111

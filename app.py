@@ -1,5 +1,10 @@
 """Local Databricks relationship explorer.  Run:  uv run --with-requirements requirements.txt app.py"""
+import os
+import sys
 from pathlib import Path
+
+if "--demo" in sys.argv:  # must be set before dbx is imported: it picks the data folder and client at import
+    os.environ["EXPLORER_DEMO"] = "1"
 
 from flask import Flask, abort, jsonify, request, send_from_directory
 
@@ -45,7 +50,7 @@ def spa(path):
 
 @app.get("/api/profiles")
 def profiles():
-    return jsonify({"profiles": dbx.list_profiles(), "config": str(dbx.cfg_path())})
+    return jsonify({"profiles": dbx.list_profiles(), "config": "demo mode: invented data, no Databricks" if dbx.DEMO else str(dbx.cfg_path())})
 
 
 @app.get("/api/session")
@@ -194,4 +199,5 @@ def canvas_get(name):
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=8765, debug=True)
+    # Demo mode uses its own port so the browser keeps its saved profile and warehouse apart from real use.
+    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", 8766 if dbx.DEMO else 8765)), debug=True)
