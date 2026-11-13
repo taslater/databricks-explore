@@ -12,3 +12,6 @@ data/
 
 # Demo mode (python app.py --demo) writes here, apart from real data.
 data-demo/
+
+# Agent worktrees.
+.claude/worktrees/

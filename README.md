@@ -16,9 +16,9 @@ Dev mode with hot reload: run the server as above, then in a second terminal `cd
 Demo mode serves invented catalogs, tables, views, foreign keys, lineage and query results from a fake workspace. It never contacts Databricks, so it is safe for trying the UI, screenshots and tests.
 ```sh
 uv run --with-requirements requirements.txt app.py --demo
-# open http://127.0.0.1:8766, pick profile "demo", Connect, pick warehouse "Demo Serverless"
+# open http://127.0.0.1:8767, pick profile "demo", Connect, pick warehouse "Demo Serverless"
 ```
-`EXPLORER_DEMO=1` does the same as `--demo`. Demo mode listens on port 8766 (`PORT` overrides) so the browser keeps its saved profile apart from real use, and it writes to `data-demo/` instead of `data/`.
+`EXPLORER_DEMO=1` does the same as `--demo`. Demo mode listens on port 8767 (`PORT` overrides) so the browser keeps its saved profile apart from real use, and it writes to `data-demo/` instead of `data/`.
 
 Magic words in a query (the rest of the SQL is ignored; any query returns a result):
 

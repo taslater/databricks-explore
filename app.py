@@ -200,4 +200,4 @@ def canvas_get(name):
 
 if __name__ == "__main__":
     # Demo mode uses its own port so the browser keeps its saved profile and warehouse apart from real use.
-    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", 8766 if dbx.DEMO else 8765)), debug=True)
+    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", 8767 if dbx.DEMO else 8765)), debug=True)
