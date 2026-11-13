@@ -6,6 +6,7 @@ from werkzeug.exceptions import HTTPException, MethodNotAllowed, NotFound
 
 import canvases
 import dbx
+import relationships
 import sqltools
 
 app = Flask(__name__, static_folder=None)  # the React build in web/dist is the only UI
@@ -156,6 +157,78 @@ def diagram(name):
 def save():
     body = request.json
     return jsonify({"saved": dbx.save_diagram(body["name"], body)})
+
+
+# ---------- relationships (relationships.py): derived edges plus the persisted ones ----------
+
+@app.errorhandler(relationships.RelationshipInvalid)
+def relationship_invalid(e):
+    return jsonify({"error": str(e)}), 400
+
+
+@app.errorhandler(relationships.RelationshipNotFound)
+def relationship_not_found(e):
+    return jsonify({"error": str(e)}), 404
+
+
+def rel_store():
+    """The store for the connected profile."""
+    return relationships.open_store(ex().profile)
+
+
+@app.get("/api/relationships")
+def relationships_for_table():
+    table = relationships.check_table(request.args.get("table", ""))
+    e = ex()
+    rel, times = None, None
+    if not table.startswith("ph:"):  # a placeholder has no catalog metadata
+        rel, times = e.relations(table, refresh()), dbx.cache_times(e, table)
+    with rel_store() as store:
+        return jsonify(relationships.unified(store, table, rel, times, request.args.get("level", "table")))
+
+
+@app.post("/api/relationships")
+def relationship_create():
+    body = relationships.parse_create(request.get_json(silent=True))
+    with rel_store() as store:
+        edge, created = store.create_manual(body)
+    return jsonify(edge.model_dump(mode="json")), 201 if created else 200
+
+
+@app.patch("/api/relationships/<rid>")
+def relationship_patch(rid):
+    patch = relationships.parse_patch(request.get_json(silent=True))
+    with rel_store() as store:
+        if rid.startswith("e_"):
+            edge = store.patch(rid, patch.status, patch.note)
+        else:  # a derived edge: its id is its natural key, and only a note can be attached
+            if patch.status is not None:
+                raise relationships.RelationshipInvalid("status: derived edges only take a note")
+            edge = store.set_derived_note(rid, patch.note)
+    return jsonify(edge.model_dump(mode="json"))
+
+
+@app.delete("/api/relationships/<rid>")
+def relationship_delete(rid):
+    with rel_store() as store:
+        if rid.startswith("e_"):
+            store.delete(rid)
+        else:
+            store.clear_derived_note(rid)
+    return jsonify({"deleted": rid})
+
+
+@app.get("/api/relationships/export")
+def relationships_export():
+    with rel_store() as store:
+        return jsonify(store.export())
+
+
+@app.post("/api/relationships/import")
+def relationships_import():
+    file = relationships.parse_export(request.get_json(silent=True))
+    with rel_store() as store:
+        return jsonify(store.import_file(file))
 
 
 def _query_sql(body):

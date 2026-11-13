@@ -1,6 +1,6 @@
 # Explorer API contract
 
-Source of truth for backend and frontend. Flask on `127.0.0.1:8765`, all bodies JSON. Sections 1 to 3 describe `app.py` as it behaves today.
+Source of truth for backend and frontend. Flask on `127.0.0.1:8765`, all bodies JSON. Sections 1 to 4 describe `app.py` as it behaves today.
 
 ## Conventions
 
@@ -315,3 +315,91 @@ Decisions made after T0 review (these override anything above):
 
 - Charts are attached to query windows through the optional `chart` field, per plan task C2. The standalone `chart` window type is in the enum but the UI does not create it.
 - Row values stay as strings or `null`. The frontend casts them using `columns[].type`.
+
+---
+
+## 4. Relationships
+
+One model for every relationship between tables or columns, with provenance. Implemented in `relationships.py`. All routes here *need a connection*, because the store is one SQLite file per profile: `data/relationships/<profile>.sqlite` (under the same data directory as the cache). Validation failures are **400** `{"error": "<path>: <reason>"}` (for example `edges[1].kind: ...`), unknown ids are **404**.
+
+### The edge shape
+
+```json
+{"id": "e_3f9c...", "kind": "join_mined",
+ "source": {"table": "main.sales.orders", "column": "cust_id"},
+ "target": {"table": "main.sales.customers", "column": "id"},
+ "directed": true,
+ "provenance": {"origin": "query_history", "source_ref": "stmt-123", "fetched_at": "2026-11-12T09:00:00+00:00"},
+ "evidence": {"runs": 12, "users": 3, "first_seen": "2026-10-01", "last_seen": "2026-11-10", "sample_refs": ["stmt-123"]},
+ "status": "proposed", "note": "",
+ "created_at": "2026-11-12T09:00:00+00:00", "updated_at": "2026-11-12T09:00:00+00:00"}
+```
+
+- **Endpoint** `{table, column?}`. `table` is a 3-part name `catalog.schema.table`, or `ph:<uuid>` for a placeholder that does not exist yet. `column` is omitted (or `null`) for a table-level end.
+- **`kind`:** `fk`, `lineage`, `view_dep` (derived) or `join_mined`, `manual`, `sketch`, `concept_link`, `ontology` (stored).
+- **`status`:** `derived` (only on derived edges), `proposed`, `accepted`, `rejected`.
+- **`evidence`** is `null` unless the edge was mined from activity. For derived lineage it holds only `last_seen`. `provenance.origin` on derived edges is `unity_catalog:table_constraints`, `unity_catalog:view_dependencies` or `unity_catalog:table_lineage`, and `fetched_at` is when the cached metadata behind it was read.
+- **Derived kinds are never stored.** They are normalized from `GET /api/relations` data at read time. An FK becomes one edge per column pair. Lineage seen in both directions becomes two directed edges. A user note on a derived edge is kept in an overlay keyed by its natural key.
+- **Natural key:** `(kind, source table, source column, target table, target column)`. Writes upsert on it. An undirected edge (`directed: false`) is the same edge in either direction.
+- **Derived ids** are `kind:table[#column]->table[#column]`, for example `fk:main.sales.orders#cust_id->main.sales.customers#id`. Stored ids are `e_<hex>`. Percent-encode ids in URLs (`#` and `>` in particular).
+
+### `GET /api/relationships?table=<name>`
+
+*Needs connection.* The unified list for one table: derived edges (read from the same cached data as `/api/relations`, with `?refresh=1` forwarded) plus stored edges with the table at either end, with notes applied to derived ones. `table` is required and may be a placeholder, which has no derived edges.
+
+`level` is `table` (default) or `column`. `column` returns each edge as it is. `table` returns the table-level view: one edge per `(kind, source table, target table)`, rolled up from its members, because a column edge implies its table edge. A rolled edge has these extra fields, and its endpoints carry no column:
+
+- `columns`: the member column pairs `[{"source": "cust_id", "target": "id"}]`.
+- `members`: the ids of the edges it was rolled from.
+- `id`: the member's own id when the group is a single table-level edge, otherwise the derived-style table-level id.
+- `status`: the strongest member's (`accepted`, then `proposed`, `derived`, `rejected`). `note` for a derived group is the overlay note on its table-level id.
+- `evidence`: runs summed, users the maximum, first and last seen the earliest and latest.
+
+Undirected groups are oriented by sorted table name.
+
+Response:
+
+```json
+{"table": "main.sales.orders", "level": "table",
+ "nodes": [{"id": "main.sales.orders", "label": "orders", "kind": "table", "focus": true}],
+ "edges": [{"id": "fk:main.sales.orders->main.sales.customers", "kind": "fk",
+            "source": {"table": "main.sales.orders", "column": null},
+            "target": {"table": "main.sales.customers", "column": null},
+            "directed": true, "status": "derived", "note": "",
+            "provenance": {"origin": "unity_catalog:table_constraints", "source_ref": "fk_cust", "fetched_at": "..."},
+            "evidence": null, "columns": [{"source": "cust_id", "target": "id"}],
+            "members": ["fk:main.sales.orders#cust_id->main.sales.customers#id"],
+            "created_at": "...", "updated_at": "..."}],
+ "errors": []}
+```
+
+`nodes` and `errors` are the ones `/api/relations` gives, plus a node for every stored edge's far end (`kind` `placeholder` for `ph:` names). Errors: 400 for a missing or invalid `table` or `level`.
+
+### `POST /api/relationships`
+
+*Needs connection.* Creates a `manual` edge. Body: `{"source": {"table", "column?"}, "target": {...}, "directed": true, "note": ""}`. Only `source` and `target` are required; other keys are rejected. The edge is stored with status `accepted` and provenance `{"origin": "user"}`.
+
+Response: the edge. **201** when created. **200** when the natural key already existed: the edge is re-accepted (a rejected one comes back) and its note is replaced only when the body has one. Errors: 400 (bad endpoint, same endpoint on both sides, unknown key).
+
+### `PATCH /api/relationships/<id>`
+
+*Needs connection.* Body: `{"status"?, "note"?}`, at least one. For a stored edge, `status` is `proposed`, `accepted` or `rejected`. For a derived id, only `note` is accepted (a `status` is 400), and an empty note clears it. The response is the edge. An unknown stored id, or an id that is neither stored nor derived-shaped, is 404.
+
+### `DELETE /api/relationships/<id>`
+
+*Needs connection.* Removes a stored edge. For a derived id it removes the note overlay. Response: `{"deleted": "<id>"}`. 404 when there is nothing to remove.
+
+### `GET /api/relationships/export`
+
+*Needs connection.* Every stored edge, and every note on a derived edge, in the import format:
+
+```json
+{"version": 1, "exported_at": "...", "edges": [<edge>, ...],
+ "overlays": [{"kind": "fk", "source": {"table": "..."}, "target": {"table": "..."}, "note": "...", "updated_at": "..."}]}
+```
+
+### `POST /api/relationships/import`
+
+*Needs connection.* Body: the export format. In `edges`, only `kind`, `source`, `target` and `provenance` are required. `id`, timestamps, `directed` (true), `status` (`proposed`) and `note` have defaults. Edges of a derived kind, or with status `derived`, are 400. The import is all-or-nothing and upserts by natural key: an existing edge keeps its id and `created_at` and takes everything else from the file. Notes in `overlays` replace existing notes.
+
+Response: `{"imported": 12, "created": 10, "updated": 2, "overlays": 1}`.

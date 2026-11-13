@@ -1,0 +1,613 @@
+"""Relationship store: one model for every edge between tables or columns, with provenance, in SQLite.
+
+Derived kinds (fk, lineage, view_dep) are never stored. They are normalized from Explorer.relations()
+at read time with status "derived". Every other kind is persisted in data/relationships/<profile>.sqlite.
+A user note on a derived edge is kept in an overlay keyed by the edge's natural key.
+
+Natural key: (kind, source table, source column, target table, target column). Writes upsert on it,
+so re-importing the same edge never duplicates it. Undirected edges are stored with their endpoints
+in sorted order, so (a, b) and (b, a) are the same edge.
+"""
+import json
+import re
+import sqlite3
+import uuid
+from itertools import zip_longest
+from pathlib import Path
+from typing import Annotated, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError, field_validator
+from pydantic_core import PydanticCustomError
+
+import dbx
+
+DERIVED_KINDS = ("fk", "lineage", "view_dep")
+STORED_KINDS = ("join_mined", "manual", "sketch", "concept_link", "ontology")
+STORED_STATUSES = ("proposed", "accepted", "rejected")
+EXPORT_VERSION = 1
+
+Kind = Literal["fk", "lineage", "view_dep", "join_mined", "manual", "sketch", "concept_link", "ontology"]
+Status = Literal["derived", "proposed", "accepted", "rejected"]
+
+_TABLE = re.compile(r"^[^.\s]+\.[^.\s]+\.[^.\s]+$")
+_PLACEHOLDER = "ph:"
+
+
+class RelationshipInvalid(ValueError):
+    """Validation failed. str(e) is '<path>: <reason>' (routes return it as HTTP 400)."""
+
+
+class RelationshipNotFound(LookupError):
+    """No relationship with that id (routes return HTTP 404)."""
+
+
+# ---------- models ----------
+
+def new_id():
+    """A fresh id for a stored edge."""
+    return "e_" + uuid.uuid4().hex
+
+
+class Endpoint(BaseModel):
+    """One end of an edge: a table (3-part name or ph:<uuid> placeholder) and optionally a column."""
+    model_config = ConfigDict(extra="forbid")
+    table: str
+    column: Optional[str] = None
+
+    @field_validator("table")
+    @classmethod
+    def _table_name(cls, v):
+        if v.startswith(_PLACEHOLDER):
+            try:
+                return _PLACEHOLDER + str(uuid.UUID(v[len(_PLACEHOLDER):]))
+            except ValueError:
+                raise PydanticCustomError("bad_table", 'a placeholder must be "ph:<uuid>"') from None
+        if not _TABLE.match(v):
+            raise PydanticCustomError("bad_table", 'a table must be "catalog.schema.table" or "ph:<uuid>"')
+        return v
+
+    @field_validator("column")
+    @classmethod
+    def _column_name(cls, v):
+        if v is not None and not v.strip():
+            raise PydanticCustomError("bad_column", "a column must not be empty (omit it for a table-level end)")
+        return v
+
+
+class Provenance(BaseModel):
+    """Where an edge came from: an origin label, an optional reference into it, and when it was read."""
+    model_config = ConfigDict(extra="forbid")
+    origin: Annotated[str, Field(min_length=1)]
+    source_ref: Optional[str] = None
+    fetched_at: Optional[str] = None
+
+
+class Evidence(BaseModel):
+    """How often an edge was observed, for kinds that are mined from activity."""
+    model_config = ConfigDict(extra="forbid")
+    runs: Optional[Annotated[StrictInt, Field(ge=0)]] = None
+    users: Optional[Annotated[StrictInt, Field(ge=0)]] = None
+    first_seen: Optional[str] = None
+    last_seen: Optional[str] = None
+    sample_refs: list[str] = Field(default_factory=list)
+
+
+class Edge(BaseModel):
+    """One relationship between two endpoints. The shape the API returns and the export file holds."""
+    model_config = ConfigDict(extra="forbid")
+    id: Annotated[str, Field(min_length=1)] = Field(default_factory=new_id)
+    kind: Kind
+    source: Endpoint
+    target: Endpoint
+    directed: StrictBool = True
+    provenance: Provenance
+    evidence: Optional[Evidence] = None
+    status: Status = "proposed"
+    note: str = ""
+    created_at: str = Field(default_factory=dbx.now)
+    updated_at: str = Field(default_factory=dbx.now)
+
+
+class ColumnPair(BaseModel):
+    """One column-level member of a rolled-up table edge. A side is None when that end names no column."""
+    source: Optional[str] = None
+    target: Optional[str] = None
+
+
+class Rolled(Edge):
+    """A table-level edge rolled up from its members (column edges, or the edge itself)."""
+    columns: list[ColumnPair] = Field(default_factory=list)
+    members: list[str] = Field(default_factory=list)
+
+
+class EdgeCreate(BaseModel):
+    """Body of POST /api/relationships: a user-drawn edge."""
+    model_config = ConfigDict(extra="forbid")
+    source: Endpoint
+    target: Endpoint
+    directed: StrictBool = True
+    note: str = ""
+
+
+class EdgePatch(BaseModel):
+    """Body of PATCH /api/relationships/<id>: a status and/or a note."""
+    model_config = ConfigDict(extra="forbid")
+    status: Optional[Literal["derived", "proposed", "accepted", "rejected"]] = None
+    note: Optional[str] = None
+
+
+class Overlay(BaseModel):
+    """A note on a derived edge, in the export file."""
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["fk", "lineage", "view_dep"]
+    source: Endpoint
+    target: Endpoint
+    note: Annotated[str, Field(min_length=1)]
+    updated_at: str = Field(default_factory=dbx.now)
+
+
+class ExportFile(BaseModel):
+    """The export/import format: stored edges plus notes on derived edges."""
+    model_config = ConfigDict(extra="forbid")
+    version: Annotated[StrictInt, Field(ge=EXPORT_VERSION, le=EXPORT_VERSION)]
+    exported_at: Optional[str] = None
+    edges: list[Edge]
+    overlays: list[Overlay] = Field(default_factory=list)
+
+
+def _path(loc):
+    out = ""
+    for part in loc:
+        out += f"[{part}]" if isinstance(part, int) else (f".{part}" if out else str(part))
+    return out or "(root)"
+
+
+def _parse(model, data):
+    """Validate data against a model. Raises RelationshipInvalid with a path-prefixed message."""
+    if not isinstance(data, dict):
+        raise RelationshipInvalid("(root): body must be a JSON object")
+    try:
+        return model.model_validate(data)
+    except ValidationError as e:
+        first = e.errors()[0]
+        raise RelationshipInvalid(f"{_path(first['loc'])}: {first['msg']}") from e
+
+
+def parse_create(data) -> EdgeCreate:
+    """Validate a POST body."""
+    edge = _parse(EdgeCreate, data)
+    _check_endpoints(edge.source, edge.target, "target")
+    return edge
+
+
+def parse_patch(data) -> EdgePatch:
+    """Validate a PATCH body: at least one of status and note."""
+    patch = _parse(EdgePatch, data)
+    if patch.status is None and patch.note is None:
+        raise RelationshipInvalid("(root): give a status, a note, or both")
+    return patch
+
+
+def parse_export(data) -> ExportFile:
+    """Validate an export file, including that every edge is of a stored kind."""
+    file = _parse(ExportFile, data)
+    for i, e in enumerate(file.edges):
+        check_storable(e, f"edges[{i}]")
+        _check_endpoints(e.source, e.target, f"edges[{i}].target")
+    for i, o in enumerate(file.overlays):
+        _check_endpoints(o.source, o.target, f"overlays[{i}].target")
+    return file
+
+
+def _check_endpoints(source, target, path):
+    if (source.table, source.column) == (target.table, target.column):
+        raise RelationshipInvalid(f"{path}: an edge cannot connect an endpoint to itself")
+
+
+def check_storable(edge, path="(edge)"):
+    """Derived kinds and the derived status are never stored."""
+    if edge.kind in DERIVED_KINDS:
+        raise RelationshipInvalid(f'{path}.kind: "{edge.kind}" is derived from Unity Catalog and never stored')
+    if edge.status not in STORED_STATUSES:
+        raise RelationshipInvalid(f'{path}.status: "{edge.status}" is not a stored status (use proposed, accepted or rejected)')
+
+
+# ---------- natural keys and ids ----------
+
+def _end(e):
+    return (e.table, e.column or "")
+
+
+def key_of(kind, source, target, directed=True):
+    """The natural key (kind, source table, source column, target table, target column); '' for no column."""
+    a, b = _end(source), _end(target)
+    if not directed and b < a:
+        a, b = b, a
+    return (kind, *a, *b)
+
+
+def derived_id(kind, source, target):
+    """The id of a derived edge: kind:table[#column]->table[#column]. Doubles as its overlay key."""
+    def end(e):
+        return e.table + (f"#{e.column}" if e.column else "")
+    return f"{kind}:{end(source)}->{end(target)}"
+
+
+def parse_derived_id(rid):
+    """Inverse of derived_id() for the derived kinds. Returns (kind, source, target) or None."""
+    kind, sep, rest = rid.partition(":")
+    if not sep or kind not in DERIVED_KINDS:
+        return None
+    head, arrow, tail = rest.partition("->")
+    if not arrow:
+        return None
+    ends = []
+    for part in (head, tail):
+        table, _, column = part.partition("#")
+        try:
+            ends.append(Endpoint(table=table, column=column or None))
+        except ValidationError:
+            return None
+    return kind, ends[0], ends[1]
+
+
+# ---------- derived edges ----------
+
+def derive_edges(relations, times=None):
+    """Normalize an Explorer.relations() response into Edge objects with status 'derived'.
+
+    FK edges become one column-level edge per column pair (table-level when the columns are unknown).
+    A lineage edge seen in both directions becomes two directed edges, one per direction.
+    `times` maps "object" and "lineage" to the fetch time of the cached data behind them.
+    """
+    times = times or {}
+    out = []
+
+    def add(kind, source, target, prov, evidence=None):
+        stamp = prov.fetched_at or dbx.now()
+        out.append(Edge(id=derived_id(kind, source, target), kind=kind, source=source, target=target,
+                        provenance=prov, evidence=evidence, status="derived", created_at=stamp, updated_at=stamp))
+
+    for e in relations.get("edges", []):
+        s, t = e["source"], e["target"]
+        if e["kind"] == "fk":
+            prov = Provenance(origin="unity_catalog:table_constraints", source_ref=e.get("constraint"),
+                              fetched_at=times.get("object"))
+            pairs = [(c, p) for c, p in zip_longest(e.get("child_columns") or [], e.get("parent_columns") or [])
+                     if c and p]
+            for c, p in pairs or [(None, None)]:
+                add("fk", Endpoint(table=s, column=c), Endpoint(table=t, column=p), prov)
+        elif e["kind"] == "view_dep":
+            add("view_dep", Endpoint(table=s), Endpoint(table=t),
+                Provenance(origin="unity_catalog:view_dependencies", fetched_at=times.get("object")))
+        elif e["kind"] == "lineage":
+            seen = e.get("last_seen_by_dir") or {f"{s}->{t}": e.get("last_seen")}
+            prov = Provenance(origin="unity_catalog:table_lineage", fetched_at=times.get("lineage"))
+            for direction, ts in seen.items():
+                a, _, b = direction.partition("->")
+                add("lineage", Endpoint(table=a), Endpoint(table=b), prov, Evidence(last_seen=ts))
+    return out
+
+
+# ---------- rollup ----------
+
+_PRIORITY = ("accepted", "proposed", "derived", "rejected")
+
+
+def _merge_evidence(items):
+    items = [i for i in items if i]
+    if not items:
+        return None
+    seen = [x for i in items for x in (i.first_seen, i.last_seen) if x]
+    refs = list(dict.fromkeys(r for i in items for r in i.sample_refs))[:10]
+    runs = [i.runs for i in items if i.runs is not None]
+    users = [i.users for i in items if i.users is not None]
+    return Evidence(runs=sum(runs) if runs else None, users=max(users) if users else None,
+                    first_seen=min(seen) if seen else None, last_seen=max(seen) if seen else None, sample_refs=refs)
+
+
+def rollup(edges, notes=None):
+    """The table-level view: one Rolled edge per (kind, source table, target table), built from its members.
+
+    A column edge implies its table edge. `columns` lists the column pairs of the members, `members` their ids.
+    A group of one table-level edge keeps that edge's id. Any other group gets the table-level derived id.
+    The status is the strongest member's (accepted, proposed, derived, rejected). `notes` maps natural keys to
+    overlay notes and wins for derived edges.
+    """
+    notes = notes or {}
+    groups = {}
+    for e in edges:
+        pair = (e.source.table, e.target.table)
+        key = (e.kind, *(pair if e.directed else tuple(sorted(pair))), e.directed)
+        groups.setdefault(key, []).append(e)
+    out = []
+    for (kind, a, b, directed), members in groups.items():
+        first = members[0]
+        src, tgt = Endpoint(table=a), Endpoint(table=b)
+        pairs = []
+        for m in members:
+            sc, tc = (m.target.column, m.source.column) if (m.source.table != a) else (m.source.column, m.target.column)
+            if (sc or tc) and ColumnPair(source=sc, target=tc) not in pairs:
+                pairs.append(ColumnPair(source=sc, target=tc))
+        single = len(members) == 1 and not (first.source.column or first.target.column)
+        rid = first.id if single else derived_id(kind, src, tgt)
+        note = notes.get(key_of(kind, src, tgt, directed)) or next((m.note for m in members if m.note), "")
+        status = next(s for s in _PRIORITY if any(m.status == s for m in members))
+        out.append(Rolled(
+            id=rid, kind=kind, source=src, target=tgt, directed=directed,
+            provenance=first.provenance,
+            evidence=_merge_evidence([m.evidence for m in members]), status=status, note=note,
+            created_at=min(m.created_at for m in members), updated_at=max(m.updated_at for m in members),
+            columns=pairs, members=[m.id for m in members]))
+    return out
+
+
+# ---------- the SQLite store ----------
+
+_V1 = """
+CREATE TABLE edge (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    src_table TEXT NOT NULL,
+    src_column TEXT NOT NULL DEFAULT '',
+    tgt_table TEXT NOT NULL,
+    tgt_column TEXT NOT NULL DEFAULT '',
+    directed INTEGER NOT NULL,
+    provenance TEXT NOT NULL,
+    evidence TEXT,
+    status TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (kind, src_table, src_column, tgt_table, tgt_column)
+);
+CREATE INDEX edge_src_table ON edge (src_table);
+CREATE INDEX edge_tgt_table ON edge (tgt_table);
+CREATE TABLE derived_note (
+    kind TEXT NOT NULL,
+    src_table TEXT NOT NULL,
+    src_column TEXT NOT NULL DEFAULT '',
+    tgt_table TEXT NOT NULL,
+    tgt_column TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (kind, src_table, src_column, tgt_table, tgt_column)
+);
+"""
+
+# MIGRATIONS[i] takes the database from user_version i to i + 1. Append; never edit a shipped entry.
+MIGRATIONS = [_V1]
+
+
+def migrate(conn):
+    """Bring the database up to the latest schema, tracked by PRAGMA user_version."""
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version > len(MIGRATIONS):
+        raise RuntimeError(f"relationship database is schema version {version}; this app knows up to {len(MIGRATIONS)}")
+    for i in range(version, len(MIGRATIONS)):
+        conn.executescript(f"BEGIN;\n{MIGRATIONS[i]}\nPRAGMA user_version = {i + 1};\nCOMMIT;")
+
+
+def db_path(profile):
+    """data/relationships/<profile>.sqlite, under whatever dbx.DATA is when called."""
+    return dbx.DATA / "relationships" / f"{dbx.safe(profile)}.sqlite"
+
+
+def open_store(profile):
+    """Open (and migrate) the store for one profile."""
+    return Store(db_path(profile))
+
+
+class Store:
+    """The persisted (non-derived) edges and the notes on derived edges."""
+
+    def __init__(self, path):
+        if str(path) != ":memory:":
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(str(path))
+        self.conn.row_factory = sqlite3.Row
+        migrate(self.conn)
+
+    def close(self):
+        """Close the connection."""
+        self.conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    # -- rows <-> edges --
+    @staticmethod
+    def _edge(row):
+        return Edge(
+            id=row["id"], kind=row["kind"],
+            source=Endpoint(table=row["src_table"], column=row["src_column"] or None),
+            target=Endpoint(table=row["tgt_table"], column=row["tgt_column"] or None),
+            directed=bool(row["directed"]), provenance=json.loads(row["provenance"]),
+            evidence=json.loads(row["evidence"]) if row["evidence"] else None,
+            status=row["status"], note=row["note"], created_at=row["created_at"], updated_at=row["updated_at"])
+
+    def _by_key(self, key):
+        return self.conn.execute(
+            "SELECT * FROM edge WHERE kind=? AND src_table=? AND src_column=? AND tgt_table=? AND tgt_column=?",
+            key).fetchone()
+
+    def _upsert(self, edge):
+        """Insert or update by natural key without committing. Returns (stored edge, created)."""
+        key = key_of(edge.kind, edge.source, edge.target, edge.directed)
+        prov = edge.provenance.model_dump_json()
+        ev = edge.evidence.model_dump_json() if edge.evidence else None
+        row = self._by_key(key)
+        if row:
+            self.conn.execute(
+                "UPDATE edge SET directed=?, provenance=?, evidence=?, status=?, note=?, updated_at=? WHERE id=?",
+                (int(edge.directed), prov, ev, edge.status, edge.note, dbx.now(), row["id"]))
+            return self.get(row["id"]), False
+        rid = edge.id
+        if self.conn.execute("SELECT 1 FROM edge WHERE id=?", (rid,)).fetchone():
+            rid = new_id()  # the incoming id belongs to a different edge here
+        self.conn.execute("INSERT INTO edge VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                          (rid, *key, int(edge.directed), prov, ev, edge.status, edge.note,
+                           edge.created_at, edge.updated_at))
+        return self.get(rid), True
+
+    # -- stored edges --
+    def get(self, rid):
+        """The stored edge with this id; RelationshipNotFound if none."""
+        row = self.conn.execute("SELECT * FROM edge WHERE id=?", (rid,)).fetchone()
+        if not row:
+            raise RelationshipNotFound(f"relationship not found: {rid}")
+        return self._edge(row)
+
+    def upsert(self, edge):
+        """Insert or update by natural key. Returns (stored edge, created). Derived kinds are refused."""
+        check_storable(edge)
+        _check_endpoints(edge.source, edge.target, "target")
+        with self.conn:
+            return self._upsert(edge)
+
+    def create_manual(self, body):
+        """Add a user-drawn edge (accepted). Drawing an existing edge again re-accepts it. Returns (edge, created)."""
+        provenance = Provenance(origin="user", fetched_at=dbx.now())
+        edge = Edge(kind="manual", source=body.source, target=body.target, directed=body.directed,
+                    provenance=provenance, status="accepted", note=body.note)
+        with self.conn:
+            row = self._by_key(key_of("manual", edge.source, edge.target, edge.directed))
+            if row:
+                note = body.note or row["note"]
+                self.conn.execute("UPDATE edge SET status='accepted', note=?, updated_at=? WHERE id=?",
+                                  (note, dbx.now(), row["id"]))
+                return self.get(row["id"]), False
+            return self._upsert(edge)
+
+    def patch(self, rid, status=None, note=None):
+        """Change a stored edge's status and/or note."""
+        if status is not None and status not in STORED_STATUSES:
+            raise RelationshipInvalid(f'status: "{status}" is not a stored status (use proposed, accepted or rejected)')
+        self.get(rid)
+        with self.conn:
+            if status is not None:
+                self.conn.execute("UPDATE edge SET status=?, updated_at=? WHERE id=?", (status, dbx.now(), rid))
+            if note is not None:
+                self.conn.execute("UPDATE edge SET note=?, updated_at=? WHERE id=?", (note, dbx.now(), rid))
+        return self.get(rid)
+
+    def delete(self, rid):
+        """Remove a stored edge; RelationshipNotFound if none."""
+        self.get(rid)
+        with self.conn:
+            self.conn.execute("DELETE FROM edge WHERE id=?", (rid,))
+
+    def all_edges(self):
+        """Every stored edge, oldest first."""
+        return [self._edge(r) for r in self.conn.execute("SELECT * FROM edge ORDER BY created_at, id")]
+
+    def edges_for(self, table):
+        """Stored edges with this table at either end."""
+        rows = self.conn.execute("SELECT * FROM edge WHERE src_table=? OR tgt_table=? ORDER BY created_at, id",
+                                 (table, table))
+        return [self._edge(r) for r in rows]
+
+    def table_view(self, table=None):
+        """Stored edges rolled up to table level, for one table or for all."""
+        return rollup(self.edges_for(table) if table else self.all_edges())
+
+    # -- notes on derived edges --
+    def derived_notes(self):
+        """Map of natural key to note for every derived edge that has one."""
+        rows = self.conn.execute("SELECT * FROM derived_note")
+        return {(r["kind"], r["src_table"], r["src_column"], r["tgt_table"], r["tgt_column"]): r["note"] for r in rows}
+
+    def _set_note(self, key, note, stamp=None):
+        if note:
+            self.conn.execute("INSERT OR REPLACE INTO derived_note VALUES (?,?,?,?,?,?,?)",
+                              (*key, note, stamp or dbx.now()))
+        else:
+            self.conn.execute("DELETE FROM derived_note WHERE kind=? AND src_table=? AND src_column=? "
+                              "AND tgt_table=? AND tgt_column=?", key)
+
+    def set_derived_note(self, rid, note):
+        """Attach (or, when empty, clear) a note on the derived edge with this id. Returns it as an Edge."""
+        parsed = parse_derived_id(rid)
+        if not parsed:
+            raise RelationshipNotFound(f"relationship not found: {rid}")
+        kind, source, target = parsed
+        with self.conn:
+            self._set_note(key_of(kind, source, target), note)
+        return Edge(id=rid, kind=kind, source=source, target=target, status="derived", note=note,
+                    provenance=Provenance(origin="derived"))
+
+    def clear_derived_note(self, rid):
+        """Remove the note on a derived edge; RelationshipNotFound if it had none."""
+        parsed = parse_derived_id(rid)
+        key = key_of(*parsed) if parsed else None
+        if not key or key not in self.derived_notes():
+            raise RelationshipNotFound(f"relationship not found: {rid}")
+        with self.conn:
+            self._set_note(key, "")
+
+    # -- export / import --
+    def export(self):
+        """Every stored edge and derived-edge note, in the import format."""
+        overlays = [Overlay(kind=k[0], source=Endpoint(table=k[1], column=k[2] or None),
+                            target=Endpoint(table=k[3], column=k[4] or None), note=n)
+                    for k, n in sorted(self.derived_notes().items())]
+        file = ExportFile(version=EXPORT_VERSION, exported_at=dbx.now(), edges=self.all_edges(), overlays=overlays)
+        return file.model_dump(mode="json")
+
+    def import_file(self, file):
+        """Upsert a parsed export file in one transaction. Returns counts."""
+        created = updated = 0
+        with self.conn:
+            for e in file.edges:
+                _, was_created = self._upsert(e)
+                created += was_created
+                updated += not was_created
+            for o in file.overlays:
+                self._set_note(key_of(o.kind, o.source, o.target), o.note, o.updated_at)
+        return {"imported": len(file.edges), "created": created, "updated": updated, "overlays": len(file.overlays)}
+
+
+# ---------- the unified read ----------
+
+def unified(store, table, relations=None, times=None, level="table"):
+    """Derived edges (from `relations`) plus stored edges for one table, with notes on derived ones applied.
+
+    level "table" rolls column edges up to table edges; "column" returns each edge as it is.
+    Returns {"table", "level", "nodes", "edges", "errors"}; nodes and errors pass through from `relations`.
+    """
+    if level not in ("table", "column"):
+        raise RelationshipInvalid('level: must be "table" or "column"')
+    relations = relations or {"nodes": [], "edges": [], "errors": []}
+    notes = store.derived_notes()
+    derived = derive_edges(relations, times)
+    for e in derived:
+        e.note = notes.get(key_of(e.kind, e.source, e.target), "")
+    stored = store.edges_for(table)
+    edges = derived + stored
+    out = rollup(edges, notes) if level == "table" else edges
+    nodes = list(relations.get("nodes", []))
+    known = {n["id"] for n in nodes}
+    if not any(n["id"] == table for n in nodes):
+        nodes.insert(0, {"id": table, "label": table.split(".")[-1], "kind": "table", "focus": True})
+        known.add(table)
+    for e in stored:
+        for end in (e.source, e.target):
+            if end.table not in known:
+                known.add(end.table)
+                nodes.append({"id": end.table, "label": end.table.split(".")[-1],
+                              "kind": "placeholder" if end.table.startswith(_PLACEHOLDER) else "table"})
+    return {"table": table, "level": level, "nodes": nodes,
+            "edges": [e.model_dump(mode="json") for e in out], "errors": relations.get("errors", [])}
+
+
+def check_table(table):
+    """Validate a table name or placeholder from a query string. Returns it normalized."""
+    if not table:
+        raise RelationshipInvalid("table: required")
+    try:
+        return Endpoint(table=table).table
+    except ValidationError as e:
+        raise RelationshipInvalid(f"table: {e.errors()[0]['msg']}") from e

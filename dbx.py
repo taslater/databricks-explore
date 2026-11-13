@@ -381,6 +381,20 @@ class Explorer:
         return {"nodes": list(nodes.values()), "edges": list(edges.values()), "errors": errors}
 
 
+# ---------- relationship store support (see relationships.py) ----------
+
+def cache_times(explorer, full_name):
+    """When the cached object and lineage files behind relations(full_name) were fetched; None when absent."""
+    out = {}
+    for key, sub in (("object", "obj"), ("lineage", "lineage")):
+        p = explorer.root / f"{Explorer._dir(full_name)}/{sub}/{safe(full_name)}.json"
+        try:
+            out[key] = json.loads(p.read_text(encoding="utf-8")).get("fetched_at")
+        except (OSError, ValueError):
+            out[key] = None
+    return out
+
+
 # ---------- diagrams ----------
 
 def list_diagrams():
