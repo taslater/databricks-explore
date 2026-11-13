@@ -206,6 +206,28 @@ def _literal_select(sql):
                 [["1", "3.14159", "hello"]])
 
 
+def _project(sql, cols, rows):
+    """Honors a plain column list (`SELECT a, b AS c FROM t`) over a table's columns. Anything else passes through."""
+    try:
+        node = sqlglot.parse_one(sql, read="databricks")
+        if not isinstance(node, sqlglot.exp.Select) or node.args.get("with_"):
+            return cols, rows
+        names = [c["name"] for c in cols]
+        picks = []  # (source index, output name)
+        for e in node.expressions:
+            inner = e.this if isinstance(e, sqlglot.exp.Alias) else e
+            if isinstance(inner, sqlglot.exp.Star):
+                picks += list(enumerate(names))
+            elif isinstance(inner, sqlglot.exp.Column) and inner.name in names:
+                picks.append((names.index(inner.name), e.alias_or_name))
+            else:
+                return cols, rows
+        return ([{"name": n, "type": cols[i]["type"]} for i, n in picks],
+                [[r[i] for i, _ in picks] for r in rows])
+    except Exception:
+        return cols, rows
+
+
 def result_for(statement, params=None):
     """(columns, rows) for any SQL. Raises DemoError for the `demo_error` magic word."""
     low = " ".join(statement.split()).lower()
@@ -240,7 +262,8 @@ def result_for(statement, params=None):
         return cols, rows
     table = next((t for t in TABLES if t in low), None) or next(
         (t for t in TABLES if re.search(rf"\b{t.split('.')[2]}\b", low)), "demo.sales.orders")
-    return table_rows(table, min(cap or TABLES[table][3], TABLES[table][3]))
+    cols, rows = table_rows(table, min(cap or TABLES[table][3], TABLES[table][3]))
+    return _project(wrapped_sql or statement, cols, rows)
 
 
 # ---------------------------------------------------------------- fake SDK surface

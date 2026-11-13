@@ -11,6 +11,7 @@ import type { CanvasWindow, QueryBody, QueryStatus, StatementState } from '../..
 import { DEFAULT_EDITOR_SPLIT, queryWindowMap, titleError, useCanvasStore } from '../../store/canvasStore'
 import { useUiStore } from '../../store/uiStore'
 import { ResultsGrid } from '../ResultsGrid'
+import { CopyButton } from '../grid/CopyButton'
 import { ChartTab } from '../chart/ChartTab'
 import { useSqlNamespace } from '../useSqlNamespace'
 import { windowRefCompletion } from '../linking/completion'
@@ -314,8 +315,11 @@ function TitleField({ id, title }: { id: string; title: string }) {
 }
 
 function Summary({ rowCount, truncated, ms }: { rowCount: number; truncated: boolean | null; ms: number | null }) {
+  const text = `${rowCount} ${rowCount === 1 ? 'row' : 'rows'}${truncated === true ? ' (truncated)' : ''}, ${
+    ms === null ? 'time n/a' : `${ms} ms`
+  }`
   return (
-    <span className="qw-summary">
+    <span className="qw-summary nodrag">
       {rowCount} {rowCount === 1 ? 'row' : 'rows'}
       {truncated === true && (
         <span className="qw-badge" title="More rows exist than the row limit. Only the first rows are shown.">
@@ -323,6 +327,7 @@ function Summary({ rowCount, truncated, ms }: { rowCount: number; truncated: boo
         </span>
       )}
       <span>{ms === null ? 'time n/a' : `${ms} ms`}</span>
+      <CopyButton text={text} />
     </span>
   )
 }
@@ -336,7 +341,14 @@ function ResultPane({
   running: boolean
   errorText: string | null
 }): ReactNode {
-  if (errorText) return <div className="error">{errorText}</div>
+  if (errorText) {
+    return (
+      <div className="error nodrag">
+        <span className="qw-errtext">{errorText}</span>
+        <CopyButton text={errorText} />
+      </div>
+    )
+  }
   if (st?.state === 'CANCELED') return <div className="hint">Canceled.</div>
   if (st?.state === 'CLOSED') return <div className="hint">Statement closed.</div>
   if (st?.state === 'SUCCEEDED') {

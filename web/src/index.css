@@ -700,8 +700,32 @@ tr.stale td {
   margin: 0;
 }
 
-.qw-grid {
+.qw-grid-wrap {
+  display: flex;
+  flex-direction: column;
   height: 100%;
+}
+
+.qw-grid {
+  flex: 1;
+  min-height: 0;
+}
+
+.qw-grid-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+
+.qw-grid-bar button {
+  padding: 1px 8px;
+  font-size: 12px;
+}
+
+.qw-grid-bar .hint {
+  padding: 0;
+  font-size: 12px;
 }
 
 .react-flow__panel button {
@@ -1021,4 +1045,91 @@ tr.stale td {
 .qw-grid .qw-null {
   color: #9aa0a6;
   font-style: italic;
+}
+
+/* ---- Copying: selectable text, copy buttons, the right-click menu --------- */
+
+/* React Flow sets user-select: none on every node. Text that people copy from needs to be selectable. */
+.qw-selectable,
+.qw-results .error,
+.qw-summary {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+.qw-errtext {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.qw-copy {
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  margin-left: 6px;
+  vertical-align: baseline;
+}
+
+.qw-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 6px 20px rgba(31, 35, 40, 0.25);
+  font-size: 13px;
+  user-select: none;
+}
+
+.qw-menu-item {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+}
+
+.qw-menu-item:hover {
+  background: #ddf4ff;
+}
+
+.qw-menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
+.qw-menu-title {
+  padding: 2px 8px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.qw-menu-format {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 8px;
+}
+
+.qw-menu-format-label {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.qw-menu-mini {
+  display: inline-block;
+  width: auto;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  background: #f6f8fa;
+  font-size: 12px;
+  white-space: nowrap;
 }
