@@ -2,6 +2,7 @@
 from pathlib import Path
 
 from flask import Flask, abort, jsonify, request, send_from_directory
+from werkzeug.exceptions import HTTPException, MethodNotAllowed, NotFound
 
 import canvases
 import dbx
@@ -22,8 +23,29 @@ def refresh():
     return request.args.get("refresh") == "1"
 
 
+def _api_route_exists(path):
+    """True when some route other than the SPA fallback serves this path under any method."""
+    adapter = app.url_map.bind("localhost")
+    for method in ("GET", "POST", "PUT", "PATCH", "DELETE"):
+        try:
+            if adapter.match(path, method=method)[0] != "spa":
+                return True
+        except HTTPException:
+            pass
+    return False
+
+
 @app.errorhandler(Exception)
 def err(e):
+    """JSON error body. HTTP errors (404, 405, ...) keep their status; anything else is a 500."""
+    if isinstance(e, HTTPException):
+        if isinstance(e, MethodNotAllowed) and request.path.startswith("/api/") and not _api_route_exists(request.path):
+            e = NotFound()  # only the SPA fallback matched this path, so it is an unknown API route
+        resp = jsonify({"error": e.description})
+        resp.status_code = e.code
+        if isinstance(e, MethodNotAllowed) and e.valid_methods:
+            resp.headers["Allow"] = ", ".join(e.valid_methods)
+        return resp
     return jsonify({"error": str(e)}), 500
 
 

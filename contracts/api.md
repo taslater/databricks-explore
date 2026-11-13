@@ -1,11 +1,18 @@
 # Explorer API contract
 
-Source of truth for backend and frontend. Flask on `127.0.0.1:8765`, all bodies JSON. Sections 1 and 2 describe `app.py` as it behaves today. Section 3 lists new endpoints (not implemented yet).
+Source of truth for backend and frontend. Flask on `127.0.0.1:8765`, all bodies JSON. Sections 1 to 3 describe `app.py` as it behaves today.
 
 ## Conventions
 
 - **Connection:** one active profile per server process (`STATE["ex"]`). Routes marked *needs connection* return an error until `POST /api/connect` succeeds.
-- **Errors (all routes):** any exception returns status **500** with body `{"error": "<message>"}`. This includes missing query params or body keys (`KeyError` text, e.g. `"'catalog'"`). Unknown routes and wrong methods should also return this shape, since Flask sends HTTP errors to the `Exception` handler (expected from Flask's handler lookup, not run). No other status codes are used today.
+- **Errors (all routes):** an error body is `{"error": "<message>"}`, with these statuses:
+  - **400** for a body or query that fails validation (canvases), and for a body that is not valid JSON.
+  - **401** for a failed non-interactive `POST /api/connect`.
+  - **404** for an unknown route (including unknown `/api/...` paths under any method) and for a missing canvas.
+  - **405** for a wrong method on a real route, with an `Allow` header.
+  - **415** for a route that reads a JSON body when the request is not `application/json`.
+  - **503** for `GET /` when the frontend is not built. That body is plain text, not JSON.
+  - **500** for any other exception, including missing query params or body keys (`KeyError` text, e.g. `"'catalog'"`) and routes called before `POST /api/connect`.
 - **Cache wrapper:** routes marked *cached* return `{"fetched_at": "<ISO-8601 UTC>", "data": ...}` from `data/cache/<profile>/...`. Pass `?refresh=1` to re-fetch from Databricks and overwrite the cache.
 - **Logging:** every remote call is appended to `data/logs/calls.jsonl` through `Explorer._call`.
 
@@ -180,7 +187,7 @@ Response: `{"saved": "<safe(name)>"}`
 
 ---
 
-## 3. New endpoints (T0 contract, A1 to A3 implement)
+## 3. Query and canvas endpoints
 
 ### Shared shapes
 
@@ -218,7 +225,7 @@ Response: `{"saved": "<safe(name)>"}`
 - `truncated` (boolean | null): `true` when the query has more than `max_rows` rows. `null` when the cap could not be applied in SQL, which is when the statement is not a query (sqlglot cannot parse it, or it is not `SELECT`/`WITH`/`VALUES`). In that case the server cuts `rows` to `max_rows` client-side and reports `truncated: null`.
 - `ms` (integer): wall-clock milliseconds for the Databricks call, including polling.
 
-**Canvas file:** see `contracts/canvas.schema.json`. The API stores and returns it unchanged.
+**Canvas file:** the shape is described by `contracts/canvas.schema.json`. The server does not load that file. The pydantic models in `canvases.py` mirror it and do the validating. The API stores and returns the canvas unchanged.
 
 ### `POST /api/query`
 
@@ -278,7 +285,7 @@ Response: JSON array of strings, sorted, e.g. `["hours", "sales"]`. Matches `GET
 
 ### `POST /api/canvases`
 
-No connection needed. Body: a canvas object, validated against `contracts/canvas.schema.json`. Plus: window titles unique and window ids unique, and `links` entries refer to existing ids.
+No connection needed. Body: a canvas object, validated by the pydantic models in `canvases.py` (which mirror `contracts/canvas.schema.json`; the server does not load the schema file). Beyond the models: window titles unique and window ids unique, and `links` entries refer to existing ids.
 
 Writes `data/canvases/<name>.json`, overwriting any existing canvas with that name. The server stores exactly the body it validated. It adds no fields, so save followed by load returns the same object.
 

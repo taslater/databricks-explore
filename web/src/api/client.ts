@@ -143,5 +143,5 @@ export const listCanvases = () => get<string[]>('/api/canvases')
 
 export const getCanvas = (name: string) => get<CanvasDoc>(`/api/canvases/${enc(name)}`)
 
-/** Server validates against canvas.schema.json. Failures are 400 with an `error` message. */
+/** The server validates with pydantic models that mirror canvas.schema.json. Failures are 400 with an `error` message. */
 export const saveCanvas = (doc: CanvasDoc) => post<SavedResponse>('/api/canvases', doc)
