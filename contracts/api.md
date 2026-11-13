@@ -1,6 +1,6 @@
 # Explorer API contract
 
-Source of truth for backend and frontend. Flask on `127.0.0.1:8765`, all bodies JSON. Sections 1 to 4 describe `app.py` as it behaves today.
+Source of truth for backend and frontend. Flask on `127.0.0.1:8765`, all bodies JSON. Sections 1 to 5 describe `app.py` as it behaves today.
 
 ## Conventions
 
@@ -403,3 +403,87 @@ Response: the edge. **201** when created. **200** when the natural key already e
 *Needs connection.* Body: the export format. In `edges`, only `kind`, `source`, `target` and `provenance` are required. `id`, timestamps, `directed` (true), `status` (`proposed`) and `note` have defaults. Edges of a derived kind, or with status `derived`, are 400. The import is all-or-nothing and upserts by natural key: an existing edge keeps its id and `created_at` and takes everything else from the file. Notes in `overlays` replace existing notes.
 
 Response: `{"imported": 12, "created": 10, "updated": 2, "overlays": 1}`.
+
+---
+
+## 5. Query-history mining, suggestions and column lineage
+
+Implemented in `mining.py` and `sqltools.join_pairs`. Mining is always an explicit, user-triggered batch run through the selected SQL warehouse. It reads `system.query.history` (finished SELECT, INSERT, MERGE and CREATE statements) and `system.access.table_lineage` (the tables each statement read, joined by `statement_id`), extracts the column pairs each statement joins on, and stores them as `join_mined` edges with status `proposed`. **Statement text and user names are never stored or logged.** Stored per edge: the two column endpoints, a run count, a distinct-user *count*, first and last seen as dates, and up to 5 statement ids. All routes *need a connection*.
+
+Facts the design rests on: `statement_text` reads `<REDACTED>` unless the reader is an account admin or in `databricks_pii_access`; query history keeps 365 days and rows usually appear within an hour; lineage tables keep 395 days. The REST column-lineage endpoint is undocumented, so column lineage comes from the system tables.
+
+### `GET /api/mining/plan?window_days=30&full=0`
+
+What a run would do, without running anything. The page shows this before the user confirms.
+
+- `window_days` (1 to 365, default 30). The first run, or `full=1`, reads the last `window_days` days. Any later run is **incremental**: it starts at the stored cursor, and `window_days` does not apply. The newest hour is always left out, because history rows may not be in yet.
+- `row_cap` is the most statements one run reads (5000). A run that hits it stops there, moves the cursor to the last row read, and the next run continues.
+
+```json
+{"since": "2026-10-14T11:00:00Z", "until": "2026-11-13T11:00:00Z", "window_days": 30,
+ "incremental": false, "cursor": null, "row_cap": 5000, "warehouse_id": "abc123",
+ "queries": [{"name": "query_history", "sql": "SELECT statement_id, executed_by, start_time, left(statement_text, 100000) AS statement_text\nFROM system.query.history\nWHERE ... LIMIT 5000",
+              "params": {"since": "2026-10-14T11:00:00Z", "until": "2026-11-13T11:00:00Z"}},
+             {"name": "table_lineage", "sql": "WITH q AS (...) SELECT DISTINCT l.statement_id, l.source_table_full_name FROM system.access.table_lineage l JOIN q ...",
+              "params": {"since": "...", "until": "..."}}]}
+```
+
+`sql` is exactly what runs, with `:since` and `:until` bound from `params`. Errors: 400 for a bad `window_days`.
+
+### `POST /api/mining/runs`
+
+Starts a run in the background. Body (optional): `{"window_days": 30, "full": false}`. `full: true` ignores the cursor, reads the whole window again and **replaces** the evidence of every pair it finds (so counts are not doubled). An ordinary run adds to existing evidence.
+
+Response **202**: the status object below. Errors: **400** (bad window, or no warehouse selected), **409** (a run is already in progress).
+
+### `GET /api/mining/status`
+
+The current or latest run of this server process, plus the last stored run from any earlier one.
+
+```json
+{"state": "succeeded", "phase": null, "progress": {"done": 0, "total": 0},
+ "started_at": "...", "finished_at": "...",
+ "plan": {"since": "...", "until": "...", "window_days": 30, "incremental": false, "row_cap": 5000},
+ "result": {"statements": 338, "parsed": 333, "with_joins": 236, "unparsed": 5, "redacted_skipped": 1, "no_lineage": 21,
+            "pairs": 8, "skipped_fk": 1, "fk_unreadable_tables": 0, "invalid": 0, "created": 8, "updated": 0,
+            "capped": false, "since": "...", "until": "...", "finished_at": "..."},
+ "error": null, "reason": null,
+ "last_run": {"...": "the result of the last stored run, or null"}}
+```
+
+- `state`: `idle` (nothing run in this process), `running`, `succeeded`, `failed` or `blocked`.
+- While `running`, `phase` is `history`, `lineage`, `extract`, `foreign_keys` or `save`, and `progress` counts `done` of `total` for `extract` (statements) and `foreign_keys` (tables).
+- `blocked` with `reason: "redacted"`: `statement_text` came back as `<REDACTED>` for at least half the rows, so the reader cannot see query text. `error` explains (account admin or `databricks_pii_access` needed). **Nothing is stored and the cursor does not move.** Fewer redacted rows are skipped and counted in `redacted_skipped`.
+- `failed`: `error` is the warehouse's message, for example no `SELECT` on the system tables.
+- In `result`: `unparsed` statements sqlglot could not read; `no_lineage` statements with no `table_lineage` row (short table names in those cannot be qualified and their joins are dropped); `skipped_fk` pairs that are already declared foreign keys; `fk_unreadable_tables` tables whose constraints could not be read, so their pairs were kept. `capped` means the row cap was hit and another run continues.
+- Pairs between Databricks' own tables (`system`, `__databricks_internal`) are not mined.
+
+### `GET /api/mining/usage?limit=10`
+
+Top tables by runs and top table pairs read together, for the mined window. Computed in the same pass from the same statements. Distinct users are a count. After an incremental run runs are added, and the user count is the larger of the two (a lower bound, because names are not kept). `limit` is 1 to 100. Before any run: `{"window": null, "statements": 0, "tables": [], "pairs": []}`.
+
+```json
+{"window": {"since": "...", "until": "..."}, "statements": 338,
+ "tables": [{"table": "demo.sales.orders", "runs": 205, "users": 6}],
+ "pairs": [{"tables": ["demo.sales.customers", "demo.sales.orders"], "runs": 83, "users": 6}]}
+```
+
+### `GET /api/relationships/suggestions?status=proposed&table=<name>`
+
+Stored `join_mined` edges at column level, most evidence first (runs, then users, then last seen). `status` is a comma-separated list of `proposed` (default), `accepted`, `rejected`. `table` optionally keeps edges with that table at either end. `counts` is over all `join_mined` edges, whatever the filter.
+
+```json
+{"edges": [<edge>, ...], "counts": {"proposed": 7, "accepted": 1, "rejected": 0}}
+```
+
+Errors: 400 for an unknown status.
+
+### `POST /api/relationships/bulk`
+
+Sets one status on several stored edges, all or none. Body `{"ids": ["e_..."], "status": "accepted"}` with 1 to 1000 ids and a `status` of `proposed`, `accepted` or `rejected`. Response `{"updated": 2}`. Errors: 400 (empty, a derived id, an unknown key), 404 (an id that does not exist; nothing is changed).
+
+### `GET /api/relationships?table=<name>&level=column`
+
+Section 4's route, now with column lineage. At `level=column`, derived `lineage` edges with column endpoints are added from `system.access.column_lineage` (one warehouse query for the table, **cached** like the other metadata, `?refresh=1` re-reads it). The edge `id` is `lineage:<table>#<column>-><table>#<column>`, `status` `derived`, `provenance.origin` `unity_catalog:column_lineage`, `evidence.last_seen` the latest event. Stored `join_mined`, `manual` and other edges come back as stored, each with its column endpoints, and FK edges come back one per column pair. At `level=table` nothing changes.
+
+A cached copy is used when no warehouse is selected. With no warehouse and no cache, or without access to the system table, the response is still 200 with everything else and `errors` gains `"column_lineage: <reason>"`.

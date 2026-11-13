@@ -5,12 +5,15 @@ from pathlib import Path
 
 if "--demo" in sys.argv:  # must be set before dbx is imported: it picks the data folder and client at import
     os.environ["EXPLORER_DEMO"] = "1"
+if "--redacted" in sys.argv:  # demo only: query history text reads <REDACTED>, to try that path
+    os.environ["EXPLORER_DEMO_REDACTED"] = "1"
 
 from flask import Flask, abort, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException, MethodNotAllowed, NotFound
 
 import canvases
 import dbx
+import mining
 import relationships
 import sqltools
 
@@ -185,11 +188,34 @@ def rel_store():
 def relationships_for_table():
     table = relationships.check_table(request.args.get("table", ""))
     e = ex()
-    rel, times = None, None
+    level = request.args.get("level", "table")
+    rel, times, columns, notes = None, None, None, []
     if not table.startswith("ph:"):  # a placeholder has no catalog metadata
         rel, times = e.relations(table, refresh()), dbx.cache_times(e, table)
+        if level == "column":  # one warehouse query, cached. With no warehouse or no access the rest still loads.
+            try:
+                columns = e.column_lineage(table, refresh())
+            except Exception as err:
+                notes.append(f"column_lineage: {err}")
     with rel_store() as store:
-        return jsonify(relationships.unified(store, table, rel, times, request.args.get("level", "table")))
+        out = relationships.unified(store, table, rel, times, level, columns)
+    return jsonify({**out, "errors": [*out["errors"], *notes]})
+
+
+@app.get("/api/relationships/suggestions")
+def relationship_suggestions():
+    statuses = request.args.get("status", "proposed").split(",")
+    with rel_store() as store:
+        edges = store.suggestions(relationships.check_statuses(statuses), table=request.args.get("table") or None)
+        counts = store.status_counts()
+    return jsonify({"edges": [x.model_dump(mode="json") for x in edges], "counts": counts})
+
+
+@app.post("/api/relationships/bulk")
+def relationship_bulk():
+    body = relationships.parse_bulk(request.get_json(silent=True))
+    with rel_store() as store:
+        return jsonify({"updated": store.set_status_many(body.ids, body.status)})
 
 
 @app.post("/api/relationships")
@@ -234,6 +260,65 @@ def relationships_import():
     file = relationships.parse_export(request.get_json(silent=True))
     with rel_store() as store:
         return jsonify(store.import_file(file))
+
+
+# ---------- query-history mining (mining.py): explicit, user-triggered runs ----------
+
+@app.errorhandler(mining.MiningInvalid)
+def mining_invalid(e):
+    return jsonify({"error": str(e)}), 400
+
+
+@app.errorhandler(mining.MiningBusy)
+def mining_busy(e):
+    return jsonify({"error": str(e)}), 409
+
+
+def miner():
+    """The Miner for the connected Explorer."""
+    m = STATE.get("miner")
+    if m is None or m.ex is not ex():
+        m = STATE["miner"] = mining.Miner(ex())
+    return m
+
+
+def _mining_args(source):
+    """window_days and full from a query string or body, as ints and bools. Bad types are MiningInvalid."""
+    days = source.get("window_days", mining.WINDOW_DAYS)
+    if isinstance(days, str):
+        if not days.strip().isdigit():
+            raise mining.MiningInvalid(f"window_days: must be a whole number from 1 to {mining.MAX_WINDOW_DAYS}")
+        days = int(days)
+    full = source.get("full", False)
+    return days, full in (True, "1", "true")
+
+
+@app.get("/api/mining/plan")
+def mining_plan():
+    days, full = _mining_args(request.args)
+    return jsonify({**mining.plan(ex().profile, days, full), "warehouse_id": ex().warehouse_id})
+
+
+@app.post("/api/mining/runs")
+def mining_start():
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        raise mining.MiningInvalid("(root): body must be a JSON object")
+    days, full = _mining_args(body)
+    return jsonify(miner().start(days, full)), 202
+
+
+@app.get("/api/mining/status")
+def mining_status():
+    return jsonify(miner().status())
+
+
+@app.get("/api/mining/usage")
+def mining_usage():
+    limit = request.args.get("limit", "10")
+    if not limit.isdigit() or not 1 <= int(limit) <= 100:
+        raise mining.MiningInvalid("limit: must be a whole number from 1 to 100")
+    return jsonify(mining.usage_summary(ex().profile, int(limit)))
 
 
 def _query_sql(body):

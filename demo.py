@@ -9,6 +9,7 @@ Magic words in SQL (matched anywhere in the statement, case-insensitive):
   demo_wide   a 60-column result
   demo_big    50,000 rows, so the row cap and the truncated badge show up
 Otherwise the result follows the first demo table named in the SQL (orders when none is named).
+The system tables system.query.history and system.access.table_lineage / column_lineage are answered by demo_history.py.
 """
 import json
 import random
@@ -19,6 +20,7 @@ from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import sqlglot
+import demo_history
 from databricks.sdk.service import catalog as uc
 from databricks.sdk.service import iam
 from databricks.sdk.service import sql as sqlsvc
@@ -60,8 +62,21 @@ WIDE = [("id", "bigint", None), ("event_ts", "timestamp", None)] + [
 TRIPS = [("trip_id", "bigint", None), ("pickup_ts", "timestamp", None), ("dropoff_ts", "timestamp", None),
          ("distance_mi", "double", None), ("fare", "decimal(8,2)", None), ("zone", "string", None)]
 
+PRODUCTS = [("sku", "string", "Stock keeping unit"), ("name", "string", None), ("category", "string", None),
+            ("list_price", "decimal(10,2)", None)]
+RETURNS = [("return_id", "bigint", "Primary key"), ("order_id", "bigint", None), ("line_no", "int", None),
+           ("reason", "string", None), ("returned_at", "timestamp", None)]
+SHIPMENTS = [("shipment_id", "bigint", "Primary key"), ("order_id", "bigint", None), ("carrier", "string", None),
+             ("shipped_at", "timestamp", None)]
+DEPARTMENTS = [("dept", "string", "Department name"), ("manager_id", "bigint", "Employee who runs it"),
+               ("budget", "decimal(12,2)", None)]
+
 # full name -> (table type, columns, comment, row count)
 TABLES = {
+    "demo.sales.products": ("MANAGED", PRODUCTS, "Product catalog", 300),
+    "demo.sales.returns": ("MANAGED", RETURNS, "Returned order lines", 400),
+    "demo.sales.shipments": ("MANAGED", SHIPMENTS, "Shipments per order", 2500),
+    "demo.hr.departments": ("MANAGED", DEPARTMENTS, "Departments", 5),
     "demo.sales.orders": ("MANAGED", ORDERS, "Customer orders", 3000),
     "demo.sales.customers": ("MANAGED", CUSTOMERS, "Customer master", 800),
     "demo.sales.order_items": ("MANAGED", ITEMS, "Order lines", 4000),
@@ -242,6 +257,8 @@ def result_for(statement, params=None):
         low = wrapped.group(1)
         inner = re.match(r"^\s*select\s+\*\s+from\s+\((.*)\)\s+limit\s+\d+\s*$", statement, re.I | re.S)
         wrapped_sql = inner.group(1) if inner else low
+    if re.search(r"\bsystem\.(query\.history|access\.(table|column)_lineage)\b", low):
+        return demo_history.system_query(low, params, cap or 5000)
     if "information_schema.tables" in low:
         q = str((params or {}).get("q", "")).lower()
         hits = [(f.split(".")[0], f.split(".")[1], f.split(".")[2], "VIEW" if v[0] == "VIEW" else "BASE TABLE")

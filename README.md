@@ -31,6 +31,8 @@ Magic words in a query (the rest of the SQL is ignored; any query returns a resu
 
 Otherwise the result follows the first demo table named in the SQL (`demo.sales.orders` by default: 3,000 rows with ids, timestamps, dates, decimals, nulls, empty strings and long text). `GROUP BY` or `count(` gives a daily series for the Chart tab. A trailing `LIMIT n` is honored.
 
+Demo mode also has an invented query history (a few hundred statements by six fake users, with the hard SQL cases), table lineage and column lineage, so mining joins works offline. `python app.py --demo --redacted` (or `EXPLORER_DEMO_REDACTED=1`) makes every statement read `<REDACTED>`, to try the blocked path. In an ordinary demo three rows are redacted and get skipped. Mining state is kept in `data-demo/relationships/`; delete it to start over.
+
 `EXPLORER_DATA_DIR` moves everything the app writes (cache, logs, diagrams, canvases) to another folder. It defaults to `data/`, or `data-demo/` in demo mode.
 
 ## Use
@@ -53,7 +55,9 @@ Otherwise the result follows the first demo table named in the SQL (`demo.sales.
   - Save, Save as, and Open store canvases in `data/canvases/`. Named canvases autosave.
 
 ## Relationships
-Edges come from one place, `GET /api/relationships?table=<name>`. Foreign keys, lineage and view dependencies are derived from the cached Unity Catalog data on every read and are never stored. Everything else (mined joins, manual and sketched edges, concept links, ontology imports) is kept in `data/relationships/<profile>.sqlite`, one file per profile, each edge with its provenance and a status of proposed, accepted or rejected. A note on a derived edge is stored separately and follows the edge. `GET /api/relationships/export` and `POST /api/relationships/import` move stored edges as JSON. See `contracts/api.md`, section 4.
+Edges come from one place, `GET /api/relationships?table=<name>`. Foreign keys, lineage and view dependencies are derived from the cached Unity Catalog data on every read and are never stored. Everything else (mined joins, manual and sketched edges, concept links, ontology imports) is kept in `data/relationships/<profile>.sqlite`, one file per profile, each edge with its provenance and a status of proposed, accepted or rejected. A note on a derived edge is stored separately and follows the edge.
+
+**Mining joins** (Graph tab, **Mine joins**) is an explicit batch run through the selected SQL warehouse. It shows the SQL and time window first, then reads `system.query.history` and `system.access.table_lineage`, extracts the columns each statement joins on, and stores them as proposed `join_mined` edges with run and user counts. Statement text and user names are never stored. Reading query text needs an account admin or `databricks_pii_access`; without that the run stops and says so. Later runs are incremental. Review the results in **Suggested relationships**, and see a **Usage** summary of the busiest tables. A node's **cols** button shows its columns, with column lineage and mined joins drawn between them. Column lineage comes from `system.access.column_lineage`, one cached query per table. `GET /api/relationships/export` and `POST /api/relationships/import` move stored edges as JSON. See `contracts/api.md`, section 4.
 
 ## Test
 ```sh
