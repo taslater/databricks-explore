@@ -18,6 +18,7 @@ import zlib
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import sqlglot
 from databricks.sdk.service import catalog as uc
 from databricks.sdk.service import iam
 from databricks.sdk.service import sql as sqlsvc
@@ -186,6 +187,25 @@ def _daily_revenue(n):
     return cols, rows[:n]
 
 
+def _literal_select(sql):
+    """A FROM-less SELECT of literals: one row with the aliases the query chose. Falls back to a canned row."""
+    try:
+        node = sqlglot.parse_one(sql, read="databricks")
+        cols, row = [], []
+        for e in node.expressions:
+            lit = e.this if isinstance(e, sqlglot.exp.Alias) else e
+            if isinstance(lit, sqlglot.exp.Literal):
+                kind = "STRING" if lit.is_string else ("INT" if lit.is_int else "DOUBLE")
+                cols.append({"name": e.alias_or_name or f"col{len(cols) + 1}", "type": kind})
+                row.append(lit.name)
+            else:
+                raise ValueError("not a literal")
+        return cols, [row]
+    except Exception:
+        return ([{"name": "one", "type": "INT"}, {"name": "pi", "type": "DOUBLE"}, {"name": "s", "type": "STRING"}],
+                [["1", "3.14159", "hello"]])
+
+
 def result_for(statement, params=None):
     """(columns, rows) for any SQL. Raises DemoError for the `demo_error` magic word."""
     low = " ".join(statement.split()).lower()
@@ -194,6 +214,12 @@ def result_for(statement, params=None):
                         "Verify the spelling and correctness of the schema and catalog. SQLSTATE: 42P01; line 1, pos 14")
     limits = [int(x) for x in re.findall(r"\blimit\s+(\d+)", low)]
     cap = min(limits) if limits else None
+    wrapped = re.match(r"^select \* from \((.*)\) limit \d+$", low)  # the row-cap wrapper the Explorer adds
+    wrapped_sql = None
+    if wrapped:
+        low = wrapped.group(1)
+        inner = re.match(r"^\s*select\s+\*\s+from\s+\((.*)\)\s+limit\s+\d+\s*$", statement, re.I | re.S)
+        wrapped_sql = inner.group(1) if inner else low
     if "information_schema.tables" in low:
         q = str((params or {}).get("q", "")).lower()
         hits = [(f.split(".")[0], f.split(".")[1], f.split(".")[2], "VIEW" if v[0] == "VIEW" else "BASE TABLE")
@@ -203,8 +229,7 @@ def result_for(statement, params=None):
     if re.match(r"^(create|insert|drop|alter|use|set|optimize|vacuum|grant|merge|update|delete|truncate)\b", low):
         return [], []
     if re.match(r"^select\s+[\d'\"(]", low) and " from " not in low:
-        return ([{"name": "one", "type": "INT"}, {"name": "pi", "type": "DOUBLE"}, {"name": "s", "type": "STRING"}],
-                [["1", "3.14159", "hello"]])
+        return _literal_select(statement if not wrapped else wrapped_sql)
     if "demo_big" in low:
         cols, rows = table_rows("demo.sales.orders", min(cap or BIG_ROWS, BIG_ROWS))
         return cols, rows

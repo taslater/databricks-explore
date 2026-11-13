@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { NodeResizer, type Node, type NodeProps } from '@xyflow/react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import CodeMirror from '@uiw/react-codemirror'
+import { Prec } from '@codemirror/state'
+import { keymap, type EditorView } from '@codemirror/view'
 import { sql, type SQLConfig } from '@codemirror/lang-sql'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCancelQuery, useQueryStatus, useSubmitQueryAsync } from '../../api/hooks'
@@ -13,6 +15,8 @@ import { ChartTab } from '../chart/ChartTab'
 import { useSqlNamespace } from '../useSqlNamespace'
 import { windowRefCompletion } from '../linking/completion'
 import { remoteNameSource } from '../linking/remoteNames'
+import { flashExtension, flashRanges } from '../editor/flash'
+import { planRun, type RunMode } from '../editor/statements'
 
 export type QueryFlowNode = Node<Record<string, unknown>, 'query'>
 
@@ -39,55 +43,109 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
   const setEditorSplit = useCanvasStore((s) => s.setEditorSplit)
   const editorSplit = win.editor_split ?? DEFAULT_EDITOR_SPLIT
 
-  // Run state. `statementId` is set once the async submit returns.
+  // Run state. `statementId` is the statement most recently submitted, once the async submit returns.
   const [statementId, setStatementId] = useState<string | null>(null)
   const [tab, setTab] = useState<'results' | 'chart'>('results')
+  // A run of several statements: the SQL of each, and which one is running. Null for a single statement.
+  const [script, setScript] = useState<{ sqls: string[]; index: number } | null>(null)
+  // Set when a script stopped early, or when there was nothing to run.
+  const [notice, setNotice] = useState<string | null>(null)
   const submit = useSubmitQueryAsync()
   const status = useQueryStatus(statementId)
   const cancel = useCancelQuery()
+  const viewRef = useRef<EditorView | null>(null)
+  const advancedFor = useRef<string | null>(null)
 
   const st = status.data
   // Polling is handled by useQueryStatus (1s while PENDING or RUNNING).
   const polling = statementId !== null && !status.isError && (st === undefined || ACTIVE_STATES.has(st.state))
-  const running = submit.isPending || polling
+  const running = submit.isPending || polling || script !== null
   const canRun = !running && sqlText.trim() !== ''
-  const canCancel = polling && !cancel.isPending
+  const canCancel = (polling || script !== null) && !cancel.isPending && statementId !== null
 
   // Autocomplete tree from cached catalogs and objects. Recomputed when the cache fills in.
   const namespace = useSqlNamespace()
   const qc = useQueryClient()
   const profile = useUiStore((s) => s.connectedProfile)
+
+  // The key bindings are built once and call whatever the latest render set here.
+  const runners = useRef<Record<RunMode, () => void>>({ current: () => {}, all: () => {} })
+  useEffect(() => {
+    runners.current = { current: () => startRun('current'), all: () => startRun('all') }
+  })
+  // Mod-Enter must beat the default keymap, where it inserts a blank line.
+  const runKeys = useMemo(
+    () =>
+      Prec.highest(
+        keymap.of([
+          { key: 'Mod-Enter', run: () => (runners.current.current(), true) },
+          { key: 'Shift-Mod-Enter', run: () => (runners.current.all(), true) },
+        ]),
+      ),
+    [],
+  )
+
   // Inside an open `{{` the popup shows only window titles (an override replaces the SQL sources there).
   const extensions = useMemo(() => {
     const config: SQLConfig = { schema: namespace }
-    return [sql(config), windowRefCompletion(id, config, remoteNameSource(qc, profile))]
-  }, [namespace, id, qc, profile])
+    return [sql(config), windowRefCompletion(id, config, remoteNameSource(qc, profile)), runKeys, flashExtension]
+  }, [namespace, id, qc, profile, runKeys])
 
-  function run() {
-    // Read the store at click time so every window's SQL is current.
+  function submitSql(statement: string) {
+    // Read the store at submit time so every window's SQL is current.
     const body: QueryBody = {
-      sql: sqlText,
+      sql: statement,
       windows: queryWindowMap(useCanvasStore.getState().windows),
     }
     setStatementId(null)
     submit.mutate(body, { onSuccess: (res) => setStatementId(res.statement_id) })
   }
 
+  /** Runs the selection or the statement under the cursor ('current'), or every statement in order ('all'). */
+  function startRun(mode: RunMode) {
+    if (running || sqlText.trim() === '') return
+    const view = viewRef.current
+    const sel = view?.state.selection.main
+    const plan = planRun(view ? view.state.doc.toString() : sqlText, sel?.from ?? 0, sel?.to ?? 0, mode)
+    if (plan.sqls.length === 0) {
+      setNotice('Nothing to run.')
+      return
+    }
+    setNotice(null)
+    if (view) flashRanges(view, plan.ranges)
+    setScript(plan.sqls.length > 1 ? { sqls: plan.sqls, index: 0 } : null)
+    submitSql(plan.sqls[0])
+  }
+
   function cancelRun() {
+    // Dropping the script keeps the remaining statements from starting.
+    setScript(null)
     if (statementId !== null) cancel.mutate(statementId)
   }
 
-  function onEditorKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault()
-      if (canRun) run()
+  // Move a script along: the next statement once this one succeeded, or stop at the first failure.
+  useEffect(() => {
+    if (script === null || statementId === null || st === undefined) return
+    if (ACTIVE_STATES.has(st.state) || advancedFor.current === statementId) return
+    advancedFor.current = statementId
+    const n = script.sqls.length
+    if (st.state === 'SUCCEEDED' && script.index + 1 < n) {
+      setScript({ ...script, index: script.index + 1 })
+      submitSql(script.sqls[script.index + 1])
+      return
     }
-  }
+    if (st.state !== 'SUCCEEDED') setNotice(`Statement ${script.index + 1} of ${n} did not succeed. The rest did not run.`)
+    setScript(null)
+    // submitSql only reads the store and uses stable mutation handles, so it is left out of the dependencies.
+  }, [script, statementId, st])
 
+  const step = script ? `Statement ${script.index + 1} of ${script.sqls.length}: ` : ''
   let statusText = ''
-  if (submit.isPending) statusText = 'Submitting...'
-  else if (polling) statusText = `${st?.state ?? 'PENDING'}...`
+  if (submit.isPending) statusText = `${step}Submitting...`
+  else if (polling) statusText = `${step}${st?.state ?? 'PENDING'}...`
+  else if (script) statusText = `${step}Starting...`
   else if (st) statusText = st.state
+  if (!running && notice) statusText = notice
 
   const errorText =
     (submit.isError && submit.error.message) ||
@@ -132,8 +190,21 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
         <div className="qw-body">
           {/* The toolbar's blank space drags the window. The buttons stay nodrag so they still click. */}
           <div className="qw-toolbar">
-            <button className="nodrag" onClick={run} disabled={!canRun}>
+            <button
+              className="nodrag"
+              onClick={() => startRun('current')}
+              disabled={!canRun}
+              title="Run the selection, or the statement at the cursor (Cmd/Ctrl+Enter)"
+            >
               Run
+            </button>
+            <button
+              className="nodrag"
+              onClick={() => startRun('all')}
+              disabled={!canRun}
+              title="Run every statement in order; stops at the first error (Shift+Cmd/Ctrl+Enter)"
+            >
+              Run all
             </button>
             <button className="nodrag" onClick={cancelRun} disabled={!canCancel}>
               Cancel
@@ -153,14 +224,20 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
             }}
           >
             <Panel id="editor" minSize="90px">
-              <div className="qw-editor nowheel" onKeyDown={onEditorKeyDown}>
+              <div className="qw-editor nowheel">
                 <CodeMirror
                   value={sqlText}
                   extensions={extensions}
-                  onChange={(v) => setSql(id, v)}
+                  onChange={(v) => {
+                    setSql(id, v)
+                    setNotice(null)
+                  }}
+                  onCreateEditor={(view) => {
+                    viewRef.current = view
+                  }}
                   height="100%"
                   theme="light"
-                  placeholder="SELECT ...  (Ctrl+Enter to run)"
+                  placeholder="SELECT ...  (Cmd/Ctrl+Enter runs the statement or selection)"
                 />
               </div>
             </Panel>
