@@ -42,6 +42,8 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
   const removeWindow = useCanvasStore((s) => s.removeWindow)
   const resizeWindow = useCanvasStore((s) => s.resizeWindow)
   const setEditorSplit = useCanvasStore((s) => s.setEditorSplit)
+  const maximized = useCanvasStore((s) => s.maximizedId === win.id)
+  const setMaximized = useCanvasStore((s) => s.setMaximized)
   const editorSplit = win.editor_split ?? DEFAULT_EDITOR_SPLIT
 
   // Run state. `statementId` is the statement most recently submitted, once the async submit returns.
@@ -140,12 +142,14 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
     // submitSql only reads the store and uses stable mutation handles, so it is left out of the dependencies.
   }, [script, statementId, st])
 
+  const elapsed = useElapsed(running)
   const step = script ? `Statement ${script.index + 1} of ${script.sqls.length}: ` : ''
   let statusText = ''
   if (submit.isPending) statusText = `${step}Submitting...`
   else if (polling) statusText = `${step}${st?.state ?? 'PENDING'}...`
   else if (script) statusText = `${step}Starting...`
   else if (st) statusText = st.state
+  if (running && elapsed !== null) statusText += ` ${formatElapsed(elapsed)}`
   if (!running && notice) statusText = notice
 
   const errorText =
@@ -157,7 +161,7 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
   return (
     <div className={`qw-node${selected ? ' selected' : ''}`}>
       <NodeResizer
-        isVisible={selected && !collapsed}
+        isVisible={selected && !collapsed && !maximized}
         minWidth={360}
         minHeight={220}
         onResize={(_, p) => resizeWindow(id, { x: p.x, y: p.y }, { w: p.width, h: p.height })}
@@ -177,6 +181,15 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
           {collapsed ? '▸' : '▾'}
         </button>
         <TitleField id={id} title={win.title} />
+        <button
+          className="qw-icon nodrag"
+          onClick={() => setMaximized(maximized ? null : id)}
+          aria-label={maximized ? 'Restore window size' : 'Maximize window'}
+          aria-pressed={maximized}
+          title={maximized ? 'Restore size' : 'Maximize to fill the canvas'}
+        >
+          {maximized ? '⤡' : '⤢'}
+        </button>
         <button
           className="qw-icon nodrag"
           onClick={() => removeWindow(id)}
@@ -280,6 +293,29 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
       )}
     </div>
   )
+}
+
+/** Milliseconds since `active` last turned true, refreshed several times a second. Null when not active. */
+function useElapsed(active: boolean): number | null {
+  const [elapsed, setElapsed] = useState<number | null>(null)
+  useEffect(() => {
+    if (!active) {
+      setElapsed(null)
+      return
+    }
+    const t0 = Date.now()
+    setElapsed(0)
+    const timer = window.setInterval(() => setElapsed(Date.now() - t0), 200)
+    return () => window.clearInterval(timer)
+  }, [active])
+  return elapsed
+}
+
+/** 0.0 s under a minute, then 1m 05s. */
+function formatElapsed(ms: number): string {
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(1)} s`
+  return `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, '0')}s`
 }
 
 /** Inline-editable title. Titles must be unique on the canvas and cannot contain braces. */

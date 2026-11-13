@@ -1133,3 +1133,23 @@ tr.stale td {
   font-size: 12px;
   white-space: nowrap;
 }
+
+/* ---- Canvas layout ---------------------------------------------------------- */
+
+/* The zoom buttons are a small strip in the corner and fade until pointed at, so they hide less of a window. */
+.react-flow__controls.canvas-controls {
+  opacity: 0.55;
+}
+
+.react-flow__controls.canvas-controls:hover {
+  opacity: 1;
+}
+
+.react-flow__panel button[aria-pressed='true'] {
+  background: #ddf4ff;
+  border-color: var(--accent);
+}
+
+.qw-icon[aria-pressed='true'] {
+  background: #ddf4ff;
+}

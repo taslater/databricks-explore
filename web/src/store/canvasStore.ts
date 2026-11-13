@@ -19,7 +19,9 @@ export interface CanvasSize {
 export const DEFAULT_VIEWPORT: CanvasViewport = { x: 0, y: 0, zoom: 1 }
 /** Percent of a query window's body that the SQL editor takes when the window has no saved split. */
 export const DEFAULT_EDITOR_SPLIT = 40
-export const DEFAULT_QUERY_SIZE: CanvasSize = { w: 520, h: 360 }
+/** The split a newly added query window starts with, so the results get most of the space. */
+export const NEW_WINDOW_EDITOR_SPLIT = 30
+export const DEFAULT_QUERY_SIZE: CanvasSize = { w: 760, h: 520 }
 export const DEFAULT_NOTE_SIZE: CanvasSize = { w: 320, h: 220 }
 export const DEFAULT_TABLE_SIZE: CanvasSize = { w: 320, h: 300 }
 
@@ -28,6 +30,9 @@ interface CanvasState {
   windows: CanvasWindow[]
   /** UI only. Not saved. */
   selectedId: string | null
+  /** UI only. Not saved. The window shown filling the canvas, or null. */
+  maximizedId: string | null
+  setMaximized: (id: string | null) => void
   /** Adds a query window with a new id and a unique query_N title. Returns the id. */
   addQueryWindow: (position: CanvasPoint) => string
   /** Adds a query window whose SQL is `sql`. Returns the id. */
@@ -121,6 +126,8 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
   viewport: DEFAULT_VIEWPORT,
   windows: [],
   selectedId: null,
+  maximizedId: null,
+  setMaximized: (maximizedId) => set({ maximizedId }),
 
   addQueryWindow: (position) => {
     const { windows } = get()
@@ -133,6 +140,7 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
       size: { ...DEFAULT_QUERY_SIZE },
       sql: '',
       collapsed: false,
+      editor_split: NEW_WINDOW_EDITOR_SPLIT,
     }
     set({ windows: [...windows, win], selectedId: id })
     return id
@@ -219,10 +227,11 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
     }),
 
   removeWindow: (id) => {
-    const { windows, selectedId } = get()
+    const { windows, selectedId, maximizedId } = get()
     set({
       windows: windows.filter((w) => w.id !== id),
       selectedId: selectedId === id ? null : selectedId,
+      maximizedId: maximizedId === id ? null : maximizedId,
     })
   },
 
@@ -238,5 +247,6 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
       viewport: { x: next.viewport.x, y: next.viewport.y, zoom: next.viewport.zoom },
       windows: next.windows,
       selectedId: null,
+      maximizedId: null,
     }),
 }))

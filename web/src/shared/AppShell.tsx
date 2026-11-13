@@ -13,6 +13,7 @@ export function AppShell() {
   const pickerCollapsed = useUiStore((s) => s.pickerCollapsed)
   const setPickerCollapsed = useUiStore((s) => s.setPickerCollapsed)
   const pickerRef = usePanelRef()
+  const detailsRef = usePanelRef()
 
   // The store is the source of truth. Push changes into the panel; dragging syncs back via onResize.
   useEffect(() => {
@@ -21,6 +22,14 @@ export function AppShell() {
     if (pickerCollapsed) panel.collapse()
     else panel.expand()
   }, [pickerCollapsed, pickerRef])
+
+  // The canvas has nothing to show in Details, so it gives the space back. The graph brings it back.
+  useEffect(() => {
+    const panel = detailsRef.current
+    if (!panel) return
+    if (view === 'canvas') panel.collapse()
+    else panel.expand()
+  }, [view, detailsRef])
 
   return (
     <div className="shell">
@@ -54,7 +63,7 @@ export function AppShell() {
           </div>
         </Panel>
         <Separator className="resize-handle" />
-        <Panel id="details" defaultSize="22%" minSize="10%">
+        <Panel id="details" panelRef={detailsRef} defaultSize="22%" minSize="10%" collapsible collapsedSize="0%">
           <DetailsPanel />
         </Panel>
       </Group>
