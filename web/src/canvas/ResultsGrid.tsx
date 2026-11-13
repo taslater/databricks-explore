@@ -21,6 +21,10 @@ const resultsTheme = themeQuartz.withParams({
 
 type Row = Record<string, string | null>
 
+// Passed to AgGridReact on every render, so it must be one stable object. An inline literal
+// is a new object each render, which makes the grid re-apply it and can loop (React error #185).
+const DEFAULT_COL_DEF: ColDef<Row> = { sortable: true, filter: true, resizable: true, minWidth: 80 }
+
 /**
  * Rows are positional arrays from the API. Each cell is keyed `c<index>` so column
  * names that contain dots are not read as nested paths.
@@ -47,7 +51,7 @@ export function ResultsGrid({ result }: { result: QueryResult }) {
         theme={resultsTheme}
         columnDefs={columnDefs}
         rowData={rowData}
-        defaultColDef={{ sortable: true, filter: true, resizable: true, minWidth: 80 }}
+        defaultColDef={DEFAULT_COL_DEF}
       />
     </div>
   )

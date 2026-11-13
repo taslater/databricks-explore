@@ -19,12 +19,13 @@ import { deriveLinks } from './persistence/canvasFile'
 import { QueryWindow, type QueryFlowNode } from './nodes/QueryWindow'
 import { NoteWindow, type NoteFlowNode } from './nodes/NoteWindow'
 import { TableCard, type TableFlowNode } from './nodes/TableCard'
+import { withBoundary } from './nodes/withBoundary'
 import { CanvasToolbar } from './CanvasToolbar'
 import { useQueryTables } from './linking/useQueryTables'
 import { tableEdges } from './linking/tableEdges'
 
-// Defined outside the component so React Flow sees a stable object.
-const nodeTypes = { query: QueryWindow, note: NoteWindow, table: TableCard }
+// Defined outside the component so React Flow sees a stable object. Each type has its own error boundary.
+const nodeTypes = { query: withBoundary(QueryWindow), note: withBoundary(NoteWindow), table: withBoundary(TableCard) }
 
 type CanvasFlowNode = QueryFlowNode | NoteFlowNode | TableFlowNode
 

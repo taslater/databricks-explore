@@ -956,3 +956,39 @@ tr.stale td {
   color: var(--muted, #57606a);
   white-space: nowrap;
 }
+
+/* ---- Error boundaries ----------------------------------------------------- */
+
+.error-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--error);
+  background: #fff5f5;
+  color: var(--error);
+  user-select: text;
+}
+
+.error-card.qw-node {
+  height: 100%;
+  overflow: auto;
+}
+
+.app-error {
+  margin: 24px;
+  max-width: 720px;
+}
+
+.error-card-message {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  color: #1f2328;
+}
+
+.error-card-actions {
+  display: flex;
+  gap: 8px;
+}
