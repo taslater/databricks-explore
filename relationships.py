@@ -136,6 +136,13 @@ class EdgePatch(BaseModel):
     note: Optional[str] = None
 
 
+class BulkStatus(BaseModel):
+    """Body of POST /api/relationships/bulk: one status for several stored edges."""
+    model_config = ConfigDict(extra="forbid")
+    ids: Annotated[list[Annotated[str, Field(min_length=1)]], Field(min_length=1, max_length=1000)]
+    status: Literal["proposed", "accepted", "rejected"]
+
+
 class Overlay(BaseModel):
     """A note on a derived edge, in the export file."""
     model_config = ConfigDict(extra="forbid")
@@ -186,6 +193,23 @@ def parse_patch(data) -> EdgePatch:
     if patch.status is None and patch.note is None:
         raise RelationshipInvalid("(root): give a status, a note, or both")
     return patch
+
+
+def parse_bulk(data) -> BulkStatus:
+    """Validate a bulk status body. Derived ids are refused: only stored edges have a status."""
+    body = _parse(BulkStatus, data)
+    for i, rid in enumerate(body.ids):
+        if not rid.startswith("e_"):
+            raise RelationshipInvalid(f"ids[{i}]: only stored edges (e_...) have a status")
+    return body
+
+
+def check_statuses(statuses):
+    """Validate the status filter of the suggestions list. Returns it as a tuple."""
+    bad = [s for s in statuses if s not in STORED_STATUSES]
+    if bad or not statuses:
+        raise RelationshipInvalid(f"status: must be some of {', '.join(STORED_STATUSES)}")
+    return tuple(statuses)
 
 
 def parse_export(data) -> ExportFile:
@@ -289,6 +313,32 @@ def derive_edges(relations, times=None):
     return out
 
 
+def derive_column_lineage(rows, fetched_at=None):
+    """Column-level lineage edges from system.access.column_lineage rows, with status 'derived'.
+
+    Each row has source_table_full_name, source_column_name, target_table_full_name, target_column_name and
+    last_seen. A row that does not name two valid columns (a path-based source, a self loop) is skipped.
+    """
+    prov = Provenance(origin="unity_catalog:column_lineage", fetched_at=fetched_at)
+    stamp = fetched_at or dbx.now()
+    out, seen = [], set()
+    for r in rows:
+        try:
+            source = Endpoint(table=r["source_table_full_name"], column=r["source_column_name"])
+            target = Endpoint(table=r["target_table_full_name"], column=r["target_column_name"])
+            _check_endpoints(source, target, "target")
+        except (ValidationError, RelationshipInvalid, KeyError, TypeError):
+            continue
+        rid = derived_id("lineage", source, target)
+        if rid in seen:
+            continue
+        seen.add(rid)
+        out.append(Edge(id=rid, kind="lineage", source=source, target=target, provenance=prov,
+                        evidence=Evidence(last_seen=r.get("last_seen")), status="derived",
+                        created_at=stamp, updated_at=stamp))
+    return out
+
+
 # ---------- rollup ----------
 
 _PRIORITY = ("accepted", "proposed", "derived", "rejected")
@@ -304,6 +354,13 @@ def _merge_evidence(items):
     users = [i.users for i in items if i.users is not None]
     return Evidence(runs=sum(runs) if runs else None, users=max(users) if users else None,
                     first_seen=min(seen) if seen else None, last_seen=max(seen) if seen else None, sample_refs=refs)
+
+
+def _add_evidence(old, new):
+    """Evidence of the same edge from two mining runs: runs added, users the larger, newest sample refs first (5)."""
+    both = _merge_evidence([old, new])
+    both.sample_refs = list(dict.fromkeys([*new.sample_refs, *old.sample_refs]))[:5]
+    return both
 
 
 def rollup(edges, notes=None):
@@ -500,6 +557,63 @@ class Store:
         with self.conn:
             self.conn.execute("DELETE FROM edge WHERE id=?", (rid,))
 
+    def upsert_mined(self, edges, replace=False):
+        """Store edges mined from activity in one transaction. Returns (created, updated).
+
+        A new edge is stored as given (status proposed). An existing one keeps its status, note and id, so an
+        accepted or rejected edge stays that way, and takes the new evidence: added to what it had, or in place of it
+        when `replace` is set (a re-mine of the whole window). Added evidence sums runs, keeps the larger user count
+        (users are only counted, never kept, so across runs the count is a lower bound), and spans first to last seen.
+        """
+        created = updated = 0
+        with self.conn:
+            for edge in edges:
+                check_storable(edge)
+                _check_endpoints(edge.source, edge.target, "target")
+                row = self._by_key(key_of(edge.kind, edge.source, edge.target, edge.directed))
+                if not row:
+                    self._upsert(edge)
+                    created += 1
+                    continue
+                old = self._edge(row)
+                evidence = edge.evidence if replace or not old.evidence else _add_evidence(old.evidence, edge.evidence)
+                self.conn.execute("UPDATE edge SET provenance=?, evidence=?, updated_at=? WHERE id=?",
+                                  (edge.provenance.model_dump_json(), evidence.model_dump_json() if evidence else None,
+                                   dbx.now(), row["id"]))
+                updated += 1
+        return created, updated
+
+    def suggestions(self, statuses=("proposed",), kind="join_mined", table=None):
+        """Stored edges of one kind with one of these statuses, most evidence first (runs, users, last seen)."""
+        marks = ",".join("?" * len(statuses))
+        sql = f"SELECT * FROM edge WHERE kind=? AND status IN ({marks})"
+        args = [kind, *statuses]
+        if table:
+            sql += " AND (src_table=? OR tgt_table=?)"
+            args += [table, table]
+        edges = [self._edge(r) for r in self.conn.execute(sql, args)]
+        edges.sort(key=lambda e: e.id)
+        edges.sort(key=lambda e: (e.evidence.last_seen if e.evidence else None) or "", reverse=True)
+        edges.sort(key=lambda e: ((e.evidence.runs or 0, e.evidence.users or 0) if e.evidence else (0, 0)), reverse=True)
+        return edges
+
+    def status_counts(self, kind="join_mined"):
+        """How many stored edges of one kind have each status."""
+        rows = self.conn.execute("SELECT status, COUNT(*) AS n FROM edge WHERE kind=? GROUP BY status", (kind,))
+        return {s: 0 for s in STORED_STATUSES} | {r["status"]: r["n"] for r in rows}
+
+    def set_status_many(self, ids, status):
+        """Set one status on several stored edges, all or none. Returns how many. Unknown ids are RelationshipNotFound."""
+        if status not in STORED_STATUSES:
+            raise RelationshipInvalid(f'status: "{status}" is not a stored status (use proposed, accepted or rejected)')
+        ids = list(dict.fromkeys(ids))
+        with self.conn:
+            for rid in ids:
+                self.get(rid)
+            self.conn.executemany("UPDATE edge SET status=?, updated_at=? WHERE id=?",
+                                  [(status, dbx.now(), rid) for rid in ids])
+        return len(ids)
+
     def all_edges(self):
         """Every stored edge, oldest first."""
         return [self._edge(r) for r in self.conn.execute("SELECT * FROM edge ORDER BY created_at, id")]
@@ -572,10 +686,11 @@ class Store:
 
 # ---------- the unified read ----------
 
-def unified(store, table, relations=None, times=None, level="table"):
+def unified(store, table, relations=None, times=None, level="table", column_lineage=None):
     """Derived edges (from `relations`) plus stored edges for one table, with notes on derived ones applied.
 
-    level "table" rolls column edges up to table edges; "column" returns each edge as it is.
+    level "table" rolls column edges up to table edges; "column" returns each edge as it is, and adds the column
+    lineage rows in `column_lineage` ({"fetched_at", "data": [rows]}, as Explorer.column_lineage returns it).
     Returns {"table", "level", "nodes", "edges", "errors"}; nodes and errors pass through from `relations`.
     """
     if level not in ("table", "column"):
@@ -583,6 +698,8 @@ def unified(store, table, relations=None, times=None, level="table"):
     relations = relations or {"nodes": [], "edges": [], "errors": []}
     notes = store.derived_notes()
     derived = derive_edges(relations, times)
+    if level == "column" and column_lineage:
+        derived += derive_column_lineage(column_lineage.get("data") or [], column_lineage.get("fetched_at"))
     for e in derived:
         e.note = notes.get(key_of(e.kind, e.source, e.target), "")
     stored = store.edges_for(table)
@@ -593,7 +710,7 @@ def unified(store, table, relations=None, times=None, level="table"):
     if not any(n["id"] == table for n in nodes):
         nodes.insert(0, {"id": table, "label": table.split(".")[-1], "kind": "table", "focus": True})
         known.add(table)
-    for e in stored:
+    for e in [*stored, *(d for d in derived if d.provenance.origin.endswith(":column_lineage"))]:
         for end in (e.source, e.target):
             if end.table not in known:
                 known.add(end.table)

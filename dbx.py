@@ -19,6 +19,17 @@ CACHE, LOGS, DIAGRAMS = DATA / "cache", DATA / "logs", DATA / "diagrams"
 for d in (CACHE, LOGS, DIAGRAMS):
     d.mkdir(parents=True, exist_ok=True)
 
+# Column lineage for one table, either end. One row per column pair; event_time is reduced to the latest.
+COLUMN_LINEAGE_SQL = """SELECT source_table_full_name, source_column_name, target_table_full_name, target_column_name,
+       max(event_time) AS last_seen
+FROM system.access.column_lineage
+WHERE (target_table_full_name = :t OR source_table_full_name = :t)
+  AND source_table_full_name IS NOT NULL AND target_table_full_name IS NOT NULL
+  AND source_column_name IS NOT NULL AND target_column_name IS NOT NULL
+GROUP BY 1, 2, 3, 4
+ORDER BY last_seen DESC
+LIMIT 5000"""
+
 # What the lineage API returns per upstream/downstream, besides tableInfo
 ENTITY_KEYS = {"jobInfos": "job", "notebookInfos": "notebook", "pipelineInfos": "pipeline",
                "dashboardV3Infos": "dashboard", "queryInfos": "query", "fileInfo": "file"}
@@ -272,6 +283,19 @@ class Explorer:
                                         body={"table_name": full_name, "include_entity_lineage": True})
         return self._cached(f"{self._dir(full_name)}/lineage/{safe(full_name)}.json",
                             lambda: self._call("lineage-tracking/table-lineage", fetch, full_name=full_name), refresh)
+
+    def column_lineage(self, full_name, refresh=False):
+        """Column-level lineage rows touching one table, from system.access.column_lineage (one warehouse query).
+
+        Cached like the other metadata, and a cached copy is returned even when no warehouse is selected.
+        Raises RuntimeError without a warehouse and no cache, and whatever the warehouse says (no access) otherwise.
+        """
+        def fetch():
+            if not self.warehouse_id:
+                raise RuntimeError("Column lineage is read with a SQL warehouse (system.access.column_lineage). "
+                                   "Pick one.")
+            return self.sql(COLUMN_LINEAGE_SQL, t=full_name)
+        return self._cached(f"{self._dir(full_name)}/column_lineage/{safe(full_name)}.json", fetch, refresh)
 
     # ---- edge details: what produced a lineage link, and when ----
     def _link(self, kind, info):
