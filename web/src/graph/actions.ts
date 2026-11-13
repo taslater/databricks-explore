@@ -4,13 +4,27 @@ import { useMemo } from 'react'
 import * as api from '../api/client'
 import { useCanvasStore } from '../store/canvasStore'
 import { useUiStore } from '../store/uiStore'
-import type { CanvasWindow } from '../api/types'
+import type { CanvasWindow, GraphEdge } from '../api/types'
 import { schemaOf } from './format'
 import { useGraphStore } from './graphStore'
 import { patchIds, toRelations } from './relationships'
 
 export function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
+}
+
+/**
+ * The server's current version of an edge on screen (status, note, provenance), or undefined when it is gone.
+ * An edge restored from a saved diagram carries whatever note it had when saved, or none at all, so the
+ * details panel reads this before it lets the user edit. The edge is looked up from either end, because
+ * a view dependency only shows up when its view is read.
+ */
+export async function fetchCurrentEdge(info: GraphEdge): Promise<GraphEdge | undefined> {
+  for (const table of [info.source, info.target]) {
+    const found = toRelations(await api.getRelationships(table)).edges.find((e) => e.id === info.id)
+    if (found) return found
+  }
+  return undefined
 }
 
 /** Gap between the right edge of the canvas and a card sent from the graph. */

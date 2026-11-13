@@ -1,8 +1,8 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import * as api from '../api/client'
 import { useEdge, useObject } from '../api/hooks'
 import type { EdgeFlow, GraphEdge, Producer, RelationshipStatus } from '../api/types'
-import { messageOf, sendToCanvas, useGraphActions } from './actions'
+import { fetchCurrentEdge, messageOf, sendToCanvas, useGraphActions } from './actions'
 import { DERIVED_KINDS, KIND_LABEL, KIND_STYLE, STORED_KINDS } from './edgeStyles'
 import { ageDays, fmtAge, lastPart } from './format'
 import { DEFAULT_STALE_DAYS, useGraphStore } from './graphStore'
@@ -285,7 +285,33 @@ function EdgeReview({ info }: { info: GraphEdge }) {
   const [note, setNote] = useState(info.note ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The note box stays disabled until the server's current note is in, so saving never blanks one that
+  // an edge restored from an old diagram did not carry.
+  const [loaded, setLoaded] = useState(false)
   const status: RelationshipStatus = info.status ?? 'derived'
+  const id = info.id
+
+  useEffect(() => {
+    let live = true
+    const current = useGraphStore.getState().edges.find((e) => e.id === id)?.data?.info
+    if (!current) return
+    fetchCurrentEdge(current)
+      .then((fresh) => {
+        if (!live) return
+        if (fresh) {
+          const { status, note, provenance, evidence, directed, patch_ids } = fresh
+          useGraphStore.getState().updateEdgeInfo(id, { status, note, provenance, evidence, directed, patch_ids })
+          setNote(note ?? '')
+        }
+        setLoaded(true)
+      })
+      .catch((e) => {
+        if (live) setError(messageOf(e))
+      })
+    return () => {
+      live = false
+    }
+  }, [id])
   const stored = canReview(info)
 
   async function send(body: { status: 'accepted' | 'rejected' } | { note: string }) {
@@ -322,10 +348,11 @@ function EdgeReview({ info }: { info: GraphEdge }) {
         value={note}
         onChange={(e) => setNote(e.target.value)}
         aria-label="Note"
+        disabled={!loaded}
         placeholder={stored ? 'Why this edge is right or wrong' : 'A note on this derived edge'}
       />
       <div className="btns">
-        <button disabled={busy || note === (info.note ?? '')} onClick={() => void send({ note })}>
+        <button disabled={busy || !loaded || note === (info.note ?? '')} onClick={() => void send({ note })}>
           Save note
         </button>
       </div>
