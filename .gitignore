@@ -9,3 +9,9 @@ web/dist/
 # Everything the app writes: cache, logs, canvases, diagrams, screenshots.
 # It is workspace metadata and never goes into git.
 data/
+
+# Demo mode (python app.py --demo) writes here, apart from real data.
+data-demo/
+
+# Agent worktrees.
+.claude/worktrees/

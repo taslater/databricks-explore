@@ -6,9 +6,15 @@ from pathlib import Path
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.sql import StatementParameterListItem, StatementState
 
+import demo
 import sqltools
 
-DATA = Path(__file__).parent / "data"
+
+DEMO = os.environ.get("EXPLORER_DEMO") == "1"  # fake workspace with invented data (python app.py --demo)
+# Everything the app writes lives here. Demo mode gets its own folder so demo canvases never mix with real ones.
+DATA = Path(os.environ.get("EXPLORER_DATA_DIR") or Path(__file__).parent / ("data-demo" if DEMO else "data"))
+if DEMO:
+    WorkspaceClient = demo.FakeWorkspaceClient  # the one hook: Explorer builds its client from this name
 CACHE, LOGS, DIAGRAMS = DATA / "cache", DATA / "logs", DATA / "diagrams"
 for d in (CACHE, LOGS, DIAGRAMS):
     d.mkdir(parents=True, exist_ok=True)
@@ -43,6 +49,8 @@ def cfg_path():
 
 
 def list_profiles():
+    if DEMO:
+        return demo.PROFILES
     cp = configparser.ConfigParser()
     cp.read(cfg_path())
     out = []

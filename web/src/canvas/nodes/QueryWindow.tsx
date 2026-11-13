@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { NodeResizer, type Node, type NodeProps } from '@xyflow/react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import CodeMirror from '@uiw/react-codemirror'
+import { Prec } from '@codemirror/state'
+import { keymap, type EditorView } from '@codemirror/view'
 import { sql, type SQLConfig } from '@codemirror/lang-sql'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCancelQuery, useQueryStatus, useSubmitQueryAsync } from '../../api/hooks'
@@ -9,10 +11,13 @@ import type { CanvasWindow, QueryBody, QueryStatus, StatementState } from '../..
 import { DEFAULT_EDITOR_SPLIT, queryWindowMap, titleError, useCanvasStore } from '../../store/canvasStore'
 import { useUiStore } from '../../store/uiStore'
 import { ResultsGrid } from '../ResultsGrid'
+import { CopyButton } from '../grid/CopyButton'
 import { ChartTab } from '../chart/ChartTab'
 import { useSqlNamespace } from '../useSqlNamespace'
 import { windowRefCompletion } from '../linking/completion'
 import { remoteNameSource } from '../linking/remoteNames'
+import { flashExtension, flashRanges } from '../editor/flash'
+import { planRun, type RunMode } from '../editor/statements'
 
 export type QueryFlowNode = Node<Record<string, unknown>, 'query'>
 
@@ -37,57 +42,115 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
   const removeWindow = useCanvasStore((s) => s.removeWindow)
   const resizeWindow = useCanvasStore((s) => s.resizeWindow)
   const setEditorSplit = useCanvasStore((s) => s.setEditorSplit)
+  const maximized = useCanvasStore((s) => s.maximizedId === win.id)
+  const setMaximized = useCanvasStore((s) => s.setMaximized)
   const editorSplit = win.editor_split ?? DEFAULT_EDITOR_SPLIT
 
-  // Run state. `statementId` is set once the async submit returns.
+  // Run state. `statementId` is the statement most recently submitted, once the async submit returns.
   const [statementId, setStatementId] = useState<string | null>(null)
   const [tab, setTab] = useState<'results' | 'chart'>('results')
+  // A run of several statements: the SQL of each, and which one is running. Null for a single statement.
+  const [script, setScript] = useState<{ sqls: string[]; index: number } | null>(null)
+  // Set when a script stopped early, or when there was nothing to run.
+  const [notice, setNotice] = useState<string | null>(null)
   const submit = useSubmitQueryAsync()
   const status = useQueryStatus(statementId)
   const cancel = useCancelQuery()
+  const viewRef = useRef<EditorView | null>(null)
+  const advancedFor = useRef<string | null>(null)
 
   const st = status.data
   // Polling is handled by useQueryStatus (1s while PENDING or RUNNING).
   const polling = statementId !== null && !status.isError && (st === undefined || ACTIVE_STATES.has(st.state))
-  const running = submit.isPending || polling
+  const running = submit.isPending || polling || script !== null
   const canRun = !running && sqlText.trim() !== ''
-  const canCancel = polling && !cancel.isPending
+  const canCancel = (polling || script !== null) && !cancel.isPending && statementId !== null
 
   // Autocomplete tree from cached catalogs and objects. Recomputed when the cache fills in.
   const namespace = useSqlNamespace()
   const qc = useQueryClient()
   const profile = useUiStore((s) => s.connectedProfile)
+
+  // The key bindings are built once and call whatever the latest render set here.
+  const runners = useRef<Record<RunMode, () => void>>({ current: () => {}, all: () => {} })
+  useEffect(() => {
+    runners.current = { current: () => startRun('current'), all: () => startRun('all') }
+  })
+  // Mod-Enter must beat the default keymap, where it inserts a blank line.
+  const runKeys = useMemo(
+    () =>
+      Prec.highest(
+        keymap.of([
+          { key: 'Mod-Enter', run: () => (runners.current.current(), true) },
+          { key: 'Shift-Mod-Enter', run: () => (runners.current.all(), true) },
+        ]),
+      ),
+    [],
+  )
+
   // Inside an open `{{` the popup shows only window titles (an override replaces the SQL sources there).
   const extensions = useMemo(() => {
     const config: SQLConfig = { schema: namespace }
-    return [sql(config), windowRefCompletion(id, config, remoteNameSource(qc, profile))]
-  }, [namespace, id, qc, profile])
+    return [sql(config), windowRefCompletion(id, config, remoteNameSource(qc, profile)), runKeys, flashExtension]
+  }, [namespace, id, qc, profile, runKeys])
 
-  function run() {
-    // Read the store at click time so every window's SQL is current.
+  function submitSql(statement: string) {
+    // Read the store at submit time so every window's SQL is current.
     const body: QueryBody = {
-      sql: sqlText,
+      sql: statement,
       windows: queryWindowMap(useCanvasStore.getState().windows),
     }
     setStatementId(null)
     submit.mutate(body, { onSuccess: (res) => setStatementId(res.statement_id) })
   }
 
+  /** Runs the selection or the statement under the cursor ('current'), or every statement in order ('all'). */
+  function startRun(mode: RunMode) {
+    if (running || sqlText.trim() === '') return
+    const view = viewRef.current
+    const sel = view?.state.selection.main
+    const plan = planRun(view ? view.state.doc.toString() : sqlText, sel?.from ?? 0, sel?.to ?? 0, mode)
+    if (plan.sqls.length === 0) {
+      setNotice('Nothing to run.')
+      return
+    }
+    setNotice(null)
+    if (view) flashRanges(view, plan.ranges)
+    setScript(plan.sqls.length > 1 ? { sqls: plan.sqls, index: 0 } : null)
+    submitSql(plan.sqls[0])
+  }
+
   function cancelRun() {
+    // Dropping the script keeps the remaining statements from starting.
+    setScript(null)
     if (statementId !== null) cancel.mutate(statementId)
   }
 
-  function onEditorKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault()
-      if (canRun) run()
+  // Move a script along: the next statement once this one succeeded, or stop at the first failure.
+  useEffect(() => {
+    if (script === null || statementId === null || st === undefined) return
+    if (ACTIVE_STATES.has(st.state) || advancedFor.current === statementId) return
+    advancedFor.current = statementId
+    const n = script.sqls.length
+    if (st.state === 'SUCCEEDED' && script.index + 1 < n) {
+      setScript({ ...script, index: script.index + 1 })
+      submitSql(script.sqls[script.index + 1])
+      return
     }
-  }
+    if (st.state !== 'SUCCEEDED') setNotice(`Statement ${script.index + 1} of ${n} did not succeed. The rest did not run.`)
+    setScript(null)
+    // submitSql only reads the store and uses stable mutation handles, so it is left out of the dependencies.
+  }, [script, statementId, st])
 
+  const elapsed = useElapsed(running)
+  const step = script ? `Statement ${script.index + 1} of ${script.sqls.length}: ` : ''
   let statusText = ''
-  if (submit.isPending) statusText = 'Submitting...'
-  else if (polling) statusText = `${st?.state ?? 'PENDING'}...`
+  if (submit.isPending) statusText = `${step}Submitting...`
+  else if (polling) statusText = `${step}${st?.state ?? 'PENDING'}...`
+  else if (script) statusText = `${step}Starting...`
   else if (st) statusText = st.state
+  if (running && elapsed !== null) statusText += ` ${formatElapsed(elapsed)}`
+  if (!running && notice) statusText = notice
 
   const errorText =
     (submit.isError && submit.error.message) ||
@@ -98,7 +161,7 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
   return (
     <div className={`qw-node${selected ? ' selected' : ''}`}>
       <NodeResizer
-        isVisible={selected && !collapsed}
+        isVisible={selected && !collapsed && !maximized}
         minWidth={360}
         minHeight={220}
         onResize={(_, p) => resizeWindow(id, { x: p.x, y: p.y }, { w: p.width, h: p.height })}
@@ -120,6 +183,15 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
         <TitleField id={id} title={win.title} />
         <button
           className="qw-icon nodrag"
+          onClick={() => setMaximized(maximized ? null : id)}
+          aria-label={maximized ? 'Restore window size' : 'Maximize window'}
+          aria-pressed={maximized}
+          title={maximized ? 'Restore size' : 'Maximize to fill the canvas'}
+        >
+          {maximized ? '⤡' : '⤢'}
+        </button>
+        <button
+          className="qw-icon nodrag"
           onClick={() => removeWindow(id)}
           aria-label="Delete window"
           title="Delete window"
@@ -132,8 +204,21 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
         <div className="qw-body">
           {/* The toolbar's blank space drags the window. The buttons stay nodrag so they still click. */}
           <div className="qw-toolbar">
-            <button className="nodrag" onClick={run} disabled={!canRun}>
+            <button
+              className="nodrag"
+              onClick={() => startRun('current')}
+              disabled={!canRun}
+              title="Run the selection, or the statement at the cursor (Cmd/Ctrl+Enter)"
+            >
               Run
+            </button>
+            <button
+              className="nodrag"
+              onClick={() => startRun('all')}
+              disabled={!canRun}
+              title="Run every statement in order; stops at the first error (Shift+Cmd/Ctrl+Enter)"
+            >
+              Run all
             </button>
             <button className="nodrag" onClick={cancelRun} disabled={!canCancel}>
               Cancel
@@ -153,14 +238,20 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
             }}
           >
             <Panel id="editor" minSize="90px">
-              <div className="qw-editor nowheel" onKeyDown={onEditorKeyDown}>
+              <div className="qw-editor nowheel">
                 <CodeMirror
                   value={sqlText}
                   extensions={extensions}
-                  onChange={(v) => setSql(id, v)}
+                  onChange={(v) => {
+                    setSql(id, v)
+                    setNotice(null)
+                  }}
+                  onCreateEditor={(view) => {
+                    viewRef.current = view
+                  }}
                   height="100%"
                   theme="light"
-                  placeholder="SELECT ...  (Ctrl+Enter to run)"
+                  placeholder="SELECT ...  (Cmd/Ctrl+Enter runs the statement or selection)"
                 />
               </div>
             </Panel>
@@ -204,6 +295,29 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
   )
 }
 
+/** Milliseconds since `active` last turned true, refreshed several times a second. Null when not active. */
+function useElapsed(active: boolean): number | null {
+  const [elapsed, setElapsed] = useState<number | null>(null)
+  useEffect(() => {
+    if (!active) {
+      setElapsed(null)
+      return
+    }
+    const t0 = Date.now()
+    setElapsed(0)
+    const timer = window.setInterval(() => setElapsed(Date.now() - t0), 200)
+    return () => window.clearInterval(timer)
+  }, [active])
+  return elapsed
+}
+
+/** 0.0 s under a minute, then 1m 05s. */
+function formatElapsed(ms: number): string {
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(1)} s`
+  return `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, '0')}s`
+}
+
 /** Inline-editable title. Titles must be unique on the canvas and cannot contain braces. */
 function TitleField({ id, title }: { id: string; title: string }) {
   const windows = useCanvasStore((s) => s.windows)
@@ -237,8 +351,11 @@ function TitleField({ id, title }: { id: string; title: string }) {
 }
 
 function Summary({ rowCount, truncated, ms }: { rowCount: number; truncated: boolean | null; ms: number | null }) {
+  const text = `${rowCount} ${rowCount === 1 ? 'row' : 'rows'}${truncated === true ? ' (truncated)' : ''}, ${
+    ms === null ? 'time n/a' : `${ms} ms`
+  }`
   return (
-    <span className="qw-summary">
+    <span className="qw-summary nodrag">
       {rowCount} {rowCount === 1 ? 'row' : 'rows'}
       {truncated === true && (
         <span className="qw-badge" title="More rows exist than the row limit. Only the first rows are shown.">
@@ -246,6 +363,7 @@ function Summary({ rowCount, truncated, ms }: { rowCount: number; truncated: boo
         </span>
       )}
       <span>{ms === null ? 'time n/a' : `${ms} ms`}</span>
+      <CopyButton text={text} />
     </span>
   )
 }
@@ -259,7 +377,14 @@ function ResultPane({
   running: boolean
   errorText: string | null
 }): ReactNode {
-  if (errorText) return <div className="error">{errorText}</div>
+  if (errorText) {
+    return (
+      <div className="error nodrag">
+        <span className="qw-errtext">{errorText}</span>
+        <CopyButton text={errorText} />
+      </div>
+    )
+  }
   if (st?.state === 'CANCELED') return <div className="hint">Canceled.</div>
   if (st?.state === 'CLOSED') return <div className="hint">Statement closed.</div>
   if (st?.state === 'SUCCEEDED') {

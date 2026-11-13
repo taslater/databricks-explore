@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, type DragEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react'
 import {
   Background,
   Controls,
@@ -19,25 +19,46 @@ import { deriveLinks } from './persistence/canvasFile'
 import { QueryWindow, type QueryFlowNode } from './nodes/QueryWindow'
 import { NoteWindow, type NoteFlowNode } from './nodes/NoteWindow'
 import { TableCard, type TableFlowNode } from './nodes/TableCard'
+import { withBoundary } from './nodes/withBoundary'
 import { CanvasToolbar } from './CanvasToolbar'
+import { maximizedFrame, type Frame } from './maximize'
 import { useQueryTables } from './linking/useQueryTables'
 import { tableEdges } from './linking/tableEdges'
 
-// Defined outside the component so React Flow sees a stable object.
-const nodeTypes = { query: QueryWindow, note: NoteWindow, table: TableCard }
+// Defined outside the component so React Flow sees a stable object. Each type has its own error boundary.
+const nodeTypes = { query: withBoundary(QueryWindow), note: withBoundary(NoteWindow), table: withBoundary(TableCard) }
 
 type CanvasFlowNode = QueryFlowNode | NoteFlowNode | TableFlowNode
 
-function toFlowNode(w: CanvasWindow, selected: boolean): CanvasFlowNode {
+function toFlowNode(w: CanvasWindow, selected: boolean, frame: Frame | null): CanvasFlowNode {
+  const size = frame ? frame.size : w.size
   return {
     id: w.id,
     type: w.type === 'note' || w.type === 'table' ? w.type : 'query',
-    position: w.position,
+    position: frame ? frame.position : w.position,
     data: {},
     selected,
-    width: w.size.w,
+    width: size.w,
     // Collapsed nodes drop the fixed height so React Flow measures the title bar.
-    height: w.collapsed ? undefined : w.size.h,
+    height: w.collapsed && !frame ? undefined : size.h,
+    // A maximized window sits above the others and stays put.
+    ...(frame ? { draggable: false, zIndex: 1000 } : {}),
+  }
+}
+
+function readFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeFlag(key: string, on: boolean) {
+  try {
+    localStorage.setItem(key, on ? '1' : '0')
+  } catch {
+    // Storage can be unavailable. The choice still applies for this session.
   }
 }
 
@@ -54,6 +75,8 @@ function CanvasInner() {
   const windows = useCanvasStore((s) => s.windows)
   const selectedId = useCanvasStore((s) => s.selectedId)
   const viewport = useCanvasStore((s) => s.viewport)
+  const maximizedId = useCanvasStore((s) => s.maximizedId)
+  const setMaximized = useCanvasStore((s) => s.setMaximized)
   const addQueryWindow = useCanvasStore((s) => s.addQueryWindow)
   const addNoteWindow = useCanvasStore((s) => s.addNoteWindow)
   const addTableWindow = useCanvasStore((s) => s.addTableWindow)
@@ -64,9 +87,33 @@ function CanvasInner() {
   const { screenToFlowPosition } = useReactFlow()
   const wrapRef = useRef<HTMLDivElement>(null)
 
+  // Size of the canvas area, to size a maximized window against.
+  const [box, setBox] = useState({ width: 0, height: 0 })
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const measure = () => setBox({ width: el.clientWidth, height: el.clientHeight })
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // The minimap covers part of the canvas, so it is off until asked for.
+  const [showMinimap, setShowMinimap] = useState(() => readFlag('canvasMinimap'))
+  function toggleMinimap() {
+    setShowMinimap((on) => {
+      writeFlag('canvasMinimap', !on)
+      return !on
+    })
+  }
+
+  const maximized = maximizedId !== null && windows.some((w) => w.id === maximizedId)
+  const frame = useMemo(() => (maximized ? maximizedFrame(viewport, box) : null), [maximized, viewport, box])
+
   const nodes = useMemo(
-    () => windows.map((w) => toFlowNode(w, w.id === selectedId)),
-    [windows, selectedId],
+    () => windows.map((w) => toFlowNode(w, w.id === selectedId, w.id === maximizedId ? frame : null)),
+    [windows, selectedId, maximizedId, frame],
   )
 
   // Tables each query window reads (server lookup, debounced). Feeds the table edges below.
@@ -182,14 +229,27 @@ function CanvasInner() {
         deleteKeyCode={null}
         // Double-click adds a window, so it must not also zoom.
         zoomOnDoubleClick={false}
+        // A maximized window fills the view, so the view is held still until it is restored.
+        panOnDrag={!maximized}
+        zoomOnScroll={!maximized}
+        zoomOnPinch={!maximized}
         proOptions={{ hideAttribution: false }}
       >
         <Background />
-        <Controls />
-        <MiniMap pannable zoomable />
+        {!maximized && <Controls orientation="horizontal" showInteractive={false} className="canvas-controls" />}
+        {showMinimap && <MiniMap pannable zoomable />}
         <Panel position="top-left">
           <button onClick={addAtCentre}>+ Query window</button>{' '}
-          <button onClick={addNoteAtCentre}>+ Note</button>
+          <button onClick={addNoteAtCentre}>+ Note</button>{' '}
+          <button onClick={toggleMinimap} aria-pressed={showMinimap} title="Show or hide the minimap">
+            Minimap
+          </button>
+          {maximized && (
+            <>
+              {' '}
+              <button onClick={() => setMaximized(null)}>Restore window</button>
+            </>
+          )}
         </Panel>
         <Panel position="top-right">
           <CanvasToolbar />
