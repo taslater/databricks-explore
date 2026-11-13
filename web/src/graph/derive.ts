@@ -1,0 +1,151 @@
+// Turns the stored graph (nodes, edges, filters) into what React Flow draws.
+// Pure: the same inputs always give the same output, so it can be unit tested.
+import { MarkerType } from '@xyflow/react'
+import { ageDays, EDGE_COLORS } from './format'
+import { estimateSize } from './layout'
+import type { EdgeFilters, FlowEdge, FlowNode } from './types'
+
+export interface DeriveInput {
+  nodes: FlowNode[]
+  edges: FlowEdge[]
+  focusSchema: string | null
+  filters: EdgeFilters
+  staleDays: number
+  hoverId: string | null
+  now?: number
+}
+
+/** Edge `via` labels: for each FK parent, the child columns of the last fk edge that points at it. */
+export function viaMap(edges: FlowEdge[]): Map<string, string> {
+  const via = new Map<string, string>()
+  for (const e of edges) {
+    if (e.data?.info.kind === 'fk') via.set(e.target, (e.data.info.child_columns ?? []).join(', '))
+  }
+  return via
+}
+
+function nodeLines(n: FlowNode, showSchema: boolean, via: string | undefined): string[] {
+  const lines = [`${n.data.selfRef ? '↻ ' : ''}${n.data.name}`]
+  if (showSchema) lines.push(n.data.schema)
+  if (via) lines.push(`via ${via}`)
+  return lines
+}
+
+/** Measured size if React Flow has rendered the node, otherwise an estimate. */
+export function nodeSize(
+  n: FlowNode,
+  focusSchema: string | null,
+  via: string | undefined,
+): { width: number; height: number } {
+  if (n.measured?.width && n.measured?.height) return { width: n.measured.width, height: n.measured.height }
+  return estimateSize(nodeLines(n, n.data.schema !== focusSchema, via))
+}
+
+export function nodeCenter(n: FlowNode, size: { width: number; height: number }) {
+  return { x: n.position.x + size.width / 2, y: n.position.y + size.height / 2 }
+}
+
+/** Picks the handle pair so the edge runs along the dominant axis. Layout is LR, so most edges use left/right. */
+export function handlesFor(
+  source: { x: number; y: number },
+  target: { x: number; y: number },
+  selfLoop: boolean,
+): { sourceHandle: string; targetHandle: string } {
+  if (selfLoop) return { sourceHandle: 'src-r', targetHandle: 'tgt-r' }
+  const dx = target.x - source.x
+  const dy = target.y - source.y
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0
+      ? { sourceHandle: 'src-r', targetHandle: 'tgt-l' }
+      : { sourceHandle: 'src-l', targetHandle: 'tgt-r' }
+  }
+  return dy >= 0
+    ? { sourceHandle: 'src-b', targetHandle: 'tgt-t' }
+    : { sourceHandle: 'src-t', targetHandle: 'tgt-b' }
+}
+
+export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: FlowEdge[] } {
+  const now = input.now ?? Date.now()
+  const { filters, focusSchema, hoverId } = input
+  const via = viaMap(input.edges)
+
+  // Edge visibility and stale flags. Stale means lineage whose last_seen is older than staleDays.
+  const edgeHidden = new Map<string, boolean>()
+  const edgeStale = new Map<string, boolean>()
+  for (const e of input.edges) {
+    const info = e.data!.info
+    const stale = info.kind === 'lineage' && (ageDays(info.last_seen, now) ?? -1) > input.staleDays
+    const kindShown =
+      info.kind === 'lineage' ? filters.lineage : info.kind === 'fk' ? filters.fk : info.kind === 'view_dep' ? filters.view_dep : false
+    edgeStale.set(e.id, stale)
+    edgeHidden.set(e.id, !kindShown || (stale && !filters.showStale))
+  }
+
+  // Node visibility: a node is hidden when it has edges and all of them are hidden. The focus node always shows.
+  const edgesByNode = new Map<string, FlowEdge[]>()
+  for (const e of input.edges) {
+    for (const id of new Set([e.source, e.target])) {
+      const list = edgesByNode.get(id) ?? []
+      list.push(e)
+      edgesByNode.set(id, list)
+    }
+  }
+
+  // Hover: keep the hovered node, its neighbors, and the edges touching it. Everything else fades.
+  const neighborhood = new Set<string>()
+  if (hoverId) {
+    neighborhood.add(hoverId)
+    for (const e of edgesByNode.get(hoverId) ?? []) neighborhood.add(e.source === hoverId ? e.target : e.source)
+  }
+
+  const nodeById = new Map(input.nodes.map((n) => [n.id, n]))
+  const sizeById = new Map<string, { width: number; height: number }>()
+  for (const n of input.nodes) sizeById.set(n.id, nodeSize(n, focusSchema, via.get(n.id)))
+
+  const nodes: FlowNode[] = input.nodes.map((n) => {
+    const edges = edgesByNode.get(n.id) ?? []
+    const hidden = !n.data.focus && edges.length > 0 && edges.every((e) => edgeHidden.get(e.id))
+    const external = n.data.schema !== focusSchema
+    return {
+      ...n,
+      hidden,
+      data: {
+        ...n.data,
+        showSchema: external,
+        external,
+        via: via.get(n.id) || undefined,
+        faded: hoverId !== null && !neighborhood.has(n.id),
+      },
+    }
+  })
+
+  const edges: FlowEdge[] = input.edges.map((e) => {
+    const info = e.data!.info
+    const stale = edgeStale.get(e.id) === true
+    const color = stale ? EDGE_COLORS.stale : (EDGE_COLORS[info.kind] ?? '#999')
+    const src = nodeById.get(e.source)
+    const tgt = nodeById.get(e.target)
+    const srcSize = sizeById.get(e.source) ?? { width: 0, height: 0 }
+    const tgtSize = sizeById.get(e.target) ?? { width: 0, height: 0 }
+    const handles =
+      src && tgt
+        ? handlesFor(nodeCenter(src, srcSize), nodeCenter(tgt, tgtSize), e.source === e.target)
+        : { sourceHandle: 'src-r', targetHandle: 'tgt-l' }
+    return {
+      ...e,
+      type: stale ? 'stale' : info.kind,
+      hidden: edgeHidden.get(e.id) === true,
+      sourceHandle: handles.sourceHandle,
+      targetHandle: handles.targetHandle,
+      markerEnd: { type: MarkerType.ArrowClosed, color },
+      markerStart: info.bidir ? { type: MarkerType.ArrowClosed, color } : undefined,
+      data: {
+        ...e.data!,
+        stale,
+        faded: hoverId !== null && e.source !== hoverId && e.target !== hoverId,
+      },
+    }
+  })
+
+  return { nodes, edges }
+}

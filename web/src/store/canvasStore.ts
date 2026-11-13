@@ -1,0 +1,242 @@
+// Canvas state. `viewport` and `windows` are the serialized part and match
+// contracts/canvas.schema.json field for field (plain JSON, no React objects).
+// `selectedId` is UI-only and is never written to the canvas file.
+import { create } from 'zustand'
+import type { CanvasPoint, CanvasWindow } from '../api/types'
+import { renameInWindows } from '../canvas/linking/refs'
+
+export interface CanvasViewport {
+  x: number
+  y: number
+  zoom: number
+}
+
+export interface CanvasSize {
+  w: number
+  h: number
+}
+
+export const DEFAULT_VIEWPORT: CanvasViewport = { x: 0, y: 0, zoom: 1 }
+/** Percent of a query window's body that the SQL editor takes when the window has no saved split. */
+export const DEFAULT_EDITOR_SPLIT = 40
+export const DEFAULT_QUERY_SIZE: CanvasSize = { w: 520, h: 360 }
+export const DEFAULT_NOTE_SIZE: CanvasSize = { w: 320, h: 220 }
+export const DEFAULT_TABLE_SIZE: CanvasSize = { w: 320, h: 300 }
+
+interface CanvasState {
+  viewport: CanvasViewport
+  windows: CanvasWindow[]
+  /** UI only. Not saved. */
+  selectedId: string | null
+  /** Adds a query window with a new id and a unique query_N title. Returns the id. */
+  addQueryWindow: (position: CanvasPoint) => string
+  /** Adds a query window whose SQL is `sql`. Returns the id. */
+  addQueryWindowWithSql: (position: CanvasPoint, sql: string) => string
+  /** Adds a note window (Markdown text, empty to start). Returns the id. */
+  addNoteWindow: (position: CanvasPoint) => string
+  /** Adds a table card for the full name catalog.schema.table. Returns the id. */
+  addTableWindow: (position: CanvasPoint, fullName: string) => string
+  /** Sets the Markdown body of a note window. */
+  setText: (id: string, text: string) => void
+  /** Trims and validates the title. Returns an error message, or null when saved. */
+  renameWindow: (id: string, title: string) => string | null
+  setSql: (id: string, sql: string) => void
+  /** Sets the window's chart to { vega_lite: spec }, or removes `chart` when spec is null. */
+  setChartSpec: (id: string, spec: Record<string, unknown> | null) => void
+  setCollapsed: (id: string, collapsed: boolean) => void
+  /** Saves the editor's percent of a query window's body (the splitter between editor and results). */
+  setEditorSplit: (id: string, percent: number) => void
+  moveWindow: (id: string, position: CanvasPoint) => void
+  resizeWindow: (id: string, position: CanvasPoint, size: CanvasSize) => void
+  removeWindow: (id: string) => void
+  setSelected: (id: string | null) => void
+  setViewport: (viewport: CanvasViewport) => void
+  /** Name of the saved canvas this state belongs to. Null for a new canvas, which does not autosave. */
+  canvasName: string | null
+  setCanvasName: (name: string | null) => void
+  /** Replaces the whole canvas (used by Open). Clears the selection. */
+  loadState: (next: { canvasName: string | null; viewport: CanvasViewport; windows: CanvasWindow[] }) => void
+}
+
+/** Next free id of the form w<n>, one above the largest n already used. */
+export function nextWindowId(windows: CanvasWindow[]): string {
+  let max = 0
+  for (const w of windows) {
+    const m = /^w(\d+)$/.exec(w.id)
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  return `w${max + 1}`
+}
+
+/** Lowest query_N not used as a title on the canvas. */
+export function nextQueryTitle(windows: CanvasWindow[]): string {
+  const taken = new Set(windows.map((w) => w.title))
+  let n = 1
+  while (taken.has(`query_${n}`)) n++
+  return `query_${n}`
+}
+
+/** `base` if no window uses it, otherwise the first free `base_2`, `base_3`, ... */
+export function nextFreeTitle(windows: CanvasWindow[], base: string): string {
+  const taken = new Set(windows.map((w) => w.title))
+  if (!taken.has(base)) return base
+  let n = 2
+  while (taken.has(`${base}_${n}`)) n++
+  return `${base}_${n}`
+}
+
+/** Title for a table card: the table name without its schema, braces removed (titles cannot contain them). */
+export function tableTitleBase(fullName: string): string {
+  const name = fullName.split('.').pop()?.replace(/[{}]/g, '').trim() ?? ''
+  return name || 'table'
+}
+
+/**
+ * Returns an error message for a title, or null when it is valid.
+ * `selfId` is excluded from the uniqueness check so a window can keep its own title.
+ */
+export function titleError(title: string, windows: CanvasWindow[], selfId: string | null): string | null {
+  if (title.length === 0) return 'Title cannot be empty.'
+  if (/[{}]/.test(title)) return 'Titles cannot contain { or }.'
+  if (windows.some((w) => w.id !== selfId && w.title === title)) {
+    return `Another window is already named "${title}".`
+  }
+  return null
+}
+
+/** The `windows` map sent with each query run: title to SQL, for every query window. */
+export function queryWindowMap(windows: CanvasWindow[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const w of windows) {
+    if (w.type === 'query') out[w.title] = w.sql ?? ''
+  }
+  return out
+}
+
+function patch(windows: CanvasWindow[], id: string, change: Partial<CanvasWindow>): CanvasWindow[] {
+  return windows.map((w) => (w.id === id ? { ...w, ...change } : w))
+}
+
+export const useCanvasStore = create<CanvasState>()((set, get) => ({
+  viewport: DEFAULT_VIEWPORT,
+  windows: [],
+  selectedId: null,
+
+  addQueryWindow: (position) => {
+    const { windows } = get()
+    const id = nextWindowId(windows)
+    const win: CanvasWindow = {
+      id,
+      type: 'query',
+      title: nextQueryTitle(windows),
+      position: { x: position.x, y: position.y },
+      size: { ...DEFAULT_QUERY_SIZE },
+      sql: '',
+      collapsed: false,
+    }
+    set({ windows: [...windows, win], selectedId: id })
+    return id
+  },
+
+  addQueryWindowWithSql: (position, sql) => {
+    const id = get().addQueryWindow(position)
+    set({ windows: patch(get().windows, id, { sql }) })
+    return id
+  },
+
+  addNoteWindow: (position) => {
+    const { windows } = get()
+    const id = nextWindowId(windows)
+    const win: CanvasWindow = {
+      id,
+      type: 'note',
+      title: nextFreeTitle(windows, 'note'),
+      position: { x: position.x, y: position.y },
+      size: { ...DEFAULT_NOTE_SIZE },
+      text: '',
+      collapsed: false,
+    }
+    set({ windows: [...windows, win], selectedId: id })
+    return id
+  },
+
+  addTableWindow: (position, fullName) => {
+    const { windows } = get()
+    const id = nextWindowId(windows)
+    const win: CanvasWindow = {
+      id,
+      type: 'table',
+      title: nextFreeTitle(windows, tableTitleBase(fullName)),
+      position: { x: position.x, y: position.y },
+      size: { ...DEFAULT_TABLE_SIZE },
+      table: fullName,
+      collapsed: false,
+    }
+    set({ windows: [...windows, win], selectedId: id })
+    return id
+  },
+
+  setText: (id, text) => set({ windows: patch(get().windows, id, { text }) }),
+
+  renameWindow: (id, title) => {
+    const trimmed = title.trim()
+    const { windows } = get()
+    const err = titleError(trimmed, windows, id)
+    if (err) return err
+    // One set: the title and every {{old}} reference in other windows change together.
+    set({ windows: renameInWindows(windows, id, trimmed) })
+    return null
+  },
+
+  setSql: (id, sql) => set({ windows: patch(get().windows, id, { sql }) }),
+
+  setChartSpec: (id, spec) =>
+    set({
+      windows: get().windows.map((w) => {
+        if (w.id !== id) return w
+        if (spec === null) {
+          // Drop the key rather than leave chart: undefined, so the saved file matches the loaded one.
+          const { chart: _chart, ...rest } = w
+          return rest
+        }
+        return { ...w, chart: { vega_lite: spec } }
+      }),
+    }),
+
+  setCollapsed: (id, collapsed) => set({ windows: patch(get().windows, id, { collapsed }) }),
+
+  setEditorSplit: (id, percent) => set({ windows: patch(get().windows, id, { editor_split: percent }) }),
+
+  moveWindow: (id, position) =>
+    set({ windows: patch(get().windows, id, { position: { x: position.x, y: position.y } }) }),
+
+  resizeWindow: (id, position, size) =>
+    set({
+      windows: patch(get().windows, id, {
+        position: { x: position.x, y: position.y },
+        size: { w: size.w, h: size.h },
+      }),
+    }),
+
+  removeWindow: (id) => {
+    const { windows, selectedId } = get()
+    set({
+      windows: windows.filter((w) => w.id !== id),
+      selectedId: selectedId === id ? null : selectedId,
+    })
+  },
+
+  setSelected: (selectedId) => set({ selectedId }),
+
+  setViewport: (viewport) => set({ viewport: { x: viewport.x, y: viewport.y, zoom: viewport.zoom } }),
+
+  canvasName: null,
+  setCanvasName: (canvasName) => set({ canvasName }),
+  loadState: (next) =>
+    set({
+      canvasName: next.canvasName,
+      viewport: { x: next.viewport.x, y: next.viewport.y, zoom: next.viewport.zoom },
+      windows: next.windows,
+      selectedId: null,
+    }),
+}))
