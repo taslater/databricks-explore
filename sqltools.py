@@ -5,8 +5,11 @@ Each function is a stub until its owner implements it.
 """
 from __future__ import annotations
 
+from typing import Iterable, NamedTuple
+
 import sqlglot
 from sqlglot import exp
+from sqlglot.optimizer.scope import ScopeType, build_scope, traverse_scope
 from sqlglot.tokens import TokenType
 
 
@@ -234,3 +237,258 @@ def tables_read(sql: str) -> list[str]:
             seen.add(full)
             result.append(full)
     return result
+
+
+# ---------- join extraction ----------
+
+class JoinPair(NamedTuple):
+    """Two columns a statement equates. The two ends are in sorted order, so a pair has one spelling."""
+    left_table: str
+    left_column: str
+    right_table: str
+    right_column: str
+    join_type: str  # inner, left, right, full, semi, anti, implicit (comma or cross join plus WHERE), correlated
+
+
+class _Names:
+    """Qualifies table names to catalog.schema.table, in lowercase, from defaults and a set of known names."""
+
+    def __init__(self, catalog, schema, known):
+        self.catalog = (catalog or "").lower() or None
+        self.schema = (schema or "").lower() or None
+        self.by_suffix: dict[str, set[str]] = {}
+        for full in {k.lower() for k in known or ()}:
+            parts = full.split(".")
+            for i in range(1, len(parts)):
+                self.by_suffix.setdefault(".".join(parts[i:]), set()).add(full)
+
+    def qualify(self, table: exp.Table):
+        if not isinstance(table.this, exp.Identifier):
+            return None  # a table-valued function
+        parts = [p.name.lower() for p in table.parts]
+        if len(parts) > 3:
+            return None
+        if len(parts) == 3:
+            return ".".join(parts)
+        short = ".".join(parts)
+        default = None
+        if len(parts) == 2 and self.catalog:
+            default = f"{self.catalog}.{short}"
+        elif len(parts) == 1 and self.catalog and self.schema:
+            default = f"{self.catalog}.{self.schema}.{short}"
+        found = self.by_suffix.get(short, set())
+        if default in found:
+            return default
+        if len(found) == 1:
+            return next(iter(found))
+        return default
+
+
+class _FlatScope:
+    """The few Scope attributes the resolver reads, for statements sqlglot builds no scope for (MERGE)."""
+
+    def __init__(self, sources):
+        self.sources = sources
+        self.parent = None
+        self.scope_type = ScopeType.ROOT
+
+
+_MAX_DEPTH = 12
+
+
+def _strip(node):
+    """The expression under any parentheses and casts, which do not change which column is meant."""
+    while isinstance(node, (exp.Paren, exp.Cast, exp.TryCast)):
+        node = node.this
+    return node
+
+
+def _unwrap_query(node):
+    while isinstance(node, exp.Subquery):
+        node = node.this
+    return node
+
+
+def _is_column(node) -> bool:
+    return isinstance(node, exp.Column) and not isinstance(node.this, exp.Star)
+
+
+def _sources_of(scope) -> dict:
+    """The tables and derived tables a scope's own FROM and JOINs name. sqlglot also lists the CTEs visible to it."""
+    sources = {str(k).lower(): v for k, v in scope.sources.items()}
+    query = getattr(scope, "expression", None)
+    if not isinstance(query, exp.Select):
+        return sources
+    from_ = query.args.get("from_")
+    named = {n.alias_or_name.lower() for n in ([from_.this] if from_ is not None else []) + (query.args.get("joins") or [])}
+    return {k: v for k, v in sources.items() if k in named}
+
+
+def _trace(source, name: str, names: _Names, depth: int = 0):
+    """(base table, column) a column of one source comes from, looking through CTEs and subqueries. None if unclear."""
+    if depth > _MAX_DEPTH:
+        return None
+    if isinstance(source, exp.Table):
+        full = names.qualify(source)
+        return (full, name) if full else None
+    query = _unwrap_query(getattr(source, "expression", None))
+    if not isinstance(query, exp.Select):
+        return None  # a UNION, VALUES or function: the column has no single origin
+    inner = _sources_of(source)
+    stars = []
+    for projection in query.expressions:
+        value = projection.this if isinstance(projection, exp.Alias) else projection
+        if projection.alias_or_name.lower() == name and not isinstance(value, exp.Star):
+            value = _strip(value)
+            if not _is_column(value):
+                return None  # computed: not a plain column
+            found = _resolve(value, source, names, depth + 1)
+            return found[2:] if found else None
+        if isinstance(value, exp.Star) or (isinstance(value, exp.Column) and isinstance(value.this, exp.Star)):
+            stars.append(value)
+    if len(stars) != 1:
+        return None
+    star = stars[0]
+    if isinstance(star, exp.Column):  # alias.*
+        target = inner.get(star.table.lower())
+    else:
+        target = next(iter(inner.values())) if len(inner) == 1 else None
+    return _trace(target, name, names, depth + 1) if target is not None else None
+
+
+def _resolve(col: exp.Column, scope, names: _Names, depth: int = 0):
+    """(scope id, source key, base table, column) for a column reference, or None when it cannot be pinned down."""
+    name = col.name.lower()
+    qualifier = col.table.lower()
+    current = scope
+    key = None
+    while current is not None:
+        sources = _sources_of(current)
+        if qualifier:
+            if qualifier in sources:
+                key = qualifier
+                break
+        elif len(sources) == 1:
+            key = next(iter(sources))
+            break
+        else:
+            return None  # an unqualified column with several candidate tables, and no schema to decide
+        # A correlated subquery may name a table of the query around it.
+        current = getattr(current, "parent", None) if current.scope_type == ScopeType.SUBQUERY else None
+    if current is None or key is None:
+        return None
+    traced = _trace(sources[key], name, names, depth)
+    return (id(current), key, *traced) if traced else None
+
+
+def _conjuncts(cond):
+    """The equalities that must all hold: the AND-ed parts of a condition. OR branches are left out."""
+    if isinstance(cond, exp.Paren):
+        yield from _conjuncts(cond.this)
+    elif isinstance(cond, exp.And):
+        yield from _conjuncts(cond.left)
+        yield from _conjuncts(cond.right)
+    elif isinstance(cond, (exp.EQ, exp.NullSafeEQ)):
+        yield cond
+
+
+def _equalities(cond, scope, names: _Names, join_type: str):
+    for eq in _conjuncts(cond):
+        left, right = _strip(eq.left), _strip(eq.right)
+        if not (_is_column(left) and _is_column(right)):
+            continue
+        a, b = _resolve(left, scope, names), _resolve(right, scope, names)
+        if a and b and a[:2] != b[:2] and a[2:] != b[2:]:
+            yield _pair(a[2], a[3], b[2], b[3], join_type)
+
+
+def _pair(t1, c1, t2, c2, join_type) -> JoinPair:
+    if (t2, c2) < (t1, c1):
+        t1, c1, t2, c2 = t2, c2, t1, c1
+    return JoinPair(t1, c1, t2, c2, join_type)
+
+
+def _join_type(join: exp.Join) -> str:
+    kind, side = (join.kind or "").lower(), (join.side or "").lower()
+    if kind in ("semi", "anti"):
+        return kind
+    return side if side in ("left", "right", "full") else "inner"
+
+
+def _select_pairs(scope, names: _Names):
+    select = scope.expression
+    if not isinstance(select, exp.Select):
+        return
+    sources = _sources_of(scope)
+    from_ = select.args.get("from_")
+    preceding = [from_.this.alias_or_name.lower()] if from_ is not None else []
+    implicit = False
+    for join in select.args.get("joins") or []:
+        key = join.alias_or_name.lower()
+        kind = _join_type(join)
+        if join.args.get("on") is not None:
+            yield from _equalities(join.args["on"], scope, names, kind)
+        elif join.args.get("using"):
+            for ident in join.args["using"]:
+                name = ident.name.lower()
+                one_left = len(preceding) == 1 and preceding[0] in sources
+                left = _trace(sources[preceding[0]], name, names) if one_left else None
+                right = _trace(sources[key], name, names) if key in sources else None
+                if left and right and left != right:
+                    yield _pair(*left, *right, kind)
+        elif not join.args.get("method"):
+            implicit = True  # a comma or CROSS JOIN: its condition, if any, is in WHERE
+        preceding.append(key)
+    where = select.args.get("where")
+    if where is not None and implicit:
+        yield from _equalities(where.this, scope, names, "implicit")
+    elif where is not None and scope.scope_type == ScopeType.SUBQUERY:
+        yield from _equalities(where.this, scope, names, "correlated")
+
+
+def _merge_pairs(merge: exp.Merge, names: _Names):
+    on = merge.args.get("on")
+    if on is None:
+        return
+    sources = {}
+    for node in (merge.this, merge.args.get("using")):
+        if isinstance(node, exp.Table):
+            sources[node.alias_or_name.lower()] = node
+        elif isinstance(node, exp.Subquery):
+            inner = build_scope(node.this)
+            if inner is not None:
+                sources[node.alias_or_name.lower()] = inner
+                yield from (p for s in traverse_scope(node.this) for p in _select_pairs(s, names))
+    yield from _equalities(on, _FlatScope(sources), names, "inner")
+
+
+def join_pairs(sql: str, default_catalog: str | None = None, default_schema: str | None = None,
+               known: Iterable[str] | None = None) -> list[JoinPair]:
+    """Column pairs a statement joins on, resolved through aliases, CTEs and subqueries to base tables.
+
+    Reads ON equalities (composite AND keys too), USING, comma and CROSS joins whose WHERE equates columns,
+    MERGE ... ON, and equalities that correlate a subquery with its outer query. Anything that cannot be
+    pinned to one base column is dropped, never guessed: OR conditions, expressions, an unqualified column
+    when several tables are in scope, UNION branches, a USING column when more than one table is on its left.
+    Short table names are qualified from the defaults, or from `known` (full names the statement is known to
+    read) when exactly one of them fits. Names and columns come back lowercase and each pair has one spelling,
+    sorted, so the same join written either way round is equal. Raises ValueError when the SQL does not parse.
+    """
+    names = _Names(default_catalog, default_schema, known)
+    try:
+        trees = sqlglot.parse(sql, read=_DIALECT)
+        found: dict[tuple, JoinPair] = {}
+        for tree in trees:
+            if tree is None:
+                continue
+            if isinstance(tree, exp.Merge):
+                pairs = _merge_pairs(tree, names)
+            else:
+                pairs = (p for scope in traverse_scope(tree) for p in _select_pairs(scope, names))
+            for p in pairs:
+                found.setdefault(p[:4], p)
+        return list(found.values())
+    except sqlglot.errors.SqlglotError as e:
+        raise ValueError(f"cannot parse SQL: {e}") from e
+    except RecursionError as e:
+        raise ValueError("cannot parse SQL: nested too deeply") from e
