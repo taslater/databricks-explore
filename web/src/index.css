@@ -992,3 +992,33 @@ tr.stale td {
   display: flex;
   gap: 8px;
 }
+
+/* ---- Results grid cells and headers --------------------------------------- */
+
+.qw-colhead {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.qw-colname {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.qw-coltype {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.qw-grid .qw-num {
+  text-align: right;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.qw-grid .qw-null {
+  color: #9aa0a6;
+  font-style: italic;
+}
