@@ -5,6 +5,7 @@ Every test points canvases.CANVASES at tmp_path, so the real data/canvases is ne
 """
 import copy
 import json
+from pathlib import Path
 
 import pytest
 
@@ -126,7 +127,7 @@ INVALID = [
     ("invalid name with space", _set(["name"], "bad name"), "name: "),
     ("invalid name with slash", _set(["name"], "a/b"), "name: "),
     ("empty name", _set(["name"], ""), "name: "),
-    ("version 2", _set(["version"], 2), "version: "),
+    ("version 3", _set(["version"], 3), "version: "),
     ("version true", _set(["version"], True), "version: "),
     ("zoom 0", _set(["viewport", "zoom"], 0), "viewport.zoom: "),
     ("size w 0", _set(["windows", 0, "size", "w"], 0), "windows[0].size.w: "),
@@ -201,7 +202,7 @@ def test_corrupt_json_file_is_400(client, cdir):
 
 def test_stored_file_failing_schema_is_400(client, cdir):
     stored = example()
-    stored["version"] = 2
+    stored["version"] = 3
     (cdir / "hours.json").write_text(json.dumps(stored), encoding="utf-8")
     resp = client.get("/api/canvases/hours")
     assert resp.status_code == 400
@@ -239,3 +240,146 @@ def test_list_is_sorted_stems_and_ignores_other_files(client, cdir):
 
 def test_list_empty(client):
     assert client.get("/api/canvases").get_json() == []
+
+
+# ---------- version 2: sketch nodes and connectors ----------
+
+PH_ID = "0b6f1c0e-5c1a-4d2e-9a52-3f6d1a7e8c90"
+
+
+def example_v2():
+    """A version 2 canvas: a table card, a query, every sketch node type, and connectors between them."""
+    body = example()
+    body["version"] = 2
+    body["profile"] = None
+    base = {"size": {"w": 140, "h": 80}, "collapsed": False}
+    body["windows"] += [
+        {"id": "w3", "type": "table", "title": "orders", "position": {"x": 0, "y": 400},
+         "size": {"w": 320, "h": 300}, "table": "main.sales.orders", "collapsed": False, "z": 2},
+        {"id": "s1", "type": "shape", "shape": "rounded", "label": "API", "position": {"x": 700, "y": 0},
+         "fill": "#dbeafe", "stroke": "#2563eb", "font_size": 14, "locked": True, "z": 1, **base},
+        {"id": "s2", "type": "shape", "shape": "cylinder", "label": "", "position": {"x": 700, "y": 200}, **base},
+        {"id": "s3", "type": "text", "label": "Notes", "position": {"x": 700, "y": 400}, **base},
+        {"id": "s4", "type": "sticky", "label": "todo", "position": {"x": 900, "y": 0}, **base},
+        {"id": "s5", "type": "frame", "label": "Group", "position": {"x": 650, "y": -40},
+         "size": {"w": 500, "h": 600}, "z": -1},
+        {"id": "s6", "type": "placeholder", "position": {"x": 900, "y": 200}, "size": {"w": 280, "h": 160},
+         "placeholder": {"id": PH_ID, "name": "customers", "linked": "main.sales.customers",
+                         "columns": [{"name": "id", "type": "bigint", "key": "pk"},
+                                     {"name": "email", "type": ""}]}},
+    ]
+    body["edges"] = [
+        {"id": "e1", "source": "s1", "target": "w3", "source_handle": "b", "target_handle": "t", "line": "curve",
+         "arrow_start": True, "arrow_end": True, "dashed": True, "label": "reads", "color": "#dc2626"},
+        {"id": "e2", "source": "w3", "target": "s6", "line": "straight", "arrow_start": False, "arrow_end": True,
+         "dashed": False, "relationship": {"id": "e_" + "a" * 32, "source_column": "customer_id", "target_column": "id"}},
+    ]
+    return body
+
+
+def test_v1_file_loads_unchanged(cdir):
+    """A version 1 file written before the bump loads and returns exactly as stored, with no sketch fields added."""
+    (cdir / "hours.json").write_text(json.dumps(EXAMPLE), encoding="utf-8")
+    assert canvases.load_canvas("hours") == EXAMPLE
+    assert canvases.parse_canvas(EXAMPLE).edges == []
+
+
+def test_v2_round_trips_unchanged(cdir):
+    body = example_v2()
+    canvases.save_canvas(body)
+    assert canvases.load_canvas("hours") == body
+    assert json.loads((cdir / "hours.json").read_text(encoding="utf-8")) == body
+
+
+def test_v2_round_trips_through_routes(client):
+    body = example_v2()
+    assert client.post("/api/canvases", json=body).get_json() == {"saved": "hours"}
+    assert client.get("/api/canvases/hours").get_json() == body
+
+
+def test_v2_with_a_profile_and_no_sketch_content_is_fine(client):
+    body = example()
+    body["version"] = 2
+    body["profile"] = "dev"
+    assert client.post("/api/canvases", json=body).status_code == 200
+    assert client.get("/api/canvases/hours").get_json() == body
+
+
+def test_v1_and_v2_both_listed_and_overwrite_each_other(client):
+    assert client.post("/api/canvases", json=example()).status_code == 200
+    assert client.post("/api/canvases", json=example_v2()).status_code == 200
+    assert client.get("/api/canvases/hours").get_json()["version"] == 2
+    assert client.get("/api/canvases").get_json() == ["hours"]
+
+
+INVALID_V1 = [
+    ("sketch type in v1", _set(["windows", 0, "type"], "frame"), "windows[0].type: "),
+    ("edges in v1", lambda b: b.update(edges=[]) or b, "edges: needs version 2"),
+    ("profile null in v1", _set(["profile"], None), "profile: required in version 1"),
+]
+
+INVALID_V2 = [
+    ("shape without kind", _set(["windows", 3, "shape"], None), 'windows[3]: type "shape" requires "shape"'),
+    ("unknown shape kind", _set(["windows", 3, "shape"], "star"), "windows[3].shape: "),
+    ("placeholder without spec", _set(["windows", 8, "placeholder"], None),
+     'windows[8]: type "placeholder" requires "placeholder"'),
+    ("placeholder id not a uuid", _set(["windows", 8, "placeholder", "id"], "not-a-uuid"),
+     "windows[8].placeholder.id: "),
+    ("placeholder key unknown", _set(["windows", 8, "placeholder", "columns", 0, "key"], "uk"),
+     "windows[8].placeholder.columns[0].key: "),
+    ("query without title in v2", _set(["windows", 0, "title"], None), 'windows[0]: type "query" requires "title"'),
+    ("edge to missing node", _set(["edges", 0, "target"], "zz"), 'edges[0].target: no window with id "zz"'),
+    ("edge from missing node", _set(["edges", 1, "source"], "zz"), 'edges[1].source: no window with id "zz"'),
+    ("duplicate edge id", _set(["edges", 1, "id"], "e1"), 'edges[1].id: duplicate id "e1"'),
+    ("unknown line kind", _set(["edges", 0, "line"], "wavy"), "edges[0].line: "),
+    ("unknown handle", _set(["edges", 0, "source_handle"], "x"), "edges[0].source_handle: "),
+    ("extra edge key", _set(["edges", 0, "weight"], 3), "edges[0].weight: "),
+    ("empty relationship column", _set(["edges", 1, "relationship", "source_column"], ""),
+     "edges[1].relationship.source_column: "),
+    ("zero font size", _set(["windows", 3, "font_size"], 0), "windows[3].font_size: "),
+]
+
+
+@pytest.mark.parametrize("label,mutate,expected", INVALID_V1, ids=[c[0] for c in INVALID_V1])
+def test_invalid_v1_body_is_400_with_path(client, cdir, label, mutate, expected):
+    resp = client.post("/api/canvases", json=mutate(example()))
+    assert resp.status_code == 400
+    assert resp.get_json()["error"].startswith(expected)
+    assert list(cdir.iterdir()) == []
+
+
+@pytest.mark.parametrize("label,mutate,expected", INVALID_V2, ids=[c[0] for c in INVALID_V2])
+def test_invalid_v2_body_is_400_with_path(client, cdir, label, mutate, expected):
+    resp = client.post("/api/canvases", json=mutate(example_v2()))
+    assert resp.status_code == 400
+    message = resp.get_json()["error"]
+    assert message.startswith(expected), message
+    assert list(cdir.iterdir()) == []
+
+
+def test_sketch_labels_need_not_be_unique(client):
+    body = example_v2()
+    body["windows"][4]["label"] = body["windows"][3]["label"] = "same"
+    assert client.post("/api/canvases", json=body).status_code == 200
+
+
+def test_sketch_nodes_do_not_take_part_in_title_uniqueness(client):
+    body = example_v2()
+    body["windows"][3]["title"] = "daily_hours"  # a sketch node carrying a title the query also has
+    assert client.post("/api/canvases", json=body).status_code == 200
+
+
+def test_schema_file_agrees_with_the_models():
+    """contracts/canvas.schema.json accepts both examples and rejects what the models reject (needs jsonschema)."""
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = json.loads((Path(canvases.__file__).parent / "contracts" / "canvas.schema.json").read_text(encoding="utf-8"))
+    jsonschema.Draft202012Validator.check_schema(schema)
+    validator = jsonschema.Draft202012Validator(schema)
+    assert list(validator.iter_errors(example())) == []
+    assert list(validator.iter_errors(example_v2())) == []
+    for label, mutate, _ in INVALID_V1:
+        assert list(validator.iter_errors(mutate(example()))), label
+    for label, mutate, _ in INVALID_V2:
+        if label in ("duplicate edge id", "edge to missing node", "edge from missing node"):
+            continue  # references and uniqueness are the server's checks; JSON Schema cannot express them
+        assert list(validator.iter_errors(mutate(example_v2()))), label

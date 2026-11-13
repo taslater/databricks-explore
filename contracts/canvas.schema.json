@@ -1,13 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Explorer canvas",
-  "description": "One canvas file, stored as data/canvases/<name>.json. Windows reference each other in SQL as {{title}}. Window titles must be unique across the canvas; JSON Schema cannot enforce this, so the server must check it. Window ids must also be unique, and every links[].from/to must name an existing window id.",
+  "description": "One canvas file, stored as data/canvases/<name>.json. Version 1 holds query, chart, note and table windows. Version 2 adds the sketch node types (shape, text, sticky, frame, placeholder), which live in `windows` next to the others, and a top-level `edges` list of user-drawn connectors. Version 1 files stay valid and load unchanged. Windows reference each other in SQL as {{title}}. Titles of query, chart, note and table windows must be unique across the canvas; JSON Schema cannot enforce this, so the server must check it. Window ids must also be unique, and every links[].from/to and edges[].source/target must name an existing window id.",
   "type": "object",
-  "required": ["version", "name", "profile", "windows"],
+  "required": [
+    "version",
+    "name",
+    "windows"
+  ],
   "properties": {
     "version": {
-      "const": 1,
-      "description": "Schema version. Only 1 is valid today."
+      "enum": [
+        1,
+        2
+      ],
+      "description": "Schema version. 1 is the original format; 2 adds sketch nodes and `edges`."
     },
     "name": {
       "type": "string",
@@ -16,12 +23,17 @@
       "description": "Canvas name. Also the file stem (data/canvases/<name>.json). Uses the same character set that dbx.safe() produces, so name === safe(name)."
     },
     "profile": {
-      "type": "string",
-      "minLength": 1,
-      "description": "Databricks CLI profile the canvas was created under."
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Databricks CLI profile the canvas was created under. Required (a non-empty string) in version 1. In version 2 it may be null, which is how a sketch made without a connection is saved."
     },
     "warehouse_id": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "SQL warehouse id, or null when none is selected."
     },
     "viewport": {
@@ -29,47 +41,91 @@
     },
     "windows": {
       "type": "array",
-      "items": { "$ref": "#/$defs/window" }
+      "items": {
+        "$ref": "#/$defs/window"
+      }
     },
     "links": {
       "type": "array",
-      "items": { "$ref": "#/$defs/link" },
+      "items": {
+        "$ref": "#/$defs/link"
+      },
       "default": [],
       "description": "Derived from {{title}} references and kept only for drawing read-only edges. The {{title}} references in each window's sql are the source of truth; clients must not edit windows based on links."
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edge"
+      },
+      "default": [],
+      "description": "Version 2 only. Connectors the user drew, in draw order. Unlike `links`, these are the source of truth and clients edit them."
     }
   },
   "$defs": {
     "point": {
       "type": "object",
-      "required": ["x", "y"],
+      "required": [
+        "x",
+        "y"
+      ],
       "additionalProperties": false,
       "properties": {
-        "x": { "type": "number" },
-        "y": { "type": "number" }
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
       }
     },
     "size": {
       "type": "object",
-      "required": ["w", "h"],
+      "required": [
+        "w",
+        "h"
+      ],
       "additionalProperties": false,
       "properties": {
-        "w": { "type": "number", "exclusiveMinimum": 0 },
-        "h": { "type": "number", "exclusiveMinimum": 0 }
+        "w": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "h": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
       }
     },
     "viewport": {
       "type": "object",
-      "required": ["x", "y", "zoom"],
+      "required": [
+        "x",
+        "y",
+        "zoom"
+      ],
       "additionalProperties": false,
       "properties": {
-        "x": { "type": "number" },
-        "y": { "type": "number" },
-        "zoom": { "type": "number", "exclusiveMinimum": 0 }
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "zoom": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
       }
     },
     "window": {
       "type": "object",
-      "required": ["id", "type", "title", "position", "size"],
+      "required": [
+        "id",
+        "type",
+        "position",
+        "size"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -77,23 +133,40 @@
           "description": "Unique within the canvas. Used by links."
         },
         "type": {
-          "enum": ["query", "chart", "note", "table"]
+          "enum": [
+            "query",
+            "chart",
+            "note",
+            "table",
+            "shape",
+            "text",
+            "sticky",
+            "frame",
+            "placeholder"
+          ],
+          "description": "query, chart, note and table exist in version 1. shape, text, sticky, frame and placeholder need version 2."
         },
         "title": {
           "type": "string",
           "minLength": 1,
           "pattern": "^[^{}]+$",
-          "description": "Unique within the canvas (not enforced by JSON Schema; the server must check it). Used in {{title}} references, so it must not contain braces."
+          "description": "Required for query, chart, note and table windows. Unique among them (not enforced by JSON Schema; the server must check it). Used in {{title}} references, so it must not contain braces. Sketch nodes use `label` and may omit it."
         },
-        "position": { "$ref": "#/$defs/point" },
-        "size": { "$ref": "#/$defs/size" },
+        "position": {
+          "$ref": "#/$defs/point"
+        },
+        "size": {
+          "$ref": "#/$defs/size"
+        },
         "sql": {
           "type": "string",
           "description": "SQL text for a query window. May contain {{title}} references. Required when type is query."
         },
         "chart": {
           "type": "object",
-          "required": ["vega_lite"],
+          "required": [
+            "vega_lite"
+          ],
           "properties": {
             "vega_lite": {
               "type": "object",
@@ -119,22 +192,179 @@
           "exclusiveMinimum": 0,
           "exclusiveMaximum": 100,
           "description": "Query windows only. Percent of the window body the SQL editor takes. Absent means the default split."
+        },
+        "label": {
+          "type": "string",
+          "description": "Sketch nodes. The text shown on the shape, text, sticky or frame."
+        },
+        "shape": {
+          "enum": [
+            "rect",
+            "rounded",
+            "ellipse",
+            "diamond",
+            "cylinder"
+          ],
+          "description": "Required when type is shape."
+        },
+        "fill": {
+          "type": "string",
+          "description": "Sketch nodes. CSS color of the fill. Absent means the type's default."
+        },
+        "stroke": {
+          "type": "string",
+          "description": "Sketch nodes. CSS color of the outline."
+        },
+        "font_size": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Sketch nodes. Label size in px."
+        },
+        "locked": {
+          "type": "boolean",
+          "description": "Any node. A locked node cannot be moved, resized, deleted or edited until unlocked."
+        },
+        "z": {
+          "type": "number",
+          "description": "Any node. Stacking order, higher is in front. Absent means 0 (frames: -1)."
+        },
+        "placeholder": {
+          "$ref": "#/$defs/placeholder"
         }
       },
       "allOf": [
-        { "if": { "properties": { "type": { "const": "query" } }, "required": ["type"] },
-          "then": { "required": ["sql"] } },
-        { "if": { "properties": { "type": { "const": "chart" } }, "required": ["type"] },
-          "then": { "required": ["chart"] } },
-        { "if": { "properties": { "type": { "const": "note" } }, "required": ["type"] },
-          "then": { "required": ["text"] } },
-        { "if": { "properties": { "type": { "const": "table" } }, "required": ["type"] },
-          "then": { "required": ["table"] } }
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "query",
+                  "chart",
+                  "note",
+                  "table"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "title"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "query"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "sql"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "chart"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "chart"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "note"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "text"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "table"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "table"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "shape"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "shape"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "placeholder"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "placeholder"
+            ]
+          }
+        }
       ]
     },
     "link": {
       "type": "object",
-      "required": ["from", "to"],
+      "required": [
+        "from",
+        "to"
+      ],
       "additionalProperties": false,
       "properties": {
         "from": {
@@ -148,6 +378,196 @@
           "description": "Id of the window that references it (the downstream one)."
         }
       }
+    },
+    "placeholder": {
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false,
+      "description": "A table that does not exist yet.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+          "description": "A UUID. The table is named `ph:<id>` in the relationship store."
+        },
+        "name": {
+          "type": "string",
+          "description": "Table name as typed. May be empty while it is being edited."
+        },
+        "columns": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "default": "",
+                "description": "Free text, such as bigint or decimal(10,2)."
+              },
+              "key": {
+                "enum": [
+                  "pk",
+                  "fk",
+                  null
+                ],
+                "description": "Key marker, or absent."
+              }
+            }
+          }
+        },
+        "linked": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "description": "Full name catalog.schema.table of the real table this one stands for, once it exists."
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": [
+        "id",
+        "source",
+        "target"
+      ],
+      "additionalProperties": false,
+      "description": "A connector between two nodes of any type.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique among edges."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Id of a window."
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Id of a window."
+        },
+        "source_handle": {
+          "enum": [
+            "t",
+            "r",
+            "b",
+            "l"
+          ],
+          "description": "Side of the source node: top, right, bottom, left."
+        },
+        "target_handle": {
+          "enum": [
+            "t",
+            "r",
+            "b",
+            "l"
+          ],
+          "description": "Side of the target node."
+        },
+        "line": {
+          "enum": [
+            "straight",
+            "step",
+            "curve"
+          ],
+          "default": "step",
+          "description": "step is orthogonal."
+        },
+        "arrow_start": {
+          "type": "boolean",
+          "default": false
+        },
+        "arrow_end": {
+          "type": "boolean",
+          "default": true
+        },
+        "dashed": {
+          "type": "boolean",
+          "default": false
+        },
+        "label": {
+          "type": "string"
+        },
+        "color": {
+          "type": "string",
+          "description": "CSS color of the line."
+        },
+        "relationship": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Set once this connector has been saved to the relationship store as a `sketch` edge.",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Id of the stored edge."
+            },
+            "source_column": {
+              "type": "string",
+              "minLength": 1
+            },
+            "target_column": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "version": {
+            "const": 1
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "then": {
+        "required": [
+          "profile"
+        ],
+        "properties": {
+          "profile": {
+            "type": "string",
+            "minLength": 1
+          },
+          "edges": false,
+          "windows": {
+            "items": {
+              "properties": {
+                "type": {
+                  "enum": [
+                    "query",
+                    "chart",
+                    "note",
+                    "table"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

@@ -227,6 +227,15 @@ Response: `{"saved": "<safe(name)>"}`
 
 **Canvas file:** the shape is described by `contracts/canvas.schema.json`. The server does not load that file. The pydantic models in `canvases.py` mirror it and do the validating. The API stores and returns the canvas unchanged.
 
+**Canvas format versions.**
+
+- **Version 1** has query, chart, note and table windows and read-only `links`. It requires `profile`.
+- **Version 2** keeps all of that and adds the sketch node types and a top-level `edges` list. The UI writes version 2 from now on; version 1 files load unchanged and are rewritten as version 2 only when the user saves again. `profile` may be `null` in version 2 (a sketch made with no connection).
+- Sketch nodes live in `windows`, with the same `id`, `position` and `size`, and a `type` of `shape` (with `shape`: `rect`, `rounded`, `ellipse`, `diamond` or `cylinder`), `text`, `sticky`, `frame` or `placeholder`. They carry `label` instead of `title` (not unique, not used in `{{title}}`), and optionally `fill`, `stroke` (CSS colors), `font_size`, `locked` and `z`. Any node, including query windows, may carry `locked` and `z`. A frame holds other nodes only by geometry: moving it moves the unlocked nodes lying inside it.
+- A `placeholder` node is a table that does not exist yet: `placeholder: {id, name, columns: [{name, type, key?}], linked?}`. `id` is a UUID, and the relationship store knows the table as `ph:<id>`. `key` is `pk` or `fk`. `linked` is the full name of the real table it stands for, once it exists. A placeholder that is linked is named by that real table in stored edges.
+- `edges[]` are connectors: `id`, `source`, `target` (window ids), `source_handle` and `target_handle` (`t`, `r`, `b` or `l`), `line` (`straight`, `step` or `curve`), `arrow_start`, `arrow_end`, `dashed`, `label`, `color`, and `relationship`. `relationship` is `{id?, source_column?, target_column?}` and means the connector was saved to the relationship store as a `sketch` edge (section 4) with that stored id. Edge ids are unique, and both ends must name an existing window.
+- Saving a connector to the relationship store is a separate, explicit step (the client calls `POST /api/relationships/import` with one `sketch` edge). Saving a canvas never writes to the store.
+
 ### `POST /api/query`
 
 *Needs connection and a selected warehouse.* Body: Query body.
@@ -285,7 +294,7 @@ Response: JSON array of strings, sorted, e.g. `["hours", "sales"]`. Matches `GET
 
 ### `POST /api/canvases`
 
-No connection needed. Body: a canvas object, validated by the pydantic models in `canvases.py` (which mirror `contracts/canvas.schema.json`; the server does not load the schema file). Beyond the models: window titles unique and window ids unique, and `links` entries refer to existing ids.
+No connection needed. Body: a canvas object, validated by the pydantic models in `canvases.py` (which mirror `contracts/canvas.schema.json`; the server does not load the schema file). Beyond the models: titles of query, chart, note and table windows unique, window ids unique, edge ids unique, and `links` and `edges` entries refer to existing ids. A version 1 body that carries a sketch type, an `edges` key or no `profile` is a 400.
 
 Writes `data/canvases/<name>.json`, overwriting any existing canvas with that name. The server stores exactly the body it validated. It adds no fields, so save followed by load returns the same object.
 
