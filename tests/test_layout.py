@@ -1,5 +1,6 @@
 """layout.py: doctor, tidy, arrange, describe and render_png on hand-built canvases and on perturbed generated ones."""
 import copy
+import json
 import random
 import struct
 import sys
@@ -562,12 +563,12 @@ def test_fit_size_reads_flat_keys_and_frames_and_placeholders():
     assert layout.fit_size(ph)[0] > 100
 
 
-def test_tidy_fit_labels_grows_then_separates_what_it_overlaps():
-    c = canvas([cyl("a", 0, 0), cyl("b", 110, 0, label="b")])  # b sits in the gap a will grow into
+def test_tidy_fit_labels_grows_then_makes_room_for_what_lies_beyond():
+    c = canvas([cyl("a", 0, 0), cyl("b", 110, 0, label="b")])  # b sits just beyond the edge a will grow past
     assert any(i["kind"] == "label_overflow" for i in layout.doctor(c)["issues"])
     out, changes = layout.tidy(c, rules=["fit_labels", "overlaps"])
     assert size_of(out, "a")[0] > 100 and size_of(out, "b") == (100, 120)
-    assert box_of(out, "b")[0] >= box_of(out, "a")[2] + layout.MIN_GAP - 1
+    assert box_of(out, "b")[0] - box_of(out, "a")[2] == 10  # the original gap, not squeezed to a minimum
     assert {ch["id"] for ch in changes} == {"a", "b"}
     assert layout.doctor(out)["issues"] == []
     assert layout.tidy(out)[1] == []  # idempotent with every rule
@@ -666,8 +667,8 @@ def test_place_labels_keeps_a_free_offset_and_resolves_a_stale_one():
 
 
 def test_place_labels_leaves_what_it_cannot_clear():
-    # a label wider than its whole segment, between two nodes: no offset on the segment clears the nodes
-    c = canvas([node("a", 0, 0, 60, 60), node("b", 70, 0, 60, 60)], [edge("e", "a", "b", "r", "l", label="a label that is far too long")])
+    # a label wider than its whole segment, between two nodes that may not move: no offset clears the nodes
+    c = canvas([node("a", 0, 0, 60, 60), node("b", 70, 0, 60, 60, locked=True)], [edge("e", "a", "b", "r", "l", label="a label that is far too long")])
     out, _ = layout.tidy(c)
     assert any(i["kind"] == "label_collision" for i in layout.doctor(out)["issues"])
     assert layout.tidy(out)[1] == []
@@ -698,3 +699,89 @@ def test_labels_scenario_ends_with_no_label_issues():
         # the converging connectors e0 to e2 always end clear. e3 to e5 share routes or cross short gaps, and when the
         # perturbation leaves too little room along their segment the doctor keeps reporting them
         assert not [i for i in rep["issues"] if i["kind"] == "label_collision" and set(i["edges"]) <= {"e0", "e1", "e2"}], f"seed {seed}"
+
+
+# ---------------------------------------------------------------- make room: growth, clearance and label gaps
+
+def test_make_room_pushes_what_lies_beyond_a_growing_edge_and_keeps_the_gaps():
+    # a row a, b, c (gaps 40 and 20), a node d under the row, and e on another band at the far right
+    c = canvas([node("a", 0, 0, 100, 60), node("b", 140, 0, 100, 60), node("c", 260, 20, 100, 60),
+                node("d", 0, 200, 100, 60), node("e", 500, 400, 100, 60)])
+    ctx = layout._Ctx(c, None, None)
+    before = {n["id"]: layout._box(n) for n in ctx.nodes}
+    layout._put(ctx.by["a"], w=130)
+    assert layout._make_room(ctx, before, {"a": (30.0, 0.0)})
+    assert box_of(ctx.canvas, "b")[0] == 170 and box_of(ctx.canvas, "c")[0] == 290  # both moved by exactly the growth
+    assert box_of(ctx.canvas, "b")[0] - box_of(ctx.canvas, "a")[2] == 40  # gaps as they were
+    assert box_of(ctx.canvas, "c")[0] - box_of(ctx.canvas, "b")[2] == 20
+    assert box_of(ctx.canvas, "d") == before["d"] and box_of(ctx.canvas, "e") == before["e"]  # not beyond a's span
+
+
+def test_make_room_takes_the_larger_of_two_growths_not_their_sum_and_pushes_down_too():
+    c = canvas([node("a", 0, 0, 100, 60), node("b", 0, 80, 100, 60), node("m", 150, 30, 100, 60), node("n", 0, 300, 100, 60)])
+    ctx = layout._Ctx(c, None, None)
+    before = {n["id"]: layout._box(n) for n in ctx.nodes}
+    layout._put(ctx.by["a"], w=130)
+    layout._put(ctx.by["b"], w=150)
+    assert layout._make_room(ctx, before, {"a": (30.0, 0.0), "b": (50.0, 0.0)})
+    assert box_of(ctx.canvas, "m")[0] == 200  # a and b both lie left of m: shifted 50, not 80
+    assert box_of(ctx.canvas, "n") == before["n"]
+    tall = canvas([node("a", 0, 0, 100, 60), node("b", 20, 100, 100, 60), node("c", 300, 100, 100, 60)])
+    ctx = layout._Ctx(tall, None, None)
+    before = {n["id"]: layout._box(n) for n in ctx.nodes}
+    layout._put(ctx.by["a"], h=90)
+    layout._make_room(ctx, before, {"a": (0.0, 30.0)})
+    assert box_of(ctx.canvas, "b")[1] == 130 and box_of(ctx.canvas, "c")[1] == 100  # c is not under a
+
+
+def test_make_room_leaves_locked_nodes_and_moves_a_frame_with_its_members_once():
+    c = canvas([node("a", 0, 0, 100, 60), node("b", 140, 0, 100, 60, locked=True), node("f", 300, 0, 200, 100, "frame"),
+                node("g", 320, 20, 80, 40)])
+    ctx = layout._Ctx(c, None, None)
+    before = {n["id"]: layout._box(n) for n in ctx.nodes}
+    layout._put(ctx.by["a"], w=130)
+    layout._make_room(ctx, before, {"a": (30.0, 0.0)})
+    assert box_of(ctx.canvas, "b") == before["b"]  # locked: stays, and does not carry what lies beyond it
+    assert box_of(ctx.canvas, "f")[0] == 330 and box_of(ctx.canvas, "g")[0] == 350  # the member moved with its frame, once
+
+
+def test_overlap_separation_leaves_a_clearance_that_fits_a_connector_label():
+    plain = canvas([node("a", 0, 0), node("b", 110, 0)])
+    out, _ = layout.tidy(plain, rules=["overlaps"])
+    assert box_of(out, "b")[0] - box_of(out, "a")[2] == layout.MIN_GAP == 16
+    labeled = canvas([node("a", 0, 0), node("b", 110, 0)], [edge("e", "a", "b", "r", "l", label="matches on customer_id")])
+    out, _ = layout.tidy(labeled, rules=["overlaps"])
+    gap = box_of(out, "b")[0] - box_of(out, "a")[2]
+    assert gap >= layout._label_size("matches on customer_id")[0] + layout.LABEL_GAP_PAD - 1
+    short = canvas([node("a", 0, 0), node("b", 110, 0)], [edge("e", "a", "b", "r", "l", label="x")])
+    out, _ = layout.tidy(short, rules=["overlaps"])
+    assert box_of(out, "b")[0] - box_of(out, "a")[2] >= layout.LABELED_MIN_GAP
+    assert layout.tidy(out, rules=["overlaps"])[1] == []
+
+
+def test_place_labels_widens_a_gap_that_is_too_short_and_moves_only_what_lies_beyond():
+    c = canvas([node("a", 0, 0, 60, 60), node("b", 70, 0, 60, 60), node("far", 300, 0, 60, 60), node("other", 0, 300, 60, 60)],
+               [edge("e", "a", "b", "r", "l", label="a label that is far too long")])
+    out, changes = layout.tidy(c, rules=["place_labels"])
+    assert not [i for i in layout.doctor(out)["issues"] if i["kind"] == "label_collision"]
+    assert box_of(out, "a") == layout._box(c["windows"][0]) and box_of(out, "other") == layout._box(c["windows"][3])
+    shift = box_of(out, "b")[0] - 70
+    assert shift > 0 and box_of(out, "far")[0] == 300 + shift  # b and what lies beyond it moved by the same amount
+    assert {ch["id"] for ch in changes} == {"b", "far"}
+    assert layout.tidy(out, rules=["place_labels"])[1] == []
+    assert layout.tidy(layout.tidy(c)[0])[1] == []  # and with every rule
+
+
+def test_tidy_agent_canvas_leaves_no_label_issue_and_scores_high():
+    c = json.loads((Path(__file__).parent / "fixtures" / "agent_canvas.json").read_text())
+    before = layout.doctor(c)
+    assert {"label_overflow", "uneven_spacing"} <= set(kinds(before)) and before["score"] < 95
+    out, changes = layout.tidy(c)
+    report = layout.doctor(out)
+    assert not {"label_collision", "label_overflow"} & set(kinds(report)), report["issues"]
+    assert report["score"] >= 95
+    assert layout.tidy(out)[1] == []  # idempotent
+    assert "w1" not in {ch["id"] for ch in changes}  # a node nothing grew into does not move
+    assert box_of(out, "orders")[0] < box_of(out, "metrics")[0] < box_of(out, "page")[0]  # order kept
+    for a, b in (("orders", "metrics"), ("customer", "metrics"), ("metrics", "page")):
+        assert box_of(out, b)[0] - box_of(out, a)[2] >= layout.LABELED_MIN_GAP

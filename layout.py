@@ -19,7 +19,9 @@ PLACE_RELATIONS = ("right_of", "left_of", "below", "above", "inside")
 OVERLAP_TOL = 2.0      # px of intersection on both axes that still counts as touching, not overlapping
 NEAR_MIN, NEAR_MAX = 1.0, 6.0  # edges this far apart are a near-miss alignment
 NEIGHBOR_DIST = 300.0  # nodes farther apart than this are not compared for alignment
-MIN_GAP = 8            # gap left when an overlap is pushed apart
+MIN_GAP = 16           # smallest clearance left when an overlap is pushed apart
+LABEL_GAP_PAD = 8      # px of slack a connector label needs beyond its own box on the gap it sits in
+LABELED_MIN_GAP = 40   # smallest clearance between two nodes joined by a labeled connector
 FRAME_PAD = 12         # padding when a frame grows to hold a member
 COLLAPSED_H = 36.0     # height of a collapsed window (its title bar)
 STEP_OFFSET = 20.0     # how far a step connector leaves a node before turning
@@ -949,6 +951,61 @@ def _rule_frames(ctx: _Ctx) -> bool:
     return changed
 
 
+def _pair_clearance(ctx: _Ctx, a: str, b: str, ai: int) -> float:
+    """The gap to leave between two nodes pushed apart along axis `ai`: MIN_GAP, or when a labeled connector joins them
+    enough for its label (the estimated size along that axis plus padding, at least LABELED_MIN_GAP)."""
+    need = float(MIN_GAP)
+    for e in _edges(ctx.canvas):
+        text = e.get("label")
+        if isinstance(text, str) and text and {e.get("source"), e.get("target")} == {a, b}:
+            need = max(need, LABELED_MIN_GAP, _label_size(text)[ai] + LABEL_GAP_PAD)
+    return need
+
+
+def _make_room(ctx: _Ctx, boxes: dict[str, tuple], growth: dict[str, tuple[float, float]],
+               pairs: Iterable[tuple[int, str, str]] = ()) -> bool:
+    """Inserts space where nodes grew, so what lay beyond keeps its gap.
+
+    `boxes` are the nodes' boxes before the growth and `growth` is how far each node's right edge (x) and bottom edge
+    (y) moved. A node beyond a growing edge, overlapping the grown node's span on the other axis, moves outward by the
+    growth, and so, transitively, does whatever lies beyond it; two nodes pushed by different growths move by the
+    larger chain, not the sum. `pairs` are (axis, near, far) triples forced the same way whether or not the spans
+    overlap. Nodes that may not move stay put, and nothing is pulled back, so order and gaps only widen."""
+    ctx.refresh()
+    forced = set(pairs)
+    shift = {nid: [0.0, 0.0] for nid in boxes}
+    for ai in (0, 1):
+        oa = 1 - ai
+        order = sorted(boxes, key=lambda k: (boxes[k][ai], str(k)))
+        for i, k in enumerate(order):
+            best = 0.0
+            kb = boxes[k]
+            for p in order[:i]:
+                carry = shift[p][ai] + growth.get(p, (0.0, 0.0))[ai]
+                if carry <= best:
+                    continue
+                pb = boxes[p]
+                beyond = kb[ai] >= pb[ai + 2] - 1.0
+                if (beyond and min(pb[oa + 2], kb[oa + 2]) - max(pb[oa], kb[oa]) > 1.0) or (ai, p, k) in forced:
+                    best = carry
+            shift[k][ai] = best if best > 0 and ctx.movable(k) else 0.0
+    depth = {nid: len(_ancestors(nid, ctx.parent)) for nid in boxes}
+    applied = {nid: [0.0, 0.0] for nid in boxes}
+    changed = False
+    for k in sorted(boxes, key=lambda k: (depth[k], str(k))):
+        dx, dy = (shift[k][i] - applied[k][i] for i in (0, 1))
+        dx, dy = (d if d > 1e-9 else 0.0 for d in (dx, dy))
+        if not dx and not dy:
+            continue
+        ctx.move(k, dx, dy)
+        for d in ctx.descendants(k):
+            if d in applied and ctx.by[d].get("locked") is not True:
+                applied[d][0] += dx
+                applied[d][1] += dy
+        changed = True
+    return changed
+
+
 def _rule_overlaps(ctx: _Ctx) -> bool:
     skipped: set = set()
     start = {n["id"]: (_x(n), _y(n)) for n in ctx.nodes}
@@ -969,10 +1026,12 @@ def _rule_overlaps(ctx: _Ctx) -> bool:
         high, low = (a, b) if (ca, order[a["id"]]) >= (cb, order[b["id"]]) else (b, a)
         hb, lb = _box(high), _box(low)
         if ctx.movable(high["id"]):
-            target = _snap_dir(lb[ai + 2] + MIN_GAP, ctx.grid, True)
+            gap = _pair_clearance(ctx, high["id"], low["id"], ai)
+            target = _snap_dir(lb[ai + 2] + gap, ctx.grid, True)
             mover, delta = high, target - hb[ai]
         elif ctx.movable(low["id"]):
-            target = _snap_dir(hb[ai] - MIN_GAP - (lb[ai + 2] - lb[ai]), ctx.grid, False)
+            gap = _pair_clearance(ctx, high["id"], low["id"], ai)
+            target = _snap_dir(hb[ai] - gap - (lb[ai + 2] - lb[ai]), ctx.grid, False)
             mover, delta = low, target - lb[ai]
         else:
             skipped.add((a["id"], b["id"]))
@@ -1037,21 +1096,54 @@ def _rule_handles(ctx: _Ctx, edge_ids: Optional[set] = None) -> bool:
 
 
 def _rule_fit_labels(ctx: _Ctx) -> bool:
-    """Grows nodes whose label overflows to the size `fit_size` gives. Never shrinks; locked nodes are left alone."""
-    changed = False
+    """Grows nodes whose label overflows to the size `fit_size` gives, and pushes what lies beyond a growing edge outward
+    by the growth (`_make_room`), so the gaps stay. Never shrinks; locked nodes are left alone."""
+    before = {n["id"]: _box(n) for n in ctx.nodes}
+    growth: dict[str, tuple[float, float]] = {}
     for n in ctx.nodes:
         if n.get("locked") is True or (ctx.allowed is not None and n["id"] not in ctx.allowed):
             continue
         w, h = fit_size(n)
         if w > _w(n) + 1e-9 or h > _h(n) + 1e-9:
+            growth[n["id"]] = (max(w, _w(n)) - _w(n), max(h, _h(n)) - _h(n))
             _put(n, w=max(w, _w(n)), h=max(h, _h(n)))
-            changed = True
-    return changed
+    if growth:
+        _make_room(ctx, before, growth)
+    return bool(growth)
+
+
+def _widen_gap(ctx: _Ctx, info: dict) -> bool:
+    """Makes room between a connector's end nodes when its label's segment is too short for the label: inserts the
+    missing length after the nearer end along the segment's axis, as `_make_room` does for a grown node."""
+    e = info["edge"]
+    ai = 0 if abs(info["dir"][0]) >= abs(info["dir"][1]) else 1
+    need = max(LABELED_MIN_GAP, info["size"][ai] + LABEL_GAP_PAD) - info["len"]
+    if need <= 1e-9:
+        return False
+    a, b = ctx.by[e["source"]], ctx.by[e["target"]]
+    near, far = sorted((a, b), key=lambda n: (_box(n)[ai] + _box(n)[ai + 2]) / 2)
+    if _box(far)[ai] < _box(near)[ai + 2] - 1.0:  # the ends overlap along the axis: no gap to widen
+        return False
+    need = math.ceil(need)
+    boxes = {n["id"]: _box(n) for n in ctx.nodes}
+    return _make_room(ctx, boxes, {near["id"]: (need, 0.0) if ai == 0 else (0.0, need)}, [(ai, near["id"], far["id"])])
 
 
 def _rule_place_labels(ctx: _Ctx) -> bool:
     """Sets `label_offset` on connectors whose label collides with another label or a node: the nearest offset along
-    the label's segment that clears everything. A label that collides with nothing keeps its offset."""
+    the label's segment that clears everything. A label that collides with nothing keeps its offset. When the segment
+    is too short for the label and no offset clears it, the gap between the connector's end nodes is widened instead."""
+    changed = False
+    widened: set = set()
+    for _ in range(len(_edges(ctx.canvas)) + 1):
+        ch, wide = _place_labels_pass(ctx, widened)
+        changed |= ch
+        if not wide:
+            break
+    return changed
+
+
+def _place_labels_pass(ctx: _Ctx, widened: set) -> tuple[bool, bool]:
     plan = _label_plan(ctx.canvas)
     solid = [_box(n) for n in ctx.nodes if n.get("type") != "frame"]
     offsets = {eid: _num(i["edge"].get("label_offset")) for eid, i in plan.items()}
@@ -1074,6 +1166,10 @@ def _rule_place_labels(ctx: _Ctx) -> bool:
         cands = sorted({v for k in range(0, half // LABEL_STEP + 1) for v in (k * LABEL_STEP, -k * LABEL_STEP)} | {half, -half},
                        key=lambda v: (abs(v), -v))
         best = next((c for c in cands if clear(c)), None)
+        if best is None and eid not in widened:
+            widened.add(eid)
+            if _widen_gap(ctx, info):  # geometry moved: plan again from the new routes
+                return True, True
         if best is None or best == offsets[eid]:
             continue
         offsets[eid] = best
@@ -1082,7 +1178,7 @@ def _rule_place_labels(ctx: _Ctx) -> bool:
         else:
             e.pop("label_offset", None)
         changed = True
-    return changed
+    return changed, False
 
 
 _RULE_FNS = {"fit_labels": _rule_fit_labels, "frames": _rule_frames, "overlaps": _rule_overlaps, "align": _rule_align,

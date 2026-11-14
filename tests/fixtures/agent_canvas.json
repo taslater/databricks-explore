@@ -1,0 +1,128 @@
+{
+  "version": 2,
+  "name": "mcp-live",
+  "profile": null,
+  "windows": [
+    {
+      "id": "orders",
+      "type": "shape",
+      "position": {
+        "x": 0,
+        "y": -20
+      },
+      "size": {
+        "w": 100,
+        "h": 120
+      },
+      "fill": "#ffffff",
+      "stroke": "#1f2328",
+      "font_size": 14,
+      "shape": "cylinder",
+      "label": "samples.tpch.orders"
+    },
+    {
+      "id": "customer",
+      "type": "shape",
+      "position": {
+        "x": 0,
+        "y": 140
+      },
+      "size": {
+        "w": 100,
+        "h": 120
+      },
+      "fill": "#ffffff",
+      "stroke": "#1f2328",
+      "font_size": 14,
+      "shape": "cylinder",
+      "label": "samples.tpch.customer"
+    },
+    {
+      "id": "metrics",
+      "type": "shape",
+      "position": {
+        "x": 180,
+        "y": 80
+      },
+      "size": {
+        "w": 140,
+        "h": 80
+      },
+      "fill": "#ffffff",
+      "stroke": "#1f2328",
+      "font_size": 14,
+      "shape": "rounded",
+      "label": "order_metrics (metric view)"
+    },
+    {
+      "id": "page",
+      "type": "sticky",
+      "position": {
+        "x": 400,
+        "y": 40
+      },
+      "size": {
+        "w": 160,
+        "h": 160
+      },
+      "fill": "#fef9c3",
+      "stroke": "#ca8a04",
+      "font_size": 14,
+      "label": "Page: Revenue (draft)"
+    },
+    {
+      "id": "w1",
+      "type": "query",
+      "position": {
+        "x": -330,
+        "y": 320
+      },
+      "size": {
+        "w": 760,
+        "h": 520
+      },
+      "title": "revenue_by_nation",
+      "sql": "SELECT `Customer Nation`, MEASURE(`Total Revenue`) FROM workspace.explore_demo.order_metrics GROUP BY ALL ORDER BY 2 DESC LIMIT 5",
+      "collapsed": false,
+      "editor_split": 30
+    }
+  ],
+  "edges": [
+    {
+      "id": "c1",
+      "source": "orders",
+      "target": "metrics",
+      "source_handle": "r",
+      "target_handle": "l",
+      "line": "step",
+      "arrow_start": false,
+      "arrow_end": true,
+      "dashed": false,
+      "label": "source"
+    },
+    {
+      "id": "c2",
+      "source": "customer",
+      "target": "metrics",
+      "source_handle": "r",
+      "target_handle": "l",
+      "line": "step",
+      "arrow_start": false,
+      "arrow_end": true,
+      "dashed": false,
+      "label": "join"
+    },
+    {
+      "id": "c3",
+      "source": "metrics",
+      "target": "page",
+      "source_handle": "r",
+      "target_handle": "l",
+      "line": "step",
+      "arrow_start": false,
+      "arrow_end": true,
+      "dashed": true,
+      "label": "documents"
+    }
+  ]
+}
