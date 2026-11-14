@@ -12,6 +12,7 @@ import type {
   EdgeDetailsResponse,
   BulkStatusBody,
   ImportResult,
+  JoinsResponse,
   MiningPlan,
   MiningStatus,
   ObjectSummary,
@@ -164,6 +165,9 @@ export const saveCanvas = (doc: CanvasDoc) => post<SavedResponse>('/api/canvases
 /** Derived and stored edges for one table. `level` is 'table' (rolled up, the default) or 'column'. */
 export const getRelationships = (table: string, refresh = false, level: 'table' | 'column' = 'table') =>
   get<RelationshipsResponse>(`/api/relationships${qs({ table, refresh, level: level === 'table' ? null : level })}`)
+
+/** The tables `table` is known to join to, with the column pairs: foreign keys, mined joins and manual edges. Local only. */
+export const getJoinKeys = (table: string) => get<JoinsResponse>(`/api/relationships/joins${qs({ table })}`)
 
 /** Creates a `manual` edge. 201 when new, 200 when the same edge existed (it is re-accepted). */
 export const createRelationship = (body: RelationshipCreate) => post<Relationship>('/api/relationships', body)

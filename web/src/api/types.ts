@@ -197,6 +197,25 @@ export interface RelationshipsResponse {
   errors: string[]
 }
 
+/** One way two tables join: every column pair of one join condition, read from the asked table's side. */
+export interface JoinKey {
+  pairs: Array<{ here: string; there: string }>
+  /** `fk` is a declared foreign key, `mined` came from query history, `manual` was drawn by the user. */
+  source: 'fk' | 'mined' | 'manual'
+  status: RelationshipStatus
+  /** Statements that used this key (mined only). */
+  runs: number | null
+  /** The constraint name (fk only). */
+  name: string | null
+}
+
+/** GET /api/relationships/joins: the tables one table is known to join to, with the keys. */
+export interface JoinsResponse {
+  table: string
+  joins: Array<{ table: string; keys: JoinKey[] }>
+  errors: string[]
+}
+
 export interface RelationshipCreate {
   source: Endpoint
   target: Endpoint
