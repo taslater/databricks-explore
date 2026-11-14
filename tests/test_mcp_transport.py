@@ -89,6 +89,13 @@ def test_ping_and_unknown_method_and_bad_json(agent):
     assert r.status_code == 400
 
 
+def test_the_handshake_free_probe_is_answered_so_a_modern_client_falls_back_to_initialize(env):
+    a = Agent(env)  # no session yet
+    r = a.rpc("server/discover")
+    assert r.status_code == 200 and r.get_json()["error"]["code"] == -32601 and "Mcp-Session-Id" not in r.headers
+    assert r.get_json()["id"] == 1
+
+
 def test_a_batch_gets_a_batch_back(agent):
     r = agent.post([{"jsonrpc": "2.0", "id": 1, "method": "ping"}, {"jsonrpc": "2.0", "method": "notifications/initialized"},
                     {"jsonrpc": "2.0", "id": 2, "method": "nope"}])

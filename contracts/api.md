@@ -322,6 +322,20 @@ No connection needed. Returns the stored canvas object exactly as saved. The fil
 
 Errors: missing file returns **404** `{"error": "canvas not found: <name>"}`. A file that fails validation returns **400** `{"error": ...}` with the same message format as POST.
 
+### Revisions, undo and live sync
+
+Every saved canvas has a **revision**: a counter that every save bumps, by the page or by an agent over MCP (`contracts/mcp.md`). It lives beside the file in `data/canvas_history/<name>/meta.json`, never inside the canvas, so a save followed by a load still returns exactly what was saved. A canvas saved before revisions existed is at revision 0.
+
+`POST /api/canvases` now answers `{"saved": "<name>", "revision": <n>}`. It also reads an optional request header, `X-Base-Revision: <n>`, the revision the sender started from. When the canvas exists and is no longer at that revision, nothing is written and the answer is **409** `{"error": "canvas d was saved by agent since revision 4 (now revision 6)", "name": "d", "revision": 6, "by": "agent", "snapshots": 2}`. A bad header value is 400. With no header the save is unchecked, as before.
+
+#### `GET /api/canvases/<name>/revision`
+
+No connection needed. The page polls it every 2 seconds. Response: `{"name": "d", "revision": 6, "by": "agent", "snapshots": 2}`. `by` is who wrote last: `ui`, `agent` or `undo` (`null` for a file that was never saved by this version). `snapshots` is how many agent writes can still be undone. **404** for a missing canvas.
+
+#### `POST /api/canvases/<name>/undo`
+
+No connection needed, no body. Puts back the newest snapshot, the file as it was before an agent's last write (the server keeps the last 20 per canvas, under `data/canvas_history/<name>/`), and drops that snapshot. The restore is a write: the revision goes up and `by` is `undo`. Response: `{"name": "d", "revision": 7, "snapshots": 1}`. **400** `{"error": "nothing to undo for canvas d"}` when there is no snapshot, **404** for a missing canvas.
+
 Decisions made after T0 review (these override anything above):
 
 - Charts are attached to query windows through the optional `chart` field, per plan task C2. The standalone `chart` window type is in the enum but the UI does not create it.

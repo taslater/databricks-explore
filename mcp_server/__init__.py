@@ -26,6 +26,7 @@ def access_info(port: str) -> dict:
 def register(app: Flask, explorer: Callable, store: Callable, miner: Callable) -> None:
     """Add the MCP endpoint and the agent-access routes to the app."""
     ctx = Context(explorer=explorer, store=store, miner=miner)
+    auth.get_token()  # create the token file at startup, so it exists before the first request
 
     def refuse_non_local():
         """403 for a Host or Origin that is not this machine (DNS rebinding); None when fine."""
@@ -59,6 +60,9 @@ def register(app: Flask, explorer: Callable, store: Callable, miner: Callable) -
         batch = body if isinstance(body, list) else [body]
         if not batch:
             return json_rpc(rpc.error(rpc.INVALID_REQUEST, "empty batch"), 400)
+        if all(isinstance(m, dict) and m.get("method") == "server/discover" for m in batch):
+            # The 2026-07-28 handshake-free probe. We speak the initialize handshake, so say "no such method" and let the client fall back.
+            return json_rpc(rpc.error(rpc.METHOD_NOT_FOUND, "method not found: server/discover; use initialize", batch[0].get("id")))
         is_init = any(isinstance(m, dict) and m.get("method") == "initialize" for m in batch)
         if not is_init:
             if not session:

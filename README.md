@@ -101,6 +101,22 @@ The **Concepts** tab is a small business glossary over the catalog. It is shaped
 
 What tidy leaves is mostly connectors that pass through nodes. Those need a different arrangement, not a nudge, so Doctor reports them without a Fix.
 
+## Use from an agent (MCP)
+A coding agent such as Claude Code can explore the catalog and work on canvases next to you, through an MCP server inside the app (`/mcp`, streamable HTTP, this computer only). Click **Agent access** in the top bar, then **Copy command** and paste it into a terminal once:
+
+```sh
+claude mcp add --transport http databricks-explore http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"
+```
+
+The panel shows the real command (the port is the app's, 8767 in demo mode) with the token hidden until you tick **Show token**. **New token** replaces it, and agents that had the old one are refused until you give them the new command. The token is created on first run in `data/mcp_token` (mode 0600), and requests from another host or a web page are refused.
+
+- **What it can do.** Read the catalog (search, describe, list), relationships, mined join suggestions and usage, and concepts; add manual relationships and review them; create and link concepts; run **read-only SQL** (one `SELECT`, `DESCRIBE`, `SHOW` or `EXPLAIN`, checked with sqlglot, capped at 1000 rows and a timeout, cancelled when slow); and edit canvases (add shapes, text, stickies, frames, placeholder tables, query windows and table cards, connect, arrange, tidy, run the doctor, and render a PNG). Mining runs only when the agent passes `confirm: true`.
+- **What it cannot do.** Write to the workspace in any way, connect, or pick a profile or warehouse. It uses what you connected in the app, and its tools say "connect in the app first" otherwise.
+- **Canvas edits.** An agent places nodes by structure (right of, below or inside another node) and gets the layout doctor's score and a short text summary back after every edit. Every agent edit is saved to the canvas file at once and can be undone: **Undo agent change** in the top bar, or the agent's own `undo_canvas` (the last 20 are kept in `data/canvas_history/`).
+- **Live sync.** The open canvas checks for a newer revision every 2 seconds. With no unsaved edits it reloads in place and keeps your view. With unsaved edits you get "An agent changed this canvas", with **Reload** and **Keep mine**, and autosave waits for your choice.
+
+Try it without a workspace: `python app.py --demo` and `uv run --with mcp scripts/mcp_interop.py`, which starts the demo app and drives it with the official MCP Python SDK client (initialize, list tools, `status`, `search_tables`, `run_sql` allowed and rejected, then a canvas: create, add nodes, connect, arrange, doctor, render) and prints a pass or fail line for each. The full contract, every tool with its input and output, is `contracts/mcp.md`.
+
 ## Test
 ```sh
 uv run --with-requirements requirements.txt pytest -q
@@ -117,4 +133,4 @@ cd web && npm test
 | canvas queries | SQL Statement Execution API on the selected warehouse |
 
 ## Feedback files
-`data/logs/calls.jsonl`, `data/cache/...`, `data/diagrams/`, `data/canvases/`, `data/relationships/`, `data/screenshots/` (all under `EXPLORER_DATA_DIR` when set, and `data-demo/` in demo mode)
+`data/logs/calls.jsonl`, `data/cache/...`, `data/diagrams/`, `data/canvases/`, `data/canvas_history/`, `data/relationships/`, `data/mcp_token`, `data/screenshots/` (all under `EXPLORER_DATA_DIR` when set, and `data-demo/` in demo mode)
