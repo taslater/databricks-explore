@@ -322,3 +322,20 @@ def test_place_right_of_top_aligns_by_default_and_takes_align(agent):
     assert abs((b["c"][1] + b["c"][3]) / 2 - (b["s"][1] + b["s"][3]) / 2) <= 1  # align: center still works
     agent.ok("update_nodes", name="d", updates=[{"id": "q", "place": {"relation": "right_of", "anchor": "s", "align": "end"}}])
     assert boxes(saved())["q"][3] == boxes(saved())["s"][3]
+
+
+def test_update_nodes_accepts_nodes_as_an_alias_for_updates(agent):
+    agent.ok("create_canvas", name="d")
+    agent.ok("add_nodes", name="d", nodes=[shape(id="a", at={"x": 0, "y": 0})])
+    agent.ok("update_nodes", name="d", nodes=[{"id": "a", "label": "via alias"}])
+    assert saved()["windows"][0]["label"] == "via alias"
+    agent.ok("update_nodes", name="d", updates=[{"id": "a", "label": "via updates"}])
+    assert saved()["windows"][0]["label"] == "via updates"
+    assert "not both" in agent.fails("update_nodes", name="d", nodes=[{"id": "a"}], updates=[{"id": "a"}])
+    assert "needs updates" in agent.fails("update_nodes", name="d")
+    assert "arguments.nodes[0]" in agent.fails("update_nodes", name="d", nodes=[{"label": "no id"}])
+
+
+def test_get_canvas_format_text_is_describe(agent):
+    agent.ok("create_canvas", name="d")
+    assert agent.ok("get_canvas", name="d", format="text") == agent.ok("get_canvas", name="d")
