@@ -105,7 +105,8 @@ def list_canvases(ctx, args):
 
 
 @tool("get_canvas", "Read a canvas. describe (default) is a compact text summary: frames, a map, connectors, issues. json is the whole file.",
-      obj({"name": NAME, "format": {"type": "string", "enum": ["describe", "json"]}, "max_lines": integer(10, 300)}, ("name",)))
+      obj({"name": NAME, "format": {"type": "string", "enum": ["describe", "json", "text"], "description": "describe (default; text is an alias, as in doctor), or json"},
+           "max_lines": integer(10, 300)}, ("name",)))
 def get_canvas(ctx, args):
     c = _load(args["name"])
     if args.get("format") == "json":
@@ -248,16 +249,27 @@ UPDATE_FIELDS = {"label": S, "title": S, "sql": S, "text": S, "table": S, "shape
                  "linked": {"type": ["string", "null"]}, "place": PLACE, "at": POINT, **STYLE_PROPS}
 
 
-@tool("update_nodes", "Change fields of existing nodes: label, title, sql, text, colors, size, locked, collapsed, or move one with place or at. A new title rewrites {{old}} references in other windows. Locked nodes need locked: false in the same update to change.",
-      obj({"name": NAME, "updates": {"type": "array", "minItems": 1, "maxItems": 100, "items": {
-          "type": "object", "required": ["id"], "additionalProperties": False,
-          "properties": {"id": {"type": "string", "minLength": 1}, **UPDATE_FIELDS}}}, "auto_tidy": AUTO_TIDY}, ("name", "updates")),
+UPDATE_ITEMS = {"type": "array", "minItems": 1, "maxItems": 100, "items": {
+    "type": "object", "required": ["id"], "additionalProperties": False,
+    "properties": {"id": {"type": "string", "minLength": 1}, **UPDATE_FIELDS}}}
+
+
+@tool("update_nodes", "Change fields of existing nodes: label, title, sql, text, colors, size, locked, collapsed, or move one with place or at. A new title rewrites {{old}} references in other windows. Locked nodes need locked: false in the same update to change. Give the changes as updates (add_nodes calls its list nodes, and nodes is accepted here as an alias).",
+      obj({"name": NAME, "updates": UPDATE_ITEMS,
+           "nodes": {**UPDATE_ITEMS, "description": "alias of updates, the name add_nodes uses; give one of the two"},
+           "auto_tidy": AUTO_TIDY}, ("name",)),
       read_only=False)
 def update_nodes(ctx, args):
+    if "updates" in args and "nodes" in args:
+        raise ToolError("give updates or nodes (an alias), not both")
+    items = args.get("updates", args.get("nodes"))
+    if items is None:
+        raise ToolError("update_nodes needs updates (a list of {id, ...}); nodes is accepted as an alias")
+
     def mutate(canvas):
         by_id = {w["id"]: w for w in canvas["windows"]}
         touched = []
-        for u in args["updates"]:
+        for u in items:
             n = by_id.get(u["id"])
             if n is None:
                 raise ToolError(f"no node with id {u['id']!r}; ids: {', '.join(sorted(by_id)[:30])}")
