@@ -33,6 +33,16 @@ class CanvasNotFound(LookupError):
     """No stored canvas with that name (route returns HTTP 404)."""
 
 
+class CanvasConflict(RuntimeError):
+    """The canvas was saved by someone else since the revision the writer started from (route returns HTTP 409).
+
+    `info` is what revision_info() says now, so the page can offer Reload or Keep mine."""
+
+    def __init__(self, name: str, expected: int, info: dict):
+        super().__init__(f"canvas {name} was saved by {info['by'] or 'someone else'} since revision {expected} (now revision {info['revision']})")
+        self.info = info
+
+
 class Point(BaseModel):
     model_config = ConfigDict(extra="forbid")
     x: StrictFloat
@@ -252,11 +262,12 @@ def revision_info(name: str) -> dict:
                 "snapshots": len(_snapshots(name))}
 
 
-def write_canvas(data, by: str = "ui", snapshot: bool = False) -> tuple[str, int]:
+def write_canvas(data, by: str = "ui", snapshot: bool = False, expect: Optional[int] = None) -> tuple[str, int]:
     """Validate and write data/canvases/<name>.json, storing the body exactly as received. Returns (name, revision).
 
     Every write bumps the revision and records who made it (`by`). With `snapshot`, the file being replaced is kept
-    first (the newest KEEP_SNAPSHOTS are kept), which is what undo_canvas restores.
+    first (the newest KEEP_SNAPSHOTS are kept), which is what undo_canvas restores. With `expect`, the write is refused
+    (CanvasConflict) when the canvas exists and is not at that revision, so a page cannot overwrite an agent's newer save unseen.
     """
     name = parse_canvas(data).name
     # On Windows (and macOS by default) "Hours" and "hours" are the same file. Refuse
@@ -272,6 +283,8 @@ def write_canvas(data, by: str = "ui", snapshot: bool = False) -> tuple[str, int
     with LOCK:
         meta = _meta(name)
         old = meta.get("revision") if isinstance(meta.get("revision"), int) else 0
+        if expect is not None and path.is_file() and old != expect:
+            raise CanvasConflict(name, expect, revision_info(name))
         if snapshot and path.is_file():
             _atomic_write(history_dir(name) / f"{old:08d}.json", path.read_text(encoding="utf-8"))
             for stale in _snapshots(name)[:-KEEP_SNAPSHOTS]:

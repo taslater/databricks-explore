@@ -4,7 +4,7 @@
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import * as api from '../../api/client'
-import { getCanvasRevision } from '../../api/agent'
+import { getCanvasRevision, saveCanvasChecked, SaveConflict } from '../../api/agent'
 import type { CanvasDoc } from '../../api/types'
 import { useSaveCanvas, useSetWarehouse } from '../../api/hooks'
 import { useCanvasStore } from '../../store/canvasStore'
@@ -15,6 +15,15 @@ import { usePersistStore } from './persistStore'
 import { useSyncStore } from './syncStore'
 
 export const AUTOSAVE_DELAY_MS = 1500
+
+/** True when two file JSONs differ at most in the viewport (panning and zooming are not edits worth a banner). */
+export function sameContent(a: string, b: string): boolean {
+  const strip = (json: string) => {
+    const { viewport: _viewport, ...rest } = JSON.parse(json) as Record<string, unknown>
+    return JSON.stringify(rest)
+  }
+  return strip(a) === strip(b)
+}
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -115,10 +124,24 @@ export function useCanvasPersistence(): CanvasPersistence {
 
     persist.setStatus('saving')
     try {
-      const saved = await latest.current.save(built.file as unknown as CanvasDoc)
+      // The server refuses (409) when something else saved this canvas since the revision the page has.
+      const known = useSyncStore.getState().known
+      const saved = await saveCanvasChecked(built.file as unknown as CanvasDoc, known !== null && known.name === name ? known.revision : null)
+      void latest.current.qc.invalidateQueries({ queryKey: ['canvases'] })
       // The revision the server gave this write: the page has it, so the poll does not mistake it for someone else's.
       if (typeof saved?.revision === 'number') useSyncStore.getState().setKnown(name, saved.revision)
     } catch (e) {
+      if (e instanceof SaveConflict) {
+        // Nothing was written. A page whose only difference is the viewport has nothing to lose: the next poll reloads it.
+        // Otherwise the banner offers Reload or Keep mine, and autosave waits for the choice.
+        if (persist.savedJson !== null && sameContent(built.json, persist.savedJson)) {
+          usePersistStore.getState().markSaved(persist.savedJson)
+        } else {
+          useSyncStore.getState().setConflict(e.remote)
+          usePersistStore.getState().setStatus('unsaved')
+        }
+        return false
+      }
       usePersistStore.getState().setStatus('error', errorText(e), true)
       return false
     }

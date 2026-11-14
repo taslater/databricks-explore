@@ -541,11 +541,16 @@ def canvas_list():
 @app.post("/api/canvases")
 def canvas_save():
     body = request.get_json(silent=True)
+    base = request.headers.get("X-Base-Revision")  # the page sends the revision it loaded, to avoid overwriting a newer save
+    if base is not None and not base.isdigit():
+        return jsonify({"error": "X-Base-Revision: must be a whole number"}), 400
     try:
-        name, revision = canvases.write_canvas(body)
+        name, revision = canvases.write_canvas(body, expect=int(base) if base is not None else None)
         return jsonify({"saved": name, "revision": revision})
     except canvases.CanvasInvalid as e:
         return jsonify({"error": str(e)}), 400
+    except canvases.CanvasConflict as e:
+        return jsonify({"error": str(e), **e.info}), 409
 
 
 @app.get("/api/canvases/<name>")

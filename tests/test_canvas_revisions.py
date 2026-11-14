@@ -119,3 +119,32 @@ def test_routes_save_returns_the_revision_and_revision_and_undo_work(client):
 def test_routes_unknown_canvas_is_404(client):
     assert client.get("/api/canvases/nope/revision").status_code == 404
     assert client.post("/api/canvases/nope/undo").status_code == 404
+
+
+def test_expect_refuses_a_write_over_a_newer_save(cdir):
+    canvases.write_canvas(with_label("1"))
+    canvases.write_canvas(with_label("agent"), by="agent", snapshot=True)
+    with pytest.raises(canvases.CanvasConflict) as e:
+        canvases.write_canvas(with_label("stale page"), expect=1)
+    assert e.value.info == {"name": "sk", "revision": 2, "by": "agent", "snapshots": 1}
+    assert "saved by agent since revision 1" in str(e.value)
+    assert canvases.load_canvas("sk") == with_label("agent")
+    assert canvases.write_canvas(with_label("up to date"), expect=2) == ("sk", 3)
+
+
+def test_expect_does_not_apply_to_a_canvas_that_does_not_exist_yet(cdir):
+    assert canvases.write_canvas(with_label("new"), expect=7) == ("sk", 1)
+
+
+def test_route_returns_409_with_the_current_revision_and_accepts_a_matching_base(client):
+    client.post("/api/canvases", json=with_label("1"))
+    canvases.write_canvas(with_label("agent"), by="agent", snapshot=True)
+    stale = client.post("/api/canvases", json=with_label("page"), headers={"X-Base-Revision": "1"})
+    assert stale.status_code == 409
+    body = stale.get_json()
+    assert body["revision"] == 2 and body["by"] == "agent" and "since revision 1" in body["error"]
+    assert client.get("/api/canvases/sk").get_json() == with_label("agent")
+    ok = client.post("/api/canvases", json=with_label("page"), headers={"X-Base-Revision": "2"})
+    assert ok.status_code == 200 and ok.get_json() == {"saved": "sk", "revision": 3}
+    assert client.post("/api/canvases", json=with_label("x"), headers={"X-Base-Revision": "abc"}).status_code == 400
+    assert client.post("/api/canvases", json=with_label("no header")).status_code == 200  # the check is opt-in

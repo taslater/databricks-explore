@@ -9,6 +9,7 @@ import { useCanvasStore } from '../../store/canvasStore'
 import { useSketchStore } from '../../sketch/sketchStore'
 import { decideSync, handleRemote, pollNow, reloadInPlace } from './canvasSync'
 import { usePersistStore } from './persistStore'
+import { sameContent } from './useCanvasPersistence'
 import { useSyncStore } from './syncStore'
 
 const rev = (revision: number, by: CanvasRevision['by'] = 'agent', snapshots = 1): CanvasRevision => ({ name: 'd', revision, by, snapshots })
@@ -168,5 +169,15 @@ describe('pollNow', () => {
     revisionApi.getCanvasRevision.mockClear()
     await pollNow()
     expect(revisionApi.getCanvasRevision).not.toHaveBeenCalled()
+  })
+})
+
+describe('sameContent', () => {
+  const a = JSON.stringify({ name: 'd', viewport: { x: 0, y: 0, zoom: 1 }, windows: [{ id: 's1' }] })
+  it('ignores the viewport', () => {
+    expect(sameContent(a, JSON.stringify({ name: 'd', viewport: { x: 9, y: 9, zoom: 2 }, windows: [{ id: 's1' }] }))).toBe(true)
+  })
+  it('sees any other difference', () => {
+    expect(sameContent(a, JSON.stringify({ name: 'd', viewport: { x: 0, y: 0, zoom: 1 }, windows: [] }))).toBe(false)
   })
 })
