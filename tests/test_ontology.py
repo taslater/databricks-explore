@@ -433,6 +433,19 @@ def test_certification_route(client):
     assert got["tables"]["main.sales.orders"] == "certified"
 
 
+def test_certification_without_a_warehouse_is_empty_not_an_error(client):
+    client.fake.warehouse_id = None
+    r = client.get("/api/certification")
+    assert r.status_code == 200
+    assert r.json == {"tables": {}, "columns": {}, "ignored": 0, "truncated": False, "needs_warehouse": True}
+    assert client.fake.calls == []  # no query was attempted
+
+
+def test_certification_with_a_warehouse_has_no_needs_warehouse_flag(client):
+    client.fake.cert = CERT
+    assert "needs_warehouse" not in client.get("/api/certification").json
+
+
 def test_routes_need_a_connection(monkeypatch):
     monkeypatch.setitem(app_module.STATE, "ex", None)
     c = app_module.app.test_client()

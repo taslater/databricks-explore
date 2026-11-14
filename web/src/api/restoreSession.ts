@@ -44,8 +44,13 @@ export async function restoreSession(qc: QueryClient): Promise<void> {
       .setRestoreMessage(`Could not reconnect to ${target}. Click Connect to sign in again.`)
     return
   }
+  // The profile is marked connected only after the saved warehouse is on the server again. Marking it first let
+  // queries that need a warehouse (certification) fire while the server had none, and they failed.
+  await restoreWarehouse(qc, target, session)
   useUiStore.getState().setConnectedProfile(target)
+}
 
+async function restoreWarehouse(qc: QueryClient, target: string, session: SessionResponse): Promise<void> {
   const warehouseId = useUiStore.getState().warehouseId
   if (warehouseId === null || session.warehouse_id === warehouseId) return
 

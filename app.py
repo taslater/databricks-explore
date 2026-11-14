@@ -323,7 +323,10 @@ def ontology_run():
 
 @app.get("/api/certification")
 def certification():
-    return jsonify(ontology.certification(ex()))
+    e = ex()
+    if not e.warehouse_id:  # the tag query needs a warehouse: answer "nothing yet", not a 500
+        return jsonify({"tables": {}, "columns": {}, "ignored": 0, "truncated": False, "needs_warehouse": True})
+    return jsonify(ontology.certification(e))
 
 
 @app.get("/api/concepts/<cid>")

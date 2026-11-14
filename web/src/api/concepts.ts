@@ -327,6 +327,8 @@ export interface Certification {
   columns: Record<string, CertificationStatus>
   ignored: number
   truncated: boolean
+  /** True when the server has no warehouse yet: the maps are empty and the answer must not be kept. */
+  needs_warehouse?: boolean
 }
 
 export const getImportPlan = () => call<ImportPlan>('GET', '/api/concepts/import/plan')
@@ -358,7 +360,8 @@ export function useCertification() {
     queryKey: ['certification', profile, warehouseId],
     queryFn: getCertification,
     enabled: profile !== null && warehouseId !== null,
-    staleTime: 10 * 60 * 1000,
+    // An answer that said "no warehouse yet" is stale at once, so the next mount or focus asks again.
+    staleTime: (q) => (q.state.data?.needs_warehouse ? 0 : 10 * 60 * 1000),
     retry: false,
   })
 }

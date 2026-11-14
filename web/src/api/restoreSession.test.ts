@@ -90,6 +90,21 @@ describe('restoreSession', () => {
     expect(useUiStore.getState().warehouseId).toBe('wh1')
   })
 
+  it('marks the profile connected only after the saved warehouse is on the server', async () => {
+    useUiStore.setState({ lastConnectedProfile: 'dev', warehouseId: 'wh1' })
+    api.getSession.mockResolvedValue({ profile: null, warehouse_id: null })
+    api.connect.mockResolvedValue({ profile: 'dev', user: null, host: 'h', workspace_id: null })
+    api.getWarehouses.mockResolvedValue([{ id: 'wh1', name: 'Main', state: 'RUNNING' }])
+    let connectedWhenSet: string | null = 'unset'
+    api.setWarehouse.mockImplementation(async () => {
+      connectedWhenSet = useUiStore.getState().connectedProfile
+      return { warehouse_id: 'wh1' }
+    })
+    await restoreSession(qc())
+    expect(connectedWhenSet).toBeNull()
+    expect(useUiStore.getState().connectedProfile).toBe('dev')
+  })
+
   it('forgets a saved warehouse that no longer exists', async () => {
     useUiStore.setState({ lastConnectedProfile: 'dev', warehouseId: 'gone' })
     api.getSession.mockResolvedValue({ profile: 'dev', warehouse_id: null })

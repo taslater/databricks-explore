@@ -38,7 +38,10 @@ export function useSetWarehouse() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string | null) => api.setWarehouse(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['warehouses'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['warehouses'] })
+      void qc.invalidateQueries({ queryKey: ['certification'] }) // read again now that the server has the warehouse
+    },
   })
 }
 
@@ -85,9 +88,10 @@ export function useObjects(catalog: string | null, schema: string | null) {
 
 export function useSearch(q: string) {
   const profile = useConnectedProfile()
+  const warehouseId = useUiStore((s) => s.warehouseId)
   const term = q.trim()
   return useQuery({
-    queryKey: ['search', profile, term],
+    queryKey: ['search', profile, warehouseId, term], // with a warehouse the search covers everything, without it the cache
     queryFn: () => api.search(term),
     enabled: profile !== null && term.length > 0,
   })
