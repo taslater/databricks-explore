@@ -9,6 +9,7 @@ export type IssueKind =
   | 'near_alignment'
   | 'uneven_spacing'
   | 'edge_through_node'
+  | 'derived_through_node'
   | 'edge_crossings'
   | 'bad_handle_side'
   | 'outside_frame'
@@ -17,7 +18,7 @@ export type IssueKind =
   | 'far_away'
   | 'off_grid'
 
-export type TidyRule = 'fit_labels' | 'frames' | 'overlaps' | 'align' | 'spacing' | 'grid' | 'handles' | 'place_labels'
+export type TidyRule = 'fit_labels' | 'frames' | 'overlaps' | 'align' | 'spacing' | 'grid' | 'handles' | 'place_labels' | 'lines'
 
 /** The body to send to the tidy route (with the canvas) to fix one issue. */
 export interface IssueFix {
