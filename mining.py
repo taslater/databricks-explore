@@ -397,7 +397,7 @@ class Miner:
                 f"{e}. Query text is only readable by an account admin or a member of databricks_pii_access, "
                 "so nothing was mined and nothing was stored.")}
         except Exception as e:  # warehouse errors, missing access to the system tables
-            end = {"state": "failed", "error": str(e)}
+            end = {"state": "failed", "error": dbx.clean_error(e)}
         with self.lock:
             self._status.update(end, phase=None, finished_at=dbx.now())
 

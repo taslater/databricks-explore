@@ -109,7 +109,7 @@ Root: `agent-a82559df4668213e9` | files: 114
   - `def describe_json(path: Path) -> list[str]`
   - `def render() -> str`
   - `def main() -> int`
-- `mining.py` (18,234 B)
+- `mining.py` (18,246 B)
   - Query-history mining: join pairs and table usage from system.query.history, one explicit run at a time.
   - `class MiningInvalid(ValueError)`: The request cannot run (a bad window, no warehouse). Routes return HTTP 400.
   - `class MiningBusy(RuntimeError)`: A run is already in progress. Routes return HTTP 409.
