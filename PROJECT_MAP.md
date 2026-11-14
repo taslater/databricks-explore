@@ -917,7 +917,7 @@ Root: `agent-a7b4f62e17061913b` | files: 180
 - `web/src/shared/AppShell.tsx` (2,973 B)
 - `web/src/shared/DetailsPanel.tsx` (572 B)
 - `web/src/shared/ErrorBoundary.tsx` (1,428 B)
-- `web/src/shared/Picker.tsx` (3,540 B)
+- `web/src/shared/Picker.tsx` (3,661 B)
 - `web/src/shared/tableDrag.ts` (598 B)
 - `web/src/shared/TopBar.tsx` (1,461 B)
 

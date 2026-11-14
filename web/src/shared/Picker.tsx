@@ -72,8 +72,8 @@ export function Picker({ onCollapse }: PickerProps) {
               title="Optional. Search covers all catalogs only when a warehouse is set."
               onChange={(e) => {
                 const id = e.target.value || null
-                setWarehouseId(id)
-                setWarehouse.mutate(id)
+                // Only once the server has it, so search and certification never ask before the warehouse is set.
+                setWarehouse.mutate(id, { onSuccess: () => setWarehouseId(id) })
               }}
             >
               <option value="">no SQL warehouse</option>
