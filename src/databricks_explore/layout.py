@@ -18,6 +18,7 @@ PLACE_RELATIONS = ("right_of", "left_of", "below", "above", "inside")
 
 OVERLAP_TOL = 2.0      # px of intersection on both axes that still counts as touching, not overlapping
 NEAR_MIN, NEAR_MAX = 1.0, 6.0  # edges this far apart are a near-miss alignment
+ROW_TOL = 24.0         # tops of equal-height nodes in a row (lefts of equal-width nodes in a column) this far apart are a misalignment
 NEIGHBOR_DIST = 300.0  # nodes farther apart than this are not compared for alignment
 MIN_GAP = 16           # smallest clearance left when an overlap is pushed apart
 LABEL_GAP_PAD = 8      # px of slack a connector label needs beyond its own box on the gap it sits in
@@ -429,13 +430,59 @@ def _plan_align(nodes: list[dict], parent: dict[str, str], grid: Optional[float]
                 moved[axis].update(delta)
                 records.append({"kind": kind, "axis": axis, "nodes": [nid for nid, _ in cl],
                                 "spread": max(vals) - min(vals), "movers": sorted(shifts)})
+    records += _plan_rows(nodes, pos, size, anc, order, movable, moved, pinned)
     orig = {n["id"]: (_x(n), _y(n)) for n in nodes}
     out = {i: pos[i] for i in ids if abs(pos[i][0] - orig[i][0]) > 1e-9 or abs(pos[i][1] - orig[i][1]) > 1e-9}
     records.sort(key=lambda r: (min(order[i] for i in r["nodes"]), r["kind"]))
     return out, records
 
 
-def _bands(nodes: list[dict], axis: str) -> list[list[dict]]:
+def _plan_rows(nodes: list[dict], pos: dict, size: dict, anc: dict, order: dict, movable: dict[str, bool],
+               moved: dict[str, set], pinned: dict[str, set]) -> list[dict]:
+    """Rows of three or more nodes of one height whose tops differ by up to ROW_TOL px, and the same for columns of
+    three or more of one width and their lefts. The near-miss clusters only look at gaps of 1 to 6 px, so a card nudged
+    by 10 px beside two aligned ones slipped through both the doctor and tidy. Moves the odd ones to the top (left) that
+    most of the row has, or to the one a node that may not move already has, in `pos` and `moved`. Returns one record
+    per fixed row, shaped like the cluster records."""
+    records: list[dict] = []
+    cand = [n for n in nodes if n.get("type") != "frame"]
+    for axis, ai in (("y", 1), ("x", 0)):
+        kind = "top" if axis == "y" else "left"
+        for band in _bands([copy.copy(n) | {"position": {"x": pos[n["id"]][0], "y": pos[n["id"]][1]}} for n in cand],
+                           "x" if axis == "y" else "y", 3):
+            groups: dict[int, list[str]] = {}
+            for n in band:
+                groups.setdefault(round(size[n["id"]][ai]), []).append(n["id"])
+            for ids in groups.values():
+                if len(ids) < 3:  # a pair may be staggered on purpose; three of one size are a row
+                    continue
+                vals = {i: pos[i][ai] for i in ids}
+                spread = max(vals.values()) - min(vals.values())
+                if spread < 0.5 or spread > ROW_TOL:
+                    continue
+                fixed = {i: v for i, v in vals.items() if not movable.get(i, False) or i in moved[axis] or i in pinned[axis]}
+                if len({round(v, 3) for v in fixed.values()}) > 1:
+                    continue
+                if fixed:
+                    target = next(iter(fixed.values()))
+                else:
+                    votes: dict[float, list[str]] = {}
+                    for i in sorted(ids, key=lambda i: order[i]):
+                        votes.setdefault(round(vals[i], 3), []).append(i)
+                    target = min(votes, key=lambda v: (-len(votes[v]), order[votes[v][0]]))
+                target = round(target)
+                delta = {i: target - v for i, v in vals.items() if i not in fixed and abs(v - target) >= 0.5}
+                if not delta or _would_collide(pos, size, anc, delta, ai):
+                    continue
+                for i, d in delta.items():
+                    pos[i][ai] += d
+                moved[axis].update(delta)
+                records.append({"kind": kind, "axis": axis, "nodes": sorted(ids, key=lambda i: order[i]),
+                                "spread": spread, "movers": sorted(delta)})
+    return records
+
+
+def _bands(nodes: list[dict], axis: str, min_size: int = 3) -> list[list[dict]]:
     """Rows (axis 'x') or columns (axis 'y'): groups of nodes sharing at least half of the smaller extent."""
     lo, hi = (1, 3) if axis == "x" else (0, 2)
     bands: list[list] = []
@@ -449,7 +496,7 @@ def _bands(nodes: list[dict], axis: str) -> list[list[dict]]:
                 break
         else:
             bands.append([n])
-    return [bd for bd in bands if len(bd) >= 3]
+    return [bd for bd in bands if len(bd) >= min_size]
 
 
 def _pinned(nodes: list[dict]) -> dict[str, set]:

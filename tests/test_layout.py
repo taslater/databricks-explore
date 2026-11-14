@@ -785,3 +785,52 @@ def test_tidy_agent_canvas_leaves_no_label_issue_and_scores_high():
     assert box_of(out, "orders")[0] < box_of(out, "metrics")[0] < box_of(out, "page")[0]  # order kept
     for a, b in (("orders", "metrics"), ("customer", "metrics"), ("metrics", "page")):
         assert box_of(out, b)[0] - box_of(out, a)[2] >= layout.LABELED_MIN_GAP
+
+
+# ---------------------------------------------------------------- rows of equal-height nodes
+
+def cards(*ys, w=320, h=300, gap=40):
+    return canvas([node(f"t{i}", i * (w + gap), y, w, h, "table", table=f"dev.crm.t{i}", title=f"t{i}") for i, y in enumerate(ys)])
+
+
+@pytest.mark.parametrize("dy", [8, 10, 20])
+def test_doctor_flags_a_card_offset_in_a_row_of_three_equal_height_cards(dy):
+    r = layout.doctor(cards(0, 0, dy))
+    [i] = [i for i in r["issues"] if i["kind"] == "near_alignment"]
+    assert set(i["nodes"]) == {"t0", "t1", "t2"} and "top" in i["id"] and i["fix"]["rules"] == ["align"]
+    assert r["score"] < 100
+
+
+def test_tidy_snaps_the_odd_card_to_the_row_and_scores_100():
+    c = cards(0, 0, 10)
+    out, changes = layout.tidy(c)
+    assert [pos(out, f"t{i}")[1] for i in range(3)] == [0, 0, 0]
+    assert [ch["id"] for ch in changes] == ["t2"] and layout.doctor(out)["score"] == 100
+    assert layout.tidy(out)[1] == []  # idempotent
+
+
+def test_tidy_snaps_to_the_majority_whichever_card_is_odd():
+    for ys in ((10, 0, 0), (0, 10, 0), (0, 10, 10)):
+        out, _ = layout.tidy(cards(*ys))
+        assert len({pos(out, f"t{i}")[1] for i in range(3)}) == 1
+
+
+def test_tidy_snaps_to_a_locked_card_and_leaves_it_where_it_is():
+    c = cards(10, 0, 0)
+    c["windows"][0]["locked"] = True
+    out, _ = layout.tidy(c)
+    assert [pos(out, f"t{i}")[1] for i in range(3)] == [10, 10, 10]
+
+
+def test_a_wide_stagger_or_unequal_heights_or_a_pair_is_left_alone():
+    assert "near_alignment" not in kinds(layout.doctor(cards(0, 0, 60)))
+    mixed = canvas([node("a", 0, 0, 320, 300, "table"), node("b", 360, 0, 320, 300, "table"), node("c", 720, 10, 320, 200, "table")])
+    assert "near_alignment" not in kinds(layout.doctor(mixed))
+    assert "near_alignment" not in kinds(layout.doctor(cards(0, 10)))
+
+
+def test_a_column_of_three_equal_width_cards_is_snapped_on_x():
+    c = canvas([node("a", 0, 0, 320, 100), node("b", 12, 140, 320, 100), node("c", 0, 280, 320, 100)])
+    assert "near_alignment" in kinds(layout.doctor(c))
+    out, _ = layout.tidy(c)
+    assert {pos(out, k)[0] for k in "abc"} == {0}
