@@ -26,6 +26,7 @@ export function useMiningWatcher() {
   useEffect(() => {
     if (previous.current === 'running' && status && status !== 'running') {
       void qc.invalidateQueries({ queryKey: ['suggestions'] })
+      void qc.invalidateQueries({ queryKey: ['joinKeys'] })
       void qc.invalidateQueries({ queryKey: ['usage'] })
       if (status === 'succeeded') void actions.refreshGraph()
     }

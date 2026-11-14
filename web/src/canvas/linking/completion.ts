@@ -11,7 +11,11 @@ import {
   StandardSQL,
   type SQLConfig,
 } from '@codemirror/lang-sql'
+import type { Extension } from '@codemirror/state'
+import { queryClient } from '../../api/queryClient'
 import { useCanvasStore } from '../../store/canvasStore'
+import { useUiStore } from '../../store/uiStore'
+import { joinSource, joinTrigger } from './joinCompletion'
 
 /** The part of CodeMirror's CompletionContext these sources use. */
 type SourceContext = { matchBefore(expr: RegExp): { from: number; to: number; text: string } | null }
@@ -65,14 +69,23 @@ export function refSources(ownId: string, sqlSources: CompletionSource[]): Compl
  * not consulted, so the override list above is the only completion source.
  * `remote` is the on-demand Unity Catalog name source, if any.
  */
-export function windowRefCompletion(ownId: string, sqlConfig: SQLConfig, remote?: CompletionSource) {
+export function windowRefCompletion(
+  ownId: string,
+  sqlConfig: SQLConfig,
+  remote?: CompletionSource,
+  joins: CompletionSource = joinSource(queryClient, () => useUiStore.getState().connectedProfile),
+): Extension[] {
   const dialect = sqlConfig.dialect ?? StandardSQL
   const sqlSources: CompletionSource[] = [
+    joins,
     schemaCompletionSource(sqlConfig),
     keywordCompletionSource(dialect, sqlConfig.upperCaseKeywords, sqlConfig.keywordCompletion),
     ...(remote ? [remote] : []),
   ]
-  return autocompletion({ override: refSources(ownId, sqlSources) })
+  return [
+    autocompletion({ override: refSources(ownId, sqlSources) }),
+    joinTrigger(queryClient, () => useUiStore.getState().connectedProfile),
+  ]
 }
 
 /**

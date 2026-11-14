@@ -6,6 +6,9 @@ import { useUiStore } from '../store/uiStore'
 import * as api from './client'
 import type { QueryBody, QueryStatus } from './types'
 
+/** Join keys change only when a run finishes or an edge is reviewed, and both invalidate them. */
+export const JOIN_KEYS_STALE_MS = 30_000
+
 function useConnectedProfile(): string | null {
   return useUiStore((s) => s.connectedProfile)
 }
@@ -255,6 +258,20 @@ export function useBulkReview() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: api.bulkReview,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['suggestions'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['joinKeys'] })
+      return qc.invalidateQueries({ queryKey: ['suggestions'] })
+    },
+  })
+}
+
+/** The join keys known for one table (see getJoinKeys). Shares the cache the editor's completion fills. */
+export function useJoinKeys(table: string | null) {
+  const profile = useConnectedProfile()
+  return useQuery({
+    queryKey: ['joinKeys', profile, table],
+    queryFn: () => api.getJoinKeys(table!),
+    enabled: profile !== null && table !== null,
+    staleTime: JOIN_KEYS_STALE_MS,
   })
 }
