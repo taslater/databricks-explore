@@ -866,3 +866,66 @@ def test_a_column_of_three_equal_width_cards_is_snapped_on_x():
     assert "near_alignment" in kinds(layout.doctor(c))
     out, _ = layout.tidy(c)
     assert {pos(out, k)[0] for k in "abc"} == {0}
+
+
+# ---------------------------------------------------------------- render: wrapped labels and id tags
+
+def six(t):
+    return len(t) * 6.0
+
+
+def test_wrap_label_wraps_at_spaces_and_keeps_every_word():
+    lines = layout.wrap_label("Return rate by product category", 120, 5, six)
+    assert lines == ["Return rate by", "product category"]
+
+
+def test_wrap_label_puts_the_ellipsis_on_the_last_line_only():
+    lines = layout.wrap_label("Return rate = returned order lines over all order lines in the period", 120, 2, six)
+    assert lines == ["Return rate =", "returned order line…"]
+    assert all(six(x) <= 120 for x in lines)
+
+
+def test_wrap_label_fits_a_short_label_unchanged_and_honors_newlines():
+    assert layout.wrap_label("title", 200, 1, six) == ["title"]
+    assert layout.wrap_label("a\nb", 200, 3, six) == ["a", "b"]
+    assert layout.wrap_label("", 200, 3, six) == []
+
+
+def test_wrap_label_breaks_a_word_that_is_wider_than_a_line_and_one_line_ends_in_an_ellipsis():
+    lines = layout.wrap_label("x" * 40, 60, 10, six)
+    assert "".join(lines) == "x" * 40 and all(six(x) <= 60 for x in lines)
+    [one] = layout.wrap_label("Return rate by product", 90, 1, six)
+    assert one.endswith("…") and six(one) <= 90 and one.startswith("Return")
+    assert layout.wrap_label("abc", 4, 1, six)  # a box narrower than one character still terminates
+
+
+def test_wrap_label_is_deterministic():
+    t = "Return rate by product category, region and quarter"
+    assert layout.wrap_label(t, 100, 3, six) == layout.wrap_label(t, 100, 3, six)
+
+
+def _png(c, width=600):
+    from io import BytesIO
+    from PIL import Image
+    return Image.open(BytesIO(layout.render_png(c, width))).convert("RGB")
+
+
+def test_render_draws_the_id_tag_above_the_box_so_it_never_covers_the_label():
+    from PIL import ImageChops
+    one = _png(canvas([node("title", 0, 0, 200, 40, "text", label="Return rate")]))
+    two = _png(canvas([node("zz", 0, 0, 200, 40, "text", label="Return rate")]))
+    box = ImageChops.difference(one, two).getbbox()
+    assert box is not None and box[3] <= 30  # only pixels above the node's top edge (the 30 px margin) differ
+
+
+def test_render_wraps_a_long_label_inside_the_box_and_is_deterministic():
+    from PIL import ImageChops
+    long = "Return rate = returned order lines over all order lines in the period"
+    c = canvas([node("m", 0, 0, 200, 100, "sticky", label=long)])
+    a, b = layout.render_png(c, 600), layout.render_png(c, 600)
+    assert a == b
+    ink = ImageChops.difference(_png(c), _png(canvas([node("m", 0, 0, 200, 100, "sticky", label="")]))).getbbox()
+    short = ImageChops.difference(_png(canvas([node("m", 0, 0, 200, 100, "sticky", label="Return rate")])),
+                                  _png(canvas([node("m", 0, 0, 200, 100, "sticky", label="")]))).getbbox()
+    assert (ink[3] - ink[1]) > (short[3] - short[1])  # more than one line of text is drawn
+    assert ink[0] >= 30 and ink[2] <= 570 and ink[3] <= _png(c).height - 30  # and all of it stays inside the box
