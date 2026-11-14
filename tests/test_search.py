@@ -65,3 +65,15 @@ def test_the_route_searches_the_cache_without_a_warehouse_and_the_warehouse_othe
     ex.warehouse_id = "wh"
     ex.search = lambda q: {"source": "information_schema", "data": [{"full_name": "x.y.z"}]}
     assert c.get("/api/search?q=orders").json["source"] == "information_schema"
+
+
+def test_search_sql_avoids_startswith_on_information_schema():
+    """`NOT startswith(table_name, '__')` in a WHERE on system.information_schema.tables returns no rows
+    on a live warehouse (seen 2026-11-14), so the name search must filter internal tables another way."""
+    import inspect
+
+    import dbx
+
+    src = inspect.getsource(dbx.Explorer.search)
+    assert "NOT startswith(" not in src.replace("not NOT startswith()", "")
+    assert "left(table_name, 2) <> '__'" in src

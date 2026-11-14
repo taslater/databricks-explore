@@ -279,7 +279,7 @@ class Explorer:
                 SELECT table_catalog, table_schema, table_name, table_type
                 FROM system.information_schema.tables
                 WHERE lower(table_name) LIKE lower(concat('%', :q, '%'))
-                  AND NOT startswith(table_name, '__')
+                  AND left(table_name, 2) <> '__'  -- not NOT startswith(): on information_schema that filter drops every row
                 ORDER BY table_name, table_catalog, table_schema
                 LIMIT 300""", q=q)
             return {"source": "information_schema", "data": [
