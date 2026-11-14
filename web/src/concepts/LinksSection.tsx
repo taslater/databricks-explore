@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { useAddLink, useConcepts, useRemoveLink, type ConceptDetail } from '../api/concepts'
+import { useAddLink, useCertification, useConcepts, useRemoveLink, type ConceptDetail } from '../api/concepts'
 import { useObject, useSearch } from '../api/hooks'
 import type { Relationship } from '../api/types'
 import { columnsOf } from '../graph/columns'
 import { useUiStore } from '../store/uiStore'
 import { useGraphStore } from '../graph/graphStore'
+import { CertBadge } from './CertBadge'
+import { certificationOf } from './certification'
 import { conceptIdOf, defaultRelation, relationsFor, sourceLabel, targetLabel } from './model'
 import { useConceptsStore } from './conceptsStore'
 
@@ -16,6 +18,7 @@ type TargetKind = 'table' | 'column' | 'concept'
 export function LinksSection({ concept, names }: { concept: ConceptDetail; names: ReadonlyMap<string, string> }) {
   const add = useAddLink()
   const remove = useRemoveLink()
+  const certification = useCertification()
   const [error, setError] = useState<string | null>(null)
 
   async function run(fn: () => Promise<unknown>) {
@@ -60,6 +63,7 @@ export function LinksSection({ concept, names }: { concept: ConceptDetail; names
                   {targetLabel(l, names)}
                 </span>
               )}
+              {!toConcept && <CertBadge status={certificationOf(certification.data, l.target.table, l.target.column)} />}
               <button
                 className="link-remove"
                 aria-label={`Remove link to ${targetLabel(l, names)}`}

@@ -521,7 +521,7 @@ A small business glossary over the catalog. Implemented in `concepts.py`, stored
 - **`name`** is unique per profile and compared without regard to case (`Customer` and `customer` clash, 400). 1 to 200 characters, trimmed.
 - **`synonyms`** and **`tags`**: lists of strings, trimmed, with empty entries and case-insensitive repeats dropped. **`domain`**: a string or `null`.
 - **`status`:** `draft` (default), `reviewed`, `certified`.
-- **`provenance.origin`:** `manual` (made here), `uc_tag` (from a Unity Catalog tag; `source_ref` is `key` or `key=value`) or `ontology` (reserved for a later import). `fetched_at` is when the source was read.
+- **`provenance.origin`:** `manual` (made here), `uc_tag` (from a Unity Catalog tag; `source_ref` is `key` or `key=value`) or `ontology` (from the import in section 8; `source_ref` is the page name or `<metric view>#<name>`). `fetched_at` is when the source was read.
 
 ### Links
 
@@ -650,3 +650,44 @@ Body: `{"conversation_id": "..."}`. Stops the turn that is running in that conve
 ### Demo mode
 
 `python app.py --demo` answers from `demo.FakeGenie`, without a network. It picks a canned answer by words in the question: `revenue`, `customer` or `country`, else a count of orders. `demo_error` or `fail` ends the turn as `failed`, and `demo_slow` keeps it running for 45 seconds, to try Cancel. Each turn takes about 4 seconds, with one progress step more per poll.
+
+---
+
+## 8. Import from Databricks (Genie Ontology, metric views, certification)
+
+Implemented in `ontology.py`. Databricks has no export of Genie Ontology, so the parts that can be read are read one by one and land as concepts with origin `ontology` (section 6). Everything is **read-only** toward Databricks: two REST GETs, one tables-API GET per metric view and two `SELECT`s. Routes *need a connection*. Domains and Pages are Beta endpoints, so their field names are read defensively (snake_case and camelCase, a missing field is skipped, an unknown response shape reads as empty).
+
+### `GET /api/concepts/import/plan`
+
+What a run would do, without doing it: `{"steps": [...], "row_cap": 500, "warehouse_id": "..."|null}`. Each step is `{"id", "kind": "rest"|"sql", "label", ...}`: a REST step has `method`, `path` and `paginated`; a SQL step has `sql`. The steps are `domains` (`GET /api/2.0/domains`, all pages), `pages` (`GET /api/2.0/knowledge/pages`, all pages), `metric_views` (SQL over `system.information_schema.tables` where `table_type = 'METRIC_VIEW'`) and `metric_definitions` (`GET /api/2.1/unity-catalog/tables/{full_name}`, once per metric view found, for its `view_definition`).
+
+### `POST /api/concepts/import/run`
+
+Body ignored. Reads the sources and updates the concepts. Each source stands alone: a **403 or 404** from a Beta endpoint is reported as `"not available on this workspace"` and the others still run, and a failure (no warehouse selected for the metric view lookup, a server error) fails only that source. Response:
+
+```json
+{"sources": {"domains": {"status": "ok", "count": 2},
+             "pages": {"status": "unavailable", "message": "not available on this workspace"},
+             "metric_views": {"status": "ok", "count": 1, "unreadable": 0}},
+ "created": [{"id": "...", "name": "Customer", "kind": "page", "links_added": 0, "links_removed": 0, "links": 0}],
+ "updated": [{"id": "...", "name": "Total revenue", "kind": "measure", "links_added": 0, "links_removed": 0, "links": 1,
+              "fields": ["definition"], "kept": ["status"]}],
+ "skipped": [{"name": "Backlog", "reason": "a concept with this name already exists"}],
+ "unchanged": 3,
+ "stale": [{"id": "...", "name": "Old term", "links_removed": 1}],
+ "unreadable": [{"view": "main.sales.broken", "reason": "the definition is not valid YAML (...)"}]}
+```
+
+`sources.<id>.status` is `ok`, `unavailable` or `failed` (with `message`). Mapping:
+
+- **Domains** become concept domain names, by `display_name`, else `tag_key`. A page's `domain` (`domains/<id>`, an id, a name or a tag key) is looked up in them; one that matches nothing is used as its last path segment. A domain is not a concept of its own: it only names the group, and has no definition worth keeping.
+- **Pages**: `display_name` is the name, `description` and then `body` (Markdown, kept as is) are the definition, `synonyms` are the synonyms, `state` `PUBLISHED` is `reviewed` and anything else `draft`. `provenance.source_ref` is the page `name`. A page with no `name` or no `display_name` is skipped.
+- **Metric views**: each measure and each dimension of the YAML definition (`name`, `display_name`, `comment`, `synonyms`) is a `draft` concept named by `display_name`, else `name`, with the comment as definition and the view's full name as its one tag. It gets one link to the metric view's column of that name (`{"table": "<view>", "column": "<name>"}`), relation `measures` for a measure and `describes` for a dimension. `source_ref` is `<view>#<name>`. A view whose definition cannot be read or parsed is counted in `sources.metric_views.unreadable`, listed in `unreadable`, and skipped; its existing concepts and links are left alone.
+
+**Reruns update, never duplicate.** A concept is matched by `provenance.source_ref`, so a rename does not break the match. The store keeps what the source said at the last import (a table `ontology_baseline` in the profile's relationship database). A field the source changed since then is replaced unless the person changed it as well (it is then listed in `kept`); a field the source did not change keeps the person's edit. Links this import made are added, and removed when the source no longer has them. **Only links with origin `ontology` and the concept's own `source_ref` are ever removed**; a link a person made, even to the same target, is left alone. A concept whose source no longer lists it stays, loses its imported links, and is listed in `stale` (only when its source was read successfully this run). A name another concept already has gets the suffix ` (ontology)` (` (<view>)` for a metric view concept), or the item is `skipped` when that is taken too; a source rename into a taken name is not applied and is reported under `skipped`.
+
+### `GET /api/certification`
+
+The `system.certification_status` governed tag, read with one `SELECT` over `system.information_schema.table_tags` and `column_tags` on the selected warehouse (the error is the one of `POST /api/query` when none is selected). Response: `{"tables": {"main.sales.orders": "certified"}, "columns": {"main.sales.orders#amount": "deprecated"}, "ignored": 0, "truncated": false}`. A column key is `<table>#<column>`. The value is `certified` or `deprecated` (case-insensitive); any other value is ignored and counted in `ignored`. The UI shows it as a badge on table nodes in the Graph tab and next to link targets in the Concepts editor.
+
+`POST /api/concepts/suggest/run` (section 6) skips every tag whose name starts with `system.` and lists each one under `skipped`, since those are Databricks-owned (certification shows as a badge).

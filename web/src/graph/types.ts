@@ -25,6 +25,8 @@ export type TableNodeData = {
   external?: boolean
   via?: string
   faded?: boolean
+  /** The table's `system.certification_status` tag, added at draw time (concepts/certification.ts) and never saved. */
+  certification?: 'certified' | 'deprecated'
 }
 
 export type FlowNode = Node<TableNodeData, 'table'>

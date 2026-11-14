@@ -12,7 +12,8 @@ import {
   type EdgeChange,
 } from '@xyflow/react'
 import { useEffect, useMemo } from 'react'
-import { useConceptsForTables } from '../api/concepts'
+import { useCertification, useConceptsForTables } from '../api/concepts'
+import { withCertification } from '../concepts/certification'
 import { useConceptsStore } from '../concepts/conceptsStore'
 import { conceptOverlay, isConceptEdge } from '../concepts/overlay'
 import { ConceptNode } from './ConceptNode'
@@ -85,7 +86,12 @@ function GraphCanvas() {
     () => (showConcepts ? conceptOverlay(flow.nodes, conceptData.data) : { nodes: [], edges: [] }),
     [showConcepts, flow.nodes, conceptData.data],
   )
-  const drawnNodes = useMemo<Array<FlowNode | ConceptFlowNode>>(() => [...flow.nodes, ...overlay.nodes], [flow.nodes, overlay.nodes])
+  // Certification badges (system.certification_status), added when drawing like the concepts. Silent when it cannot be read.
+  const certification = useCertification()
+  const drawnNodes = useMemo<Array<FlowNode | ConceptFlowNode>>(
+    () => [...withCertification(flow.nodes, certification.data), ...overlay.nodes],
+    [flow.nodes, overlay.nodes, certification.data],
+  )
   const drawnEdges = useMemo(() => [...flow.edges, ...overlay.edges], [flow.edges, overlay.edges])
 
   // Layout and fit need real node sizes, so they wait until every visible node has been measured.

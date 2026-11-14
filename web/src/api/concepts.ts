@@ -272,3 +272,93 @@ export function useImportConcepts() {
   const changed = useChanged()
   return useMutation({ mutationFn: importConceptsFile, onSuccess: changed })
 }
+
+// ---- import from Databricks (ontology.py) and certification (contracts/api.md section 6) --------------------------
+
+export interface ImportStep {
+  id: string
+  kind: 'rest' | 'sql'
+  label: string
+  method?: 'GET'
+  path?: string
+  sql?: string
+  paginated?: boolean
+}
+
+export interface ImportPlan {
+  steps: ImportStep[]
+  row_cap: number
+  warehouse_id: string | null
+}
+
+export interface ImportSource {
+  status: 'ok' | 'unavailable' | 'failed'
+  message?: string
+  count?: number
+  unreadable?: number
+}
+
+export interface ImportEntry {
+  id: string
+  name: string
+  kind: 'page' | 'measure' | 'dimension'
+  links_added: number
+  links_removed: number
+  links: number
+  fields?: string[]
+  kept?: string[]
+}
+
+export interface ImportReport {
+  sources: Record<string, ImportSource>
+  created: ImportEntry[]
+  updated: ImportEntry[]
+  skipped: Array<{ name: string; reason: string }>
+  unchanged: number
+  stale: Array<{ id: string; name: string; links_removed: number }>
+  unreadable: Array<{ view: string; reason: string }>
+}
+
+export type CertificationStatus = 'certified' | 'deprecated'
+
+/** `system.certification_status` on tables (by full name) and columns (by `table#column`). */
+export interface Certification {
+  tables: Record<string, CertificationStatus>
+  columns: Record<string, CertificationStatus>
+  ignored: number
+  truncated: boolean
+}
+
+export const getImportPlan = () => call<ImportPlan>('GET', '/api/concepts/import/plan')
+export const runImport = () => call<ImportReport>('POST', '/api/concepts/import/run', {})
+export const getCertification = () => call<Certification>('GET', '/api/certification')
+
+/** The steps of an import run, for the confirm dialog. Runs nothing. */
+export function useImportPlan(enabled: boolean) {
+  const profile = useProfile()
+  return useQuery({
+    queryKey: ['concepts', profile, 'import-plan'],
+    queryFn: getImportPlan,
+    enabled: enabled && profile !== null,
+    staleTime: 0,
+    retry: false,
+  })
+}
+
+export function useRunImport() {
+  const changed = useChanged()
+  return useMutation({ mutationFn: runImport, onSuccess: changed })
+}
+
+/** Certified and deprecated tables and columns. One read-only query on the selected warehouse; nothing without one. */
+export function useCertification() {
+  const profile = useProfile()
+  const warehouseId = useUiStore((s) => s.warehouseId)
+  return useQuery({
+    queryKey: ['certification', profile, warehouseId],
+    queryFn: getCertification,
+    enabled: profile !== null && warehouseId !== null,
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  })
+}

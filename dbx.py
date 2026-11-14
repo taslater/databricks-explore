@@ -491,3 +491,18 @@ def save_diagram(name, payload):
 
 def load_diagram(name):
     return json.loads((DIAGRAMS / f"{safe(name)}.json").read_text(encoding="utf-8"))
+
+
+# ---------- read-only calls for the ontology import (ontology.py) ----------
+
+def api_get(explorer, path, query=None):
+    """GET a workspace REST path through the SDK's api_client, logged like every other call. Returns the parsed JSON."""
+    query = {k: v for k, v in (query or {}).items() if v is not None}
+    return explorer._call("api.get", lambda: explorer.w.api_client.do("GET", path, query=query or None),
+                          path=path, query=query)
+
+
+def table_definition(explorer, full_name):
+    """A table's `view_definition` from the tables API (the YAML of a metric view), or None when it has none."""
+    info = explorer._call("tables.get", lambda: explorer.w.tables.get(full_name), full_name=full_name)
+    return getattr(info, "view_definition", None)

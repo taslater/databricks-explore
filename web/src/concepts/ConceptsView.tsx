@@ -3,6 +3,7 @@ import { exportConcepts, useConcepts, useImportConcepts } from '../api/concepts'
 import { useUiStore } from '../store/uiStore'
 import { ConceptEditor } from './ConceptEditor'
 import { ConceptList } from './ConceptList'
+import { ImportDialog } from './ImportDialog'
 import { useConceptsStore } from './conceptsStore'
 import { downloadJson, exportName } from './model'
 import { SuggestDialog } from './SuggestDialog'
@@ -16,11 +17,12 @@ export function ConceptsView() {
   const selected = useConceptsStore((s) => s.selected)
   const filters = useConceptsStore((s) => s.filters)
   const suggestOpen = useConceptsStore((s) => s.suggestOpen)
+  const importOpen = useConceptsStore((s) => s.importOpen)
   const notice = useConceptsStore((s) => s.notice)
   const list = useConcepts(filters)
   const importer = useImportConcepts()
   const fileInput = useRef<HTMLInputElement>(null)
-  const { select, setSuggestOpen, setNotice } = useConceptsStore.getState()
+  const { select, setSuggestOpen, setImportOpen, setNotice } = useConceptsStore.getState()
 
   async function doExport() {
     try {
@@ -61,6 +63,12 @@ export function ConceptsView() {
           title="Draft concepts from Unity Catalog tags. Shows the SQL first."
         >
           Suggest from tags…
+        </button>
+        <button
+          onClick={() => setImportOpen(true)}
+          title="Read Genie Ontology pages and domains, metric views and certification. Read-only; shows every call first."
+        >
+          Import from Databricks…
         </button>
         <span className="toolbar-sep" />
         <button onClick={() => void doExport()} title="Save the concepts and their links as a JSON file">
@@ -103,6 +111,7 @@ export function ConceptsView() {
         )}
       </div>
       {suggestOpen && <SuggestDialog />}
+      {importOpen && <ImportDialog />}
     </div>
   )
 }
