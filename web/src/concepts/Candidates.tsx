@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAddLink, useCandidates, type Candidate, type ConceptDetail } from '../api/concepts'
+import { candidateKey, inFirstOrder } from './candidateOrder'
 import { defaultRelation, relationsFor } from './model'
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -14,22 +15,32 @@ export function Candidates({ concept }: { concept: ConceptDetail }) {
   const [error, setError] = useState<string | null>(null)
   const q = useCandidates(concept.id, asked)
   const add = useAddLink()
+  // Rows keep the place they first had. Linking makes the server sort that row last, which would move the list
+  // under the cursor, so the order is fixed per search and the row only changes to "linked".
+  const [order, setOrder] = useState<string[] | null>(null)
+  const [justLinked, setJustLinked] = useState<ReadonlySet<string>>(new Set())
+  const data = q.data
+  useEffect(() => {
+    if (data && order === null && !q.isFetching) setOrder(data.hits.map(candidateKey))
+  }, [data, order, q.isFetching])
 
   async function link(h: Candidate) {
     setError(null)
     try {
       await add.mutateAsync({ id: concept.id, body: { target: { table: h.table, column: h.column }, relation } })
+      setJustLinked((s) => new Set(s).add(candidateKey(h)))
     } catch (e) {
       setError(messageOf(e))
     }
   }
 
   async function search() {
+    setOrder(null)
+    setJustLinked(new Set())
     if (asked) await q.refetch()
     else setAsked(true)
   }
 
-  const data = q.data
   return (
     <section className="concept-candidates" aria-label="Candidates">
       <h4>Candidates</h4>
@@ -60,8 +71,8 @@ export function Candidates({ concept }: { concept: ConceptDetail }) {
             {data.searched.tables === 0 && ' Browse some schemas first: only cached metadata is searched.'}
           </p>
           <ul className="candidate-rows">
-            {data.hits.map((h) => (
-              <li key={`${h.table}#${h.column ?? ''}`} className="candidate-row">
+            {inFirstOrder(data.hits, order).map((h) => (
+              <li key={candidateKey(h)} className="candidate-row">
                 <span className="candidate-target">
                   {h.table}
                   {h.column ? `.${h.column}` : ''}
@@ -69,9 +80,13 @@ export function Candidates({ concept }: { concept: ConceptDetail }) {
                 <span className="candidate-why" title={h.text}>
                   {h.field} matches “{h.matched}”{h.field === 'comment' ? `: ${h.text}` : ''}
                 </span>
-                <button onClick={() => void link(h)} disabled={h.linked || add.isPending}>
-                  {h.linked ? 'linked' : 'Link'}
-                </button>
+                {h.linked || justLinked.has(candidateKey(h)) ? (
+                  <button disabled aria-label={`Linked: ${candidateKey(h)}`}>linked</button>
+                ) : (
+                  <button onClick={() => void link(h)} disabled={add.isPending}>
+                    Link
+                  </button>
+                )}
               </li>
             ))}
           </ul>
