@@ -1,6 +1,7 @@
 """Local Databricks relationship explorer.  Run:  uv run --with-requirements requirements.txt app.py"""
 import os
 import sys
+import time
 from pathlib import Path
 
 if "--demo" in sys.argv:  # must be set before dbx is imported: it picks the data folder and client at import
@@ -14,6 +15,8 @@ from werkzeug.exceptions import HTTPException, MethodNotAllowed, NotFound
 import canvases
 import concepts
 import dbx
+import demo
+import genie
 import mining
 import relationships
 import sqltools
@@ -435,6 +438,64 @@ def query_status(sid):
 @app.delete("/api/query/<sid>")
 def query_cancel(sid):
     return jsonify(ex().query_cancel(sid))
+
+
+# ---------- Ask (genie.py): Genie One questions over MCP. Nothing is stored; the page keeps the conversation ----------
+
+@app.errorhandler(genie.GenieInvalid)
+def genie_invalid(e):
+    return jsonify({"error": str(e)}), 400
+
+
+@app.errorhandler(genie.GenieError)
+def genie_failed(e):
+    return jsonify({"error": dbx.clean_error(e)}), e.status
+
+
+def genie_client():
+    """The Genie client for the connected Explorer (the fake one in demo mode), pointed at the selected warehouse."""
+    e = ex()
+    cached = STATE.get("genie")
+    if cached is None or cached[0] is not e:
+        cached = STATE["genie"] = (e, demo.FakeGenie() if dbx.DEMO else genie.GenieClient(e.w))
+    cached[1].warehouse_id = e.warehouse_id
+    return cached[1]
+
+
+def _genie_call(op, fn):
+    """Run one Genie call and log its name and timing. Never the question, the answer or the rows."""
+    t = time.time()
+    try:
+        out = fn()
+    except Exception as e:
+        dbx.log({"op": op, "ms": int((time.time() - t) * 1000), "ok": False, "error": dbx.clean_error(e)[:200]})
+        raise
+    dbx.log({"op": op, "ms": int((time.time() - t) * 1000), "ok": True})
+    return jsonify(out)
+
+
+@app.post("/api/ask")
+def ask():
+    question, cid = genie.parse_ask(request.get_json(silent=True))
+    return _genie_call("genie.ask", lambda: genie_client().ask(question, cid))
+
+
+@app.get("/api/ask/poll")
+def ask_poll():
+    cid, rid = genie.parse_ids(request.args, "conversation_id", "response_id")
+    return _genie_call("genie.poll", lambda: genie_client().poll(cid, rid))
+
+
+@app.get("/api/ask/result")
+def ask_result():
+    cid, rid, item = genie.parse_ids(request.args, "conversation_id", "response_id", "item_id")
+    return _genie_call("genie.result", lambda: genie_client().query_result(cid, rid, item))
+
+
+@app.post("/api/ask/cancel")
+def ask_cancel():
+    (cid,) = genie.parse_ids(request.get_json(silent=True) or {}, "conversation_id")
+    return _genie_call("genie.cancel", lambda: genie_client().cancel(cid))
 
 
 @app.get("/api/canvases")

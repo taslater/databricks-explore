@@ -424,3 +424,116 @@ class FakeWorkspaceClient:
 
     def get_workspace_id(self):
         return 1111111111
+
+
+# ---------------------------------------------------------------- fake Genie One (the Ask tab)
+# Stands in for genie.GenieClient when EXPLORER_DEMO=1. Canned answers, picked by words in the question:
+#   revenue            revenue by status, from a view
+#   customer, country  customers per country
+#   demo_error, fail   the turn ends `failed`
+#   demo_slow          stays in progress for SLOW_DELAY seconds (to test Cancel)
+# Anything else counts orders. A follow-up in the same conversation gets one extra progress step.
+import genie  # noqa: E402  (kept with the Genie code so this block can be appended on its own)
+
+GENIE_STEP_SECONDS = 1.2
+GENIE_HOST = "https://demo.invalid"
+
+
+def _genie_table_link(full_name):
+    return f"[{full_name}]({GENIE_HOST}/explore/data/{full_name.replace('.', '/')}?isDbOne=true&utm_source=one-chat)"
+
+
+def _genie_plan(question):
+    """The canned plan for a question: progress steps, SQL, result columns and rows, answer text, or failed=True."""
+    q = question.lower()
+    if "demo_error" in q or "fail" in q:
+        return {"failed": True, "steps": ["Thinking: I'll look for the table you mean.",
+                                          "Thinking: running the query on the warehouse."]}
+    if "revenue" in q:
+        sql = "SELECT status, SUM(revenue) AS revenue FROM demo.sales.v_daily_revenue\nGROUP BY status ORDER BY revenue DESC"
+        cols = [("status", "string"), ("revenue", "decimal(14,2)")]
+        rows = [["shipped", "3120450.75"], ["pending", "1984210.10"], ["returned", "402318.40"]]
+        answer = (f"**Shipped** orders bring in the most revenue, about **$3.12M**. The numbers come from "
+                  f"{_genie_table_link('demo.sales.v_daily_revenue')}, a view over {_genie_table_link('demo.sales.orders')}.\n\n"
+                  "- Pending: $1.98M\n- Returned: $0.40M\n\nThe view groups revenue by day and status.")
+        tables = ["demo.sales.v_daily_revenue"]
+    elif "customer" in q or "country" in q:
+        sql = "SELECT country, COUNT(*) AS customers FROM demo.sales.customers\nGROUP BY country ORDER BY customers DESC"
+        cols = [("country", "string"), ("customers", "bigint")]
+        rows = [["US", "412"], ["DE", "233"], ["JP", "187"], ["BR", "96"]]
+        answer = (f"Most customers are in the **US** (412), then Germany (233). Source: "
+                  f"{_genie_table_link('demo.sales.customers')}.\n\n"
+                  "| country | customers |\n| --- | --- |\n| US | 412 |\n| DE | 233 |\n| JP | 187 |\n| BR | 96 |")
+        tables = ["demo.sales.customers"]
+    else:
+        sql = "SELECT COUNT(*) AS order_count FROM demo.sales.orders"
+        cols = [("order_count", "bigint")]
+        rows = [[str(TABLES["demo.sales.orders"][3])]]
+        answer = (f"The {_genie_table_link('demo.sales.orders')} table has **{rows[0][0]} rows**. "
+                  "It is described as \"One row per order\".")
+        tables = ["demo.sales.orders"]
+    steps = ["Thinking: I'll find the table that matches your question.",
+             f"Thinking: I found {', '.join(tables)}. I'll write a query for it.",
+             "Thinking: the query ran, so I can answer now."]
+    return {"failed": False, "steps": steps, "sql": sql, "cols": cols, "rows": rows, "answer": answer}
+
+
+class FakeGenie:
+    """Same four calls as genie.GenieClient, answered from canned plans, with progress that advances over time."""
+
+    def __init__(self):
+        self.warehouse_id = None
+        self.convs = {}       # conversation id -> turns asked
+        self.turns = {}       # response id -> {conv, plan, t0, delay, canceled}
+
+    def ask(self, question, conversation_id=None):
+        """Start a turn. A conversation id that was never issued here starts a new conversation."""
+        cid = conversation_id if conversation_id in self.convs else f"demo-conv-{len(self.convs) + 1}"
+        self.convs[cid] = self.convs.get(cid, 0) + 1
+        rid = f"demo-resp-{len(self.turns) + 1}"
+        plan = _genie_plan(question)
+        if self.convs[cid] > 1:
+            plan["steps"] = [f"Thinking: continuing the conversation (question {self.convs[cid]})."] + plan["steps"]
+        delay = SLOW_DELAY if "demo_slow" in question.lower() else GENIE_STEP_SECONDS * len(plan["steps"])
+        self.turns[rid] = {"conv": cid, "plan": plan, "t0": time.monotonic(), "delay": delay, "canceled": False}
+        return {"conversation_id": cid, "response_id": rid, "status": "in_progress"}
+
+    def _turn(self, conversation_id, response_id):
+        t = self.turns.get(response_id)
+        if not t or t["conv"] != conversation_id:
+            raise genie.GenieError("Unknown conversation or response.", 502)
+        return t
+
+    def poll(self, conversation_id, response_id):
+        """One poll: more progress steps each time, then completed (or failed) once the delay has passed. Like the real server, a finished poll carries no steps."""
+        t = self._turn(conversation_id, response_id)
+        plan, elapsed = t["plan"], time.monotonic() - t["t0"]
+        sc = {"conversation_id": conversation_id, "response_id": response_id,
+              "deep_link": f"{GENIE_HOST}/one/chat/threads/{conversation_id}"}
+        if t["canceled"]:
+            return genie.shape_poll({**sc, "status": "incomplete", "progress_steps": plan["steps"][:1]})
+        if elapsed < t["delay"]:
+            shown = min(len(plan["steps"]), int(elapsed / max(GENIE_STEP_SECONDS, 1e-6)) + 1)
+            return genie.shape_poll({**sc, "status": "in_progress", "progress_steps": plan["steps"][:shown]})
+        if plan["failed"]:
+            return genie.shape_poll({**sc, "status": "failed",
+                                     "message": "The query could not run: the table Genie picked does not exist."})
+        return genie.shape_poll({**sc, "status": "completed", "final_answer": plan["answer"],
+                                 "query_items": [{"item_id": f"{response_id}-item-1", "sql": plan["sql"]}]})
+
+    def query_result(self, conversation_id, response_id, item_id):
+        """The canned rows of the turn's one SQL item."""
+        t = self._turn(conversation_id, response_id)
+        if item_id != f"{response_id}-item-1" or t["plan"]["failed"]:
+            raise genie.GenieError("Unknown query item.", 502)
+        plan = t["plan"]
+        return genie.shape_result({"item_id": item_id, "statement_state": "SUCCEEDED", "ready": True,
+                                   "columns": [{"name": n, "type_text": tt} for n, tt in plan["cols"]],
+                                   "rows": plan["rows"], "total_row_count": len(plan["rows"]), "truncated": False})
+
+    def cancel(self, conversation_id):
+        """Mark every turn of the conversation canceled."""
+        for t in self.turns.values():
+            if t["conv"] == conversation_id:
+                t["canceled"] = True
+        return {"conversation_id": conversation_id, "cancel_requested": True}

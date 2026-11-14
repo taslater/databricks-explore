@@ -597,3 +597,56 @@ A second run updates instead of duplicating. A concept is matched by its `proven
 ### `GET /api/concepts/export`
 
 Section 4's export, narrowed to the concepts and their links (no other edges, no overlays). The import is `POST /api/relationships/import`.
+
+## 7. Ask (Genie One)
+
+Questions in plain language, answered by Databricks Genie One through the workspace's MCP server (`https://<host>/ai-gateway/mcp-services/system.ai.genie_one_mcp?o=<workspace-id>`, JSON-RPC over streamable HTTP, `genie.py`). All four routes *need connection*. Genie picks the tables itself, so there is no space id. The selected warehouse goes to Genie in `_meta.warehouse_id` of each tool call (nothing is sent when none is selected). The server's MCP session is kept and started again when Genie drops it.
+
+**Nothing is stored.** The server keeps no question, answer or rows on disk, and `calls.jsonl` gets only the call name (`genie.ask`, `genie.poll`, `genie.result`, `genie.cancel`), its time and whether it worked. The page keeps the conversation in memory for the session.
+
+**Errors** use the shared `{"error": "..."}` body, scrubbed like every other error. Extra statuses:
+
+- **400** for a missing or empty `question`, `conversation_id`, `response_id` or `item_id` (and a question over 4,000 characters).
+- **403** when the workspace refuses the token or the call (HTTP 401 or 403, or a permission message). The text says the user needs EXECUTE on `system.ai.genie_one_mcp`, and that Genie One has to be on in the workspace.
+- **429** when Genie is rate limited.
+- **502** when the MCP server cannot be reached, times out (60 seconds per call), is missing from the workspace (HTTP 404 on start), or fails.
+
+### `POST /api/ask`
+
+Body: `{"question": "How many orders last week?", "conversation_id": "..."}`. Leave out `conversation_id` to start a conversation, or pass the one from an earlier answer for a follow-up.
+
+Starts a turn and returns at once: `{"conversation_id": "...", "response_id": "...", "status": "in_progress"}`. A follow-up reuses the conversation id and gets a new `response_id`.
+
+### `GET /api/ask/poll?conversation_id=<id>&response_id=<id>`
+
+One upstream poll per call, so the browser polls (every 2 to 5 seconds; a turn can take a minute).
+
+```json
+{"conversation_id": "...", "response_id": "...",
+ "status": "completed",
+ "deep_link": "https://<host>/one/chat/threads/<conversation_id>?o=<workspace-id>",
+ "final_answer": "The **orders** table has 0 rows. [main.shop.orders](https://<host>/explore/data/main/shop/orders?...)",
+ "progress_steps": [],
+ "query_items": [{"item_id": "pub_..._output", "sql": "SELECT COUNT(*) AS n FROM main.shop.orders"}],
+ "tables": [{"name": "main.shop.orders", "url": "https://<host>/explore/data/main/shop/orders?..."}],
+ "error": null}
+```
+
+- `status`: `in_progress`, `completed`, `incomplete` or `failed`. Stop polling on any but the first.
+- `progress_steps`: what Genie has done so far, while `in_progress`. A finished poll may carry none, so the page keeps the steps it has seen.
+- `final_answer`: Markdown (bold, lists, tables, links, fenced code), or `null` until `completed`. Treat it as untrusted text.
+- `query_items`: the SQL Genie ran, each with the `item_id` that fetches its rows. `[]` until `completed`.
+- `tables`: the `https://<host>/explore/data/<catalog>/<schema>/<table>` links found in `final_answer`, as `catalog.schema.table`, first mention first, no repeats. `[]` when there are none.
+- `error`: a message for `failed` and `incomplete` when Genie gave one, else `null`.
+
+### `GET /api/ask/result?conversation_id=<id>&response_id=<id>&item_id=<id>`
+
+The rows of one SQL item, in the Result shape of section 3 so the results grid reads it: `statement_id` is the `item_id`, `columns[].type` is the base name of `type_text` uppercased, `ms` is `null`. Extras: `state` (the statement state, for example `SUCCEEDED`), `ready` (false while the rows are not available yet; ask again), `total_row_count` (the full count when Genie returned only some) and `truncated`. Values are strings or `null`, as in section 3.
+
+### `POST /api/ask/cancel`
+
+Body: `{"conversation_id": "..."}`. Stops the turn that is running in that conversation. Response: `{"conversation_id": "...", "cancel_requested": true}`. The next poll reports the turn as `incomplete`, or `completed` if it had just finished.
+
+### Demo mode
+
+`python app.py --demo` answers from `demo.FakeGenie`, without a network. It picks a canned answer by words in the question: `revenue`, `customer` or `country`, else a count of orders. `demo_error` or `fail` ends the turn as `failed`, and `demo_slow` keeps it running for 45 seconds, to try Cancel. Each turn takes about 4 seconds, with one progress step more per poll.
