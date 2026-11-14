@@ -30,6 +30,9 @@ REDACTED = "<REDACTED>"
 SAMPLE_REFS = 5
 MAX_PAIR_TABLES = 25  # a statement that reads more tables than this adds none to the table-pair usage
 KEEP_USAGE = 500  # usage rows kept per list between runs
+STATE_VERSION = 2  # 2: edges carry composite keys (evidence.together). A state without it, or older, is re-mined whole.
+REMINE_REASON = ("The last run was made before composite-key support, so this run re-reads the whole window "
+                 "to add composite keys to the suggestions you already have.")
 HIDDEN_CATALOGS = ("system", "__databricks_internal")  # joins between Databricks' own tables are not the user's model
 
 
@@ -121,6 +124,8 @@ def plan(profile, window_days=WINDOW_DAYS, full=False, row_cap=ROW_CAP, now=None
 
     The first run (or `full`) reads the last `window_days` days. A later run is incremental: it starts where the
     last one stopped and `window_days` does not apply. The newest hour is left out, since rows may not be in yet.
+    A state written by an older format (no `version`, or below STATE_VERSION) is not continued: the run reads the whole
+    window and replaces the stored evidence, and `remine_reason` says why (it is None otherwise).
     """
     if isinstance(window_days, bool) or not isinstance(window_days, int) or not 1 <= window_days <= MAX_WINDOW_DAYS:
         raise MiningInvalid(f"window_days: must be a whole number from 1 to {MAX_WINDOW_DAYS}")
@@ -129,7 +134,8 @@ def plan(profile, window_days=WINDOW_DAYS, full=False, row_cap=ROW_CAP, now=None
     state = load_state(profile)
     until = ((now or _utcnow()) - SETTLE).replace(microsecond=0)
     cursor = None
-    if state.get("cursor") and not full:
+    outdated = bool(state.get("cursor")) and (state.get("version") or 0) < STATE_VERSION
+    if state.get("cursor") and not full and not outdated:
         try:
             cursor = _parse_ts(state["cursor"])
         except ValueError:
@@ -139,6 +145,7 @@ def plan(profile, window_days=WINDOW_DAYS, full=False, row_cap=ROW_CAP, now=None
     return {
         "since": params["since"], "until": params["until"], "window_days": window_days,
         "incremental": cursor is not None, "cursor": _z(cursor) if cursor else None, "row_cap": row_cap,
+        "remine_reason": REMINE_REASON if outdated and not full else None,
         "queries": [{"name": "query_history", "sql": history_sql(row_cap), "params": params},
                     {"name": "table_lineage", "sql": lineage_sql(row_cap), "params": params}],
     }
@@ -315,7 +322,7 @@ def _run(ex, p, progress):
               "skipped_fk": skipped_fk, "fk_unreadable_tables": unreadable, "invalid": invalid,
               "created": created, "updated": updated, "capped": capped, "since": since,
               "until": cursor if capped else until, "finished_at": dbx.now()}
-    _save_state(ex.profile, {"cursor": cursor, "cursor_ids": cursor_ids, "last_run": result, "usage": usage})
+    _save_state(ex.profile, {"version": STATE_VERSION, "cursor": cursor, "cursor_ids": cursor_ids, "last_run": result, "usage": usage})
     return result
 
 

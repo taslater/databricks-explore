@@ -84,6 +84,11 @@ export function MineDialog() {
               <strong>{p.since}</strong> to <strong>{p.until}</strong> (UTC), at most {p.row_cap} statements.
               {p.incremental && ' It continues from the last run, so the window above does not apply.'}
             </p>
+            {p.remine_reason && (
+              <p className="hint" data-testid="mine-remine-reason">
+                {p.remine_reason}
+              </p>
+            )}
             {p.queries.map((q) => (
               <details key={q.name} open>
                 <summary>{q.name === 'query_history' ? 'system.query.history' : 'system.access.table_lineage'}</summary>

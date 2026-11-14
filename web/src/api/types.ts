@@ -242,6 +242,8 @@ export interface MiningPlan {
   incremental: boolean
   cursor: string | null
   row_cap: number
+  /** One sentence on why a run that would have been incremental reads the whole window, or null. */
+  remine_reason: string | null
   warehouse_id: string | null
   queries: MiningQuery[]
 }

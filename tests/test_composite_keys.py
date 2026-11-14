@@ -3,6 +3,7 @@ from datetime import timedelta
 
 import pytest
 
+import mining
 import relationships as rel
 from sqltools import join_analysis, join_pairs
 from test_mining import NOW, O, C, S, FakeEx, Q_OS, data_dir, mine, stmt, stored  # noqa: F401
@@ -146,3 +147,63 @@ def test_a_replacing_run_swaps_the_together_counts():
         store.upsert_mined([_mined(3, (ab, 3))])
         store.upsert_mined([_mined(1, (ab, 1))], replace=True)
         assert store.all_edges()[0].evidence.together[0].runs == 1
+
+
+# ---------- state written before composite keys ----------
+
+def _make_legacy(profile="dev"):
+    """Turn the stored state and edges into what a run before composite-key support left: no version, no `together`."""
+    state = mining.load_state(profile)
+    state.pop("version", None)
+    mining._save_state(profile, state)
+    with rel.open_store(profile) as store:
+        for e in store.all_edges():
+            store.conn.execute("UPDATE edge SET evidence=? WHERE id=?",
+                               (e.evidence.model_copy(update={"together": []}).model_dump_json(), e.id))
+        store.conn.commit()
+
+
+def test_a_run_saves_the_state_format_version(data_dir):
+    mine(FakeEx([stmt(1, Q_COMPOSITE)]))
+    assert mining.load_state("dev")["version"] == mining.STATE_VERSION
+
+
+def test_an_older_state_is_re_mined_whole_and_says_why(data_dir):
+    mine(FakeEx([stmt(1, Q_COMPOSITE)]))
+    later = NOW + timedelta(days=2)
+    assert mining.plan("dev", 7, now=later)["incremental"] is True  # current format: continues
+    assert mining.plan("dev", 7, now=later)["remine_reason"] is None
+    _make_legacy()
+    p = mining.plan("dev", 7, now=later)
+    assert p["incremental"] is False and p["cursor"] is None and p["since"] == "2026-11-08T11:00:00Z"
+    assert p["remine_reason"] == mining.REMINE_REASON and p["remine_reason"].count(".") == 1
+    assert mining.plan("dev", 7, full=True, now=later)["remine_reason"] is None  # asked for already
+
+
+def test_a_state_with_no_cursor_has_nothing_to_re_mine(data_dir):
+    assert mining.plan("dev", now=NOW)["remine_reason"] is None
+
+
+def test_the_re_mine_after_an_upgrade_adds_together_without_doubling_counts(data_dir):
+    rows = [stmt(1, Q_COMPOSITE), stmt(2, Q_COMPOSITE)]
+    mine(FakeEx(rows))
+    _make_legacy()
+    assert stored()[K_PART].evidence.together == []
+    later = NOW + timedelta(days=2)
+    result = mine(FakeEx(rows), window=30, now=later)  # the default plan: no `full` asked for
+    ev = stored()[K_PART].evidence
+    assert [(tuple(t.columns), t.runs) for t in ev.together] == [(BOTH, 2)]
+    assert ev.runs == 2 and result["created"] == 0 and result["updated"] == 2
+    assert mining.load_state("dev")["version"] == mining.STATE_VERSION
+    assert mining.plan("dev", now=later + timedelta(days=1))["incremental"] is True
+
+
+def test_a_re_mine_keeps_the_status_of_an_existing_suggestion(data_dir):
+    rows = [stmt(1, Q_COMPOSITE)]
+    mine(FakeEx(rows))
+    with rel.open_store("dev") as store:
+        store.set_status_many([e.id for e in store.all_edges()], "accepted")
+    _make_legacy()
+    mine(FakeEx(rows), now=NOW + timedelta(days=1))
+    kept = stored()[K_PART]
+    assert kept.status == "accepted" and kept.evidence.together
