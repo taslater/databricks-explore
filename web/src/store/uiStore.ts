@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-export type MainView = 'graph' | 'canvas'
+export type MainView = 'graph' | 'canvas' | 'concepts'
 
 /** Object picker modes. The legacy UI used the same localStorage key. */
 export type PickMode = 'drill' | 'tree' | 'search'

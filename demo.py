@@ -10,6 +10,7 @@ Magic words in SQL (matched anywhere in the statement, case-insensitive):
   demo_big    50,000 rows, so the row cap and the truncated badge show up
 Otherwise the result follows the first demo table named in the SQL (orders when none is named).
 The system tables system.query.history and system.access.table_lineage / column_lineage are answered by demo_history.py.
+The information_schema tag tables (catalog_tags ... column_tags) answer with the few tags in TAGS.
 """
 import json
 import random
@@ -94,6 +95,16 @@ VIEW_DEPS = {"demo.sales.v_daily_revenue": ["demo.sales.orders"]}
 LINEAGE = [("demo.sales.orders", "demo.sales.v_daily_revenue", "1001"),
            ("samples.nyctaxi.trips", "demo.metrics.wide_metrics", "1002")]
 LINEAGE_SEEN = "2026-11-10T08:00:00.000Z"
+# Unity Catalog tags: scope, catalog, schema, table, column, tag name, tag value (an empty value is a bare label)
+TAGS = [("catalog", "demo", None, None, None, "environment", "sandbox"),
+        ("schema", "demo", "sales", None, None, "domain", "sales"),
+        ("table", "demo", "sales", "orders", None, "domain", "sales"),
+        ("table", "demo", "sales", "customers", None, "domain", "sales"),
+        ("table", "demo", "sales", "orders", None, "certified", ""),
+        ("table", "demo", "hr", "employees", None, "sensitivity", "confidential"),
+        ("column", "demo", "sales", "customers", "email", "pii", "email"),
+        ("column", "demo", "sales", "customers", "name", "pii", "name"),
+        ("column", "demo", "hr", "employees", "salary", "sensitivity", "confidential")]
 
 
 def _type_name(type_text):
@@ -259,6 +270,10 @@ def result_for(statement, params=None):
         wrapped_sql = inner.group(1) if inner else low
     if re.search(r"\bsystem\.(query\.history|access\.(table|column)_lineage)\b", low):
         return demo_history.system_query(low, params, cap or 5000)
+    if re.search(r"\binformation_schema\.(catalog|schema|table|column)_tags\b", low):
+        cols = [{"name": k, "type": "STRING"} for k in
+                ("scope", "catalog_name", "schema_name", "table_name", "column_name", "tag_name", "tag_value")]
+        return cols, [list(t) for t in TAGS][: cap or len(TAGS)]
     if "information_schema.tables" in low:
         q = str((params or {}).get("q", "")).lower()
         hits = [(f.split(".")[0], f.split(".")[1], f.split(".")[2], "VIEW" if v[0] == "VIEW" else "BASE TABLE")

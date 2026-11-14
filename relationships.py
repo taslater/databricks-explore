@@ -16,7 +16,7 @@ from itertools import zip_longest
 from pathlib import Path
 from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
 import dbx
@@ -25,12 +25,18 @@ DERIVED_KINDS = ("fk", "lineage", "view_dep")
 STORED_KINDS = ("join_mined", "manual", "sketch", "concept_link", "ontology")
 STORED_STATUSES = ("proposed", "accepted", "rejected")
 EXPORT_VERSION = 1
+CONCEPT_STATUSES = ("draft", "reviewed", "certified")
+CONCEPT_ORIGINS = ("manual", "uc_tag", "ontology")
+# What a concept link can say, by what it points at.
+TABLE_RELATIONS = ("defines", "measures", "identifies", "describes")
+CONCEPT_RELATIONS = ("is_a", "part_of", "related_to")
 
 Kind = Literal["fk", "lineage", "view_dep", "join_mined", "manual", "sketch", "concept_link", "ontology"]
 Status = Literal["derived", "proposed", "accepted", "rejected"]
 
 _TABLE = re.compile(r"^[^.\s]+\.[^.\s]+\.[^.\s]+$")
 _PLACEHOLDER = "ph:"
+_CONCEPT = "concept:"
 
 
 class RelationshipInvalid(ValueError):
@@ -49,7 +55,7 @@ def new_id():
 
 
 class Endpoint(BaseModel):
-    """One end of an edge: a table (3-part name or ph:<uuid> placeholder) and optionally a column."""
+    """One end of an edge: a table (3-part name, ph:<uuid> placeholder or concept:<uuid>) and optionally a column."""
     model_config = ConfigDict(extra="forbid")
     table: str
     column: Optional[str] = None
@@ -62,9 +68,20 @@ class Endpoint(BaseModel):
                 return _PLACEHOLDER + str(uuid.UUID(v[len(_PLACEHOLDER):]))
             except ValueError:
                 raise PydanticCustomError("bad_table", 'a placeholder must be "ph:<uuid>"') from None
+        if v.startswith(_CONCEPT):
+            try:
+                return _CONCEPT + str(uuid.UUID(v[len(_CONCEPT):]))
+            except ValueError:
+                raise PydanticCustomError("bad_table", 'a concept must be "concept:<uuid>"') from None
         if not _TABLE.match(v):
             raise PydanticCustomError("bad_table", 'a table must be "catalog.schema.table" or "ph:<uuid>"')
         return v
+
+    @model_validator(mode="after")
+    def _concept_has_no_column(self):
+        if self.table.startswith(_CONCEPT) and self.column is not None:
+            raise PydanticCustomError("bad_column", "a concept has no columns")
+        return self
 
     @field_validator("column")
     @classmethod
@@ -115,8 +132,69 @@ class Edge(BaseModel):
     evidence: Optional[Evidence] = None
     status: Status = "proposed"
     note: str = ""
+    relation: Optional[str] = None  # concept_link only: defines, measures, identifies, describes, is_a, part_of, related_to
     created_at: str = Field(default_factory=dbx.now)
     updated_at: str = Field(default_factory=dbx.now)
+
+
+class ConceptProvenance(Provenance):
+    """Where a concept came from: manual, a Unity Catalog tag (uc_tag) or an ontology import."""
+    origin: Literal["manual", "uc_tag", "ontology"] = "manual"
+
+
+def new_concept_id():
+    """A fresh concept id (a bare uuid)."""
+    return str(uuid.uuid4())
+
+
+def _clean_list(v):
+    """Strip each string, drop empties and case-insensitive repeats, keep order."""
+    out, seen = [], set()
+    for item in v:
+        item = item.strip()
+        if item and item.casefold() not in seen:
+            seen.add(item.casefold())
+            out.append(item)
+    return out
+
+
+class Concept(BaseModel):
+    """A business term: name, definition, synonyms, domain and review status. Links to tables live in edges."""
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(default_factory=new_concept_id)
+    name: Annotated[str, Field(min_length=1, max_length=200)]
+    definition: str = ""
+    synonyms: list[str] = Field(default_factory=list)
+    domain: Optional[str] = None
+    status: Literal["draft", "reviewed", "certified"] = "draft"
+    tags: list[str] = Field(default_factory=list)
+    provenance: ConceptProvenance = Field(default_factory=lambda: ConceptProvenance(fetched_at=dbx.now()))
+    created_at: str = Field(default_factory=dbx.now)
+    updated_at: str = Field(default_factory=dbx.now)
+
+    @field_validator("id")
+    @classmethod
+    def _id(cls, v):
+        try:
+            return str(uuid.UUID(v))
+        except ValueError:
+            raise PydanticCustomError("bad_id", "a concept id must be a uuid") from None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _name(cls, v):
+        return v.strip() if isinstance(v, str) else v
+
+    @field_validator("synonyms", "tags")
+    @classmethod
+    def _lists(cls, v):
+        return _clean_list(v)
+
+    @field_validator("domain")
+    @classmethod
+    def _domain(cls, v):
+        v = v.strip() if v is not None else None
+        return v or None
 
 
 class ColumnPair(BaseModel):
@@ -171,6 +249,7 @@ class ExportFile(BaseModel):
     exported_at: Optional[str] = None
     edges: list[Edge]
     overlays: list[Overlay] = Field(default_factory=list)
+    concepts: list[Concept] = Field(default_factory=list)
 
 
 def _path(loc):
@@ -194,6 +273,9 @@ def _parse(model, data):
 def parse_create(data) -> EdgeCreate:
     """Validate a POST body."""
     edge = _parse(EdgeCreate, data)
+    for side in ("source", "target"):
+        if getattr(edge, side).table.startswith(_CONCEPT):
+            raise RelationshipInvalid(f"{side}.table: a concept is linked through /api/concepts, not drawn as an edge")
     _check_endpoints(edge.source, edge.target, "target")
     return edge
 
@@ -226,6 +308,9 @@ def check_statuses(statuses):
 def parse_export(data) -> ExportFile:
     """Validate an export file, including that every edge is of a stored kind."""
     file = _parse(ExportFile, data)
+    for what, values in (("id", [c.id for c in file.concepts]), ("name", [c.name.casefold() for c in file.concepts])):
+        if len(set(values)) != len(values):
+            raise RelationshipInvalid(f"concepts: two concepts share a {what}")
     for i, e in enumerate(file.edges):
         check_storable(e, f"edges[{i}]")
         _check_endpoints(e.source, e.target, f"edges[{i}].target")
@@ -240,11 +325,26 @@ def _check_endpoints(source, target, path):
 
 
 def check_storable(edge, path="(edge)"):
-    """Derived kinds and the derived status are never stored."""
+    """Derived kinds and the derived status are never stored. A concept link must be a well-formed one."""
     if edge.kind in DERIVED_KINDS:
         raise RelationshipInvalid(f'{path}.kind: "{edge.kind}" is derived from Unity Catalog and never stored')
     if edge.status not in STORED_STATUSES:
         raise RelationshipInvalid(f'{path}.status: "{edge.status}" is not a stored status (use proposed, accepted or rejected)')
+    ends = (edge.source.table.startswith(_CONCEPT), edge.target.table.startswith(_CONCEPT))
+    if edge.kind != "concept_link":
+        if any(ends):
+            raise RelationshipInvalid(f"{path}.source: only a concept_link edge can touch a concept")
+        if edge.relation is not None:
+            raise RelationshipInvalid(f"{path}.relation: only a concept_link edge has a relation")
+        return
+    if not ends[0]:
+        raise RelationshipInvalid(f"{path}.source: a concept link starts at a concept (concept:<uuid>)")
+    if edge.target.table.startswith(_PLACEHOLDER):
+        raise RelationshipInvalid(f"{path}.target: a concept links to a table, a column or a concept")
+    allowed = CONCEPT_RELATIONS if ends[1] else TABLE_RELATIONS
+    if edge.relation not in allowed:
+        raise RelationshipInvalid(f"{path}.relation: a link to {'a concept' if ends[1] else 'a table or column'} "
+                                  f"is one of {', '.join(allowed)}")
 
 
 # ---------- natural keys and ids ----------
@@ -449,8 +549,27 @@ CREATE TABLE derived_note (
 );
 """
 
+# Concepts, and the relation a concept link carries. concept.name_key is the case-folded name: unique per database,
+# and there is one database per profile.
+_V2 = """
+CREATE TABLE concept (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    name_key TEXT NOT NULL UNIQUE,
+    definition TEXT NOT NULL DEFAULT '',
+    synonyms TEXT NOT NULL DEFAULT '[]',
+    domain TEXT,
+    status TEXT NOT NULL,
+    tags TEXT NOT NULL DEFAULT '[]',
+    provenance TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+ALTER TABLE edge ADD COLUMN relation TEXT;
+"""
+
 # MIGRATIONS[i] takes the database from user_version i to i + 1. Append; never edit a shipped entry.
-MIGRATIONS = [_V1]
+MIGRATIONS = [_V1, _V2]
 
 
 def migrate(conn):
@@ -501,7 +620,8 @@ class Store:
             target=Endpoint(table=row["tgt_table"], column=row["tgt_column"] or None),
             directed=bool(row["directed"]), provenance=json.loads(row["provenance"]),
             evidence=json.loads(row["evidence"]) if row["evidence"] else None,
-            status=row["status"], note=row["note"], created_at=row["created_at"], updated_at=row["updated_at"])
+            status=row["status"], note=row["note"], relation=row["relation"],
+            created_at=row["created_at"], updated_at=row["updated_at"])
 
     def _by_key(self, key):
         return self.conn.execute(
@@ -513,19 +633,31 @@ class Store:
         key = key_of(edge.kind, edge.source, edge.target, edge.directed)
         prov = edge.provenance.model_dump_json()
         ev = edge.evidence.model_dump_json() if edge.evidence else None
+        if edge.kind == "concept_link":
+            self._require_concepts(edge)
         row = self._by_key(key)
         if row:
             self.conn.execute(
-                "UPDATE edge SET directed=?, provenance=?, evidence=?, status=?, note=?, updated_at=? WHERE id=?",
-                (int(edge.directed), prov, ev, edge.status, edge.note, dbx.now(), row["id"]))
+                "UPDATE edge SET directed=?, provenance=?, evidence=?, status=?, note=?, relation=?, updated_at=? "
+                "WHERE id=?",
+                (int(edge.directed), prov, ev, edge.status, edge.note, edge.relation, dbx.now(), row["id"]))
             return self.get(row["id"]), False
         rid = edge.id
         if self.conn.execute("SELECT 1 FROM edge WHERE id=?", (rid,)).fetchone():
             rid = new_id()  # the incoming id belongs to a different edge here
-        self.conn.execute("INSERT INTO edge VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                          (rid, *key, int(edge.directed), prov, ev, edge.status, edge.note,
+        self.conn.execute("INSERT INTO edge (id, kind, src_table, src_column, tgt_table, tgt_column, directed, provenance,"
+                          " evidence, status, note, relation, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                          (rid, *key, int(edge.directed), prov, ev, edge.status, edge.note, edge.relation,
                            edge.created_at, edge.updated_at))
         return self.get(rid), True
+
+    def _require_concepts(self, edge):
+        """A concept link's concept ends must exist. RelationshipNotFound otherwise."""
+        for side in ("source", "target"):
+            table = getattr(edge, side).table
+            if table.startswith(_CONCEPT) and not self.conn.execute(
+                    "SELECT 1 FROM concept WHERE id=?", (table[len(_CONCEPT):],)).fetchone():
+                raise RelationshipNotFound(f"concept not found: {table[len(_CONCEPT):]}")
 
     # -- stored edges --
     def get(self, rid):
@@ -636,14 +768,106 @@ class Store:
         return [self._edge(r) for r in self.conn.execute("SELECT * FROM edge ORDER BY created_at, id")]
 
     def edges_for(self, table):
-        """Stored edges with this table at either end."""
-        rows = self.conn.execute("SELECT * FROM edge WHERE src_table=? OR tgt_table=? ORDER BY created_at, id",
-                                 (table, table))
+        """Stored edges with this table at either end. Concept links are not table relationships and are left out."""
+        rows = self.conn.execute("SELECT * FROM edge WHERE (src_table=? OR tgt_table=?) AND kind<>'concept_link' "
+                                 "ORDER BY created_at, id", (table, table))
         return [self._edge(r) for r in rows]
 
     def table_view(self, table=None):
-        """Stored edges rolled up to table level, for one table or for all."""
-        return rollup(self.edges_for(table) if table else self.all_edges())
+        """Stored edges rolled up to table level, for one table or for all. Concept links are left out."""
+        return rollup(self.edges_for(table) if table else [e for e in self.all_edges() if e.kind != "concept_link"])
+
+    def upsert_edges(self, edges):
+        """Upsert several edges in one transaction, all or none. Returns (created, updated)."""
+        created = updated = 0
+        for edge in edges:
+            check_storable(edge)
+            _check_endpoints(edge.source, edge.target, "target")
+        with self.conn:
+            for edge in edges:
+                _, was_created = self._upsert(edge)
+                created += was_created
+                updated += not was_created
+        return created, updated
+
+    def delete_edges(self, ids):
+        """Remove stored edges by id, ignoring unknown ids. Returns how many were removed."""
+        with self.conn:
+            return sum(self.conn.execute("DELETE FROM edge WHERE id=?", (rid,)).rowcount for rid in ids)
+
+    # -- concepts --
+    @staticmethod
+    def _concept(row):
+        return Concept(id=row["id"], name=row["name"], definition=row["definition"],
+                       synonyms=json.loads(row["synonyms"]), domain=row["domain"], status=row["status"],
+                       tags=json.loads(row["tags"]), provenance=json.loads(row["provenance"]),
+                       created_at=row["created_at"], updated_at=row["updated_at"])
+
+    def concepts(self):
+        """Every concept, by name."""
+        rows = self.conn.execute("SELECT * FROM concept ORDER BY name_key, id")
+        return [self._concept(r) for r in rows]
+
+    def concept(self, cid):
+        """The concept with this id; RelationshipNotFound if none."""
+        row = self.conn.execute("SELECT * FROM concept WHERE id=?", (cid,)).fetchone()
+        if not row:
+            raise RelationshipNotFound(f"concept not found: {cid}")
+        return self._concept(row)
+
+    def _upsert_concept(self, c):
+        """Insert or update a concept by id without committing. Returns True when it was inserted."""
+        key = c.name.casefold()
+        clash = self.conn.execute("SELECT id FROM concept WHERE name_key=? AND id<>?", (key, c.id)).fetchone()
+        if clash:
+            raise RelationshipInvalid(f'name: a concept named "{c.name}" already exists')
+        values = (c.name, key, c.definition, json.dumps(c.synonyms), c.domain, c.status, json.dumps(c.tags),
+                  c.provenance.model_dump_json(), c.updated_at)
+        if self.conn.execute("SELECT 1 FROM concept WHERE id=?", (c.id,)).fetchone():
+            self.conn.execute("UPDATE concept SET name=?, name_key=?, definition=?, synonyms=?, domain=?, status=?, "
+                              "tags=?, provenance=?, updated_at=? WHERE id=?", (*values, c.id))
+            return False
+        self.conn.execute("INSERT INTO concept (name, name_key, definition, synonyms, domain, status, tags, provenance,"
+                          " updated_at, id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (*values, c.id, c.created_at))
+        return True
+
+    def save_concept(self, concept):
+        """Insert or update a concept by id. Returns (concept, created). A taken name is RelationshipInvalid."""
+        with self.conn:
+            created = self._upsert_concept(concept)
+        return self.concept(concept.id), created
+
+    def delete_concept(self, cid):
+        """Remove a concept and every link that starts or ends at it. Returns how many links went."""
+        self.concept(cid)
+        end = _CONCEPT + cid
+        with self.conn:
+            gone = self.conn.execute("DELETE FROM edge WHERE kind='concept_link' AND (src_table=? OR tgt_table=?)",
+                                     (end, end)).rowcount
+            self.conn.execute("DELETE FROM concept WHERE id=?", (cid,))
+        return gone
+
+    def concept_links(self, cid, incoming=False):
+        """Links that start at this concept, or (incoming) that point at it from another concept."""
+        col = "tgt_table" if incoming else "src_table"
+        rows = self.conn.execute(f"SELECT * FROM edge WHERE kind='concept_link' AND {col}=? ORDER BY created_at, rowid",
+                                 (_CONCEPT + cid,))
+        return [self._edge(r) for r in rows]
+
+    def links_to_tables(self, tables):
+        """Concept links whose target is one of these tables (a table or one of its columns)."""
+        tables = list(dict.fromkeys(tables))
+        if not tables:
+            return []
+        marks = ",".join("?" * len(tables))
+        rows = self.conn.execute(f"SELECT * FROM edge WHERE kind='concept_link' AND tgt_table IN ({marks}) "
+                                 "ORDER BY created_at, rowid", tables)
+        return [self._edge(r) for r in rows]
+
+    def link_counts(self):
+        """Map of concept id to how many links start at it."""
+        rows = self.conn.execute("SELECT src_table, COUNT(*) AS n FROM edge WHERE kind='concept_link' GROUP BY src_table")
+        return {r["src_table"][len(_CONCEPT):]: r["n"] for r in rows}
 
     # -- notes on derived edges --
     def derived_notes(self):
@@ -680,25 +904,39 @@ class Store:
             self._set_note(key, "")
 
     # -- export / import --
-    def export(self):
-        """Every stored edge and derived-edge note, in the import format."""
+    def export(self, concepts_only=False):
+        """Every stored edge, derived-edge note and concept, in the import format.
+
+        With `concepts_only`, just the concepts and their links (no overlays, no other edges).
+        """
         overlays = [Overlay(kind=k[0], source=Endpoint(table=k[1], column=k[2] or None),
                             target=Endpoint(table=k[3], column=k[4] or None), note=n)
                     for k, n in sorted(self.derived_notes().items())]
-        file = ExportFile(version=EXPORT_VERSION, exported_at=dbx.now(), edges=self.all_edges(), overlays=overlays)
+        edges = self.all_edges()
+        if concepts_only:
+            overlays, edges = [], [e for e in edges if e.kind == "concept_link"]
+        file = ExportFile(version=EXPORT_VERSION, exported_at=dbx.now(), edges=edges, overlays=overlays,
+                          concepts=self.concepts())
         return file.model_dump(mode="json")
 
     def import_file(self, file):
-        """Upsert a parsed export file in one transaction. Returns counts."""
-        created = updated = 0
+        """Upsert a parsed export file in one transaction (concepts first, then edges). Returns counts.
+
+        A failure, such as a name another concept already has or a link to a concept that exists nowhere,
+        leaves the store as it was.
+        """
+        created = updated = concepts_created = 0
         with self.conn:
+            for c in file.concepts:
+                concepts_created += self._upsert_concept(c)
             for e in file.edges:
                 _, was_created = self._upsert(e)
                 created += was_created
                 updated += not was_created
             for o in file.overlays:
                 self._set_note(key_of(o.kind, o.source, o.target), o.note, o.updated_at)
-        return {"imported": len(file.edges), "created": created, "updated": updated, "overlays": len(file.overlays)}
+        return {"imported": len(file.edges), "created": created, "updated": updated, "overlays": len(file.overlays),
+                "concepts": len(file.concepts), "concepts_created": concepts_created}
 
 
 # ---------- the unified read ----------
@@ -741,6 +979,8 @@ def check_table(table):
     """Validate a table name or placeholder from a query string. Returns it normalized."""
     if not table:
         raise RelationshipInvalid("table: required")
+    if table.startswith(_CONCEPT):
+        raise RelationshipInvalid("table: a concept is not a table")
     try:
         return Endpoint(table=table).table
     except ValidationError as e:

@@ -35,6 +35,8 @@ interface GraphState {
   drawer: Drawer
   /** The confirm dialog for a mining run is open. */
   mineDialog: boolean
+  /** Draw the concepts linked to the tables on the graph (the Concepts toggle). Not part of a saved diagram. */
+  showConcepts: boolean
   focusSchema: string | null
   selection: Selection
   hoverId: string | null
@@ -58,6 +60,7 @@ interface GraphState {
   setFocusSchema: (schema: string | null) => void
   setDrawer: (drawer: Drawer) => void
   setMineDialog: (open: boolean) => void
+  setShowConcepts: (show: boolean) => void
   /** Stores a node's columns and shows them. */
   setColumns: (id: string, columns: ColumnInfo[]) => void
   setShowColumns: (id: string, show: boolean) => void
@@ -79,6 +82,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   columnEdges: [],
   drawer: null,
   mineDialog: false,
+  showConcepts: false,
   focusSchema: null,
   selection: null,
   hoverId: null,
@@ -102,6 +106,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   },
   setDrawer: (drawer) => set({ drawer }),
   setMineDialog: (mineDialog) => set({ mineDialog }),
+  setShowConcepts: (showConcepts) => set({ showConcepts }),
   setColumns: (id, columns) =>
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, columns, showColumns: true } } : n)),

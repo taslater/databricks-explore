@@ -12,6 +12,7 @@ from flask import Flask, abort, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException, MethodNotAllowed, NotFound
 
 import canvases
+import concepts
 import dbx
 import mining
 import relationships
@@ -260,6 +261,88 @@ def relationships_import():
     file = relationships.parse_export(request.get_json(silent=True))
     with rel_store() as store:
         return jsonify(store.import_file(file))
+
+
+# ---------- concepts (concepts.py): a business glossary linked to tables, columns and other concepts ----------
+
+@app.get("/api/concepts")
+def concept_list():
+    status = request.args.get("status") or None
+    with rel_store() as store:
+        return jsonify(concepts.listing(store, request.args.get("q", ""), request.args.get("domain") or None, status))
+
+
+@app.post("/api/concepts")
+def concept_create():
+    body = concepts.parse_create(request.get_json(silent=True))
+    with rel_store() as store:
+        return jsonify(concepts.detail(store, concepts.create(store, body).id)), 201
+
+
+@app.get("/api/concepts/export")
+def concepts_export():
+    with rel_store() as store:
+        return jsonify(store.export(concepts_only=True))
+
+
+@app.get("/api/concepts/for-tables")
+def concepts_for_tables():
+    with rel_store() as store:
+        return jsonify(concepts.for_tables(store, request.args.getlist("table")))
+
+
+@app.get("/api/concepts/suggest/plan")
+def concept_suggest_plan():
+    return jsonify(concepts.tag_plan(ex().warehouse_id))
+
+
+@app.post("/api/concepts/suggest/run")
+def concept_suggest_run():
+    result = ex().query(concepts.TAG_SQL, None, concepts.TAG_ROW_CAP)
+    with rel_store() as store:
+        return jsonify(concepts.tag_run(store, result))
+
+
+@app.get("/api/concepts/<cid>")
+def concept_get(cid):
+    with rel_store() as store:
+        return jsonify(concepts.detail(store, concepts.check_concept_id(cid)))
+
+
+@app.patch("/api/concepts/<cid>")
+def concept_patch(cid):
+    cid = concepts.check_concept_id(cid)
+    patch = concepts.parse_patch(request.get_json(silent=True))
+    with rel_store() as store:
+        concepts.update(store, cid, patch)
+        return jsonify(concepts.detail(store, cid))
+
+
+@app.delete("/api/concepts/<cid>")
+def concept_delete(cid):
+    with rel_store() as store:
+        return jsonify(concepts.remove(store, concepts.check_concept_id(cid)))
+
+
+@app.post("/api/concepts/<cid>/links")
+def concept_link_add(cid):
+    cid = concepts.check_concept_id(cid)
+    body = concepts.parse_link(request.get_json(silent=True))
+    with rel_store() as store:
+        edge, created = concepts.add_link(store, cid, body)
+    return jsonify(edge.model_dump(mode="json")), 201 if created else 200
+
+
+@app.delete("/api/concepts/<cid>/links/<edge_id>")
+def concept_link_remove(cid, edge_id):
+    with rel_store() as store:
+        return jsonify(concepts.remove_link(store, concepts.check_concept_id(cid), edge_id))
+
+
+@app.get("/api/concepts/<cid>/candidates")
+def concept_candidates(cid):
+    with rel_store() as store:
+        return jsonify(concepts.candidates(store, concepts.check_concept_id(cid), dbx.cached_metadata(ex())))
 
 
 # ---------- query-history mining (mining.py): explicit, user-triggered runs ----------

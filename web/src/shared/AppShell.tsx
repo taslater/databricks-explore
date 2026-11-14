@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
 import { CanvasView } from '../canvas/CanvasView'
+import { ConceptsView } from '../concepts/ConceptsView'
 import { GraphView } from '../graph/GraphView'
 import { useUiStore } from '../store/uiStore'
 import { DetailsPanel } from './DetailsPanel'
@@ -24,11 +25,11 @@ export function AppShell() {
     else panel.expand()
   }, [pickerCollapsed, pickerRef])
 
-  // The canvas keeps Details collapsed until its Properties button opens it. The graph always shows it.
+  // The canvas keeps Details collapsed until its Properties button opens it, and Concepts has no use for it. The graph always shows it.
   useEffect(() => {
     const panel = detailsRef.current
     if (!panel) return
-    if (view === 'canvas' && !canvasDetailsOpen) panel.collapse()
+    if ((view === 'canvas' && !canvasDetailsOpen) || view === 'concepts') panel.collapse()
     else panel.expand()
   }, [view, canvasDetailsOpen, detailsRef])
 
@@ -60,7 +61,7 @@ export function AppShell() {
                 »
               </button>
             )}
-            {view === 'graph' ? <GraphView /> : <CanvasView />}
+            {view === 'graph' ? <GraphView /> : view === 'concepts' ? <ConceptsView /> : <CanvasView />}
           </div>
         </Panel>
         <Separator className="resize-handle" />
