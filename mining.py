@@ -154,6 +154,7 @@ class _Pair:
         self.users = set()
         self.first = self.last = None
         self.refs = deque(maxlen=SAMPLE_REFS)
+        self.together = defaultdict(int)  # composite key (its column pairs) -> statements that joined on it
 
     def add(self, sid, user, day):
         self.runs += 1
@@ -243,7 +244,7 @@ def _run(ex, p, progress):
         read = _read_names(lineage.get(sid, ()))
         no_lineage += not lineage.get(sid)
         try:
-            found = sqltools.join_pairs(text, known=lineage.get(sid))
+            found, composites = sqltools.join_analysis(text, known=lineage.get(sid))
             if not read:
                 read = _read_names(_safe_tables(text))
         except ValueError:
@@ -264,6 +265,12 @@ def _run(ex, p, progress):
         with_joins += bool(mine)
         for j in mine:
             pairs[_key(j.left_table, j.left_column, j.right_table, j.right_column)].add(sid, user, day)
+        for keys in composites:
+            members = [_key(*k) for k in keys]
+            if all(k in pairs for k in members):  # all of them, so none is in a Databricks catalog
+                columns = tuple((k[1], k[3]) for k in members)
+                for k in members:
+                    pairs[k].together[columns] += 1
     progress("extract", len(rows), len(rows))
 
     # Pairs that are declared foreign keys are not suggestions.
@@ -291,7 +298,7 @@ def _run(ex, p, progress):
                 target=relationships.Endpoint(table=k[2], column=k[3]),
                 provenance=relationships.Provenance(origin="query_history", source_ref=ev.refs[-1], fetched_at=fetched),
                 evidence=relationships.Evidence(runs=ev.runs, users=len(ev.users), first_seen=ev.first, last_seen=ev.last,
-                                                sample_refs=list(reversed(ev.refs)))))
+                                                sample_refs=list(reversed(ev.refs)), together=_together(ev))))
         except ValidationError:
             invalid += 1
     with relationships.open_store(ex.profile) as store:
@@ -310,6 +317,12 @@ def _run(ex, p, progress):
               "until": cursor if capped else until, "finished_at": dbx.now()}
     _save_state(ex.profile, {"cursor": cursor, "cursor_ids": cursor_ids, "last_run": result, "usage": usage})
     return result
+
+
+def _together(ev):
+    """The composite keys a pair was part of, most runs first."""
+    top = sorted(ev.together.items(), key=lambda kv: (-kv[1], kv[0]))[:relationships.MAX_TOGETHER]
+    return [relationships.Together(columns=list(cols), runs=n) for cols, n in top]
 
 
 def _safe_tables(text):

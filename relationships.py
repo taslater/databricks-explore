@@ -82,6 +82,16 @@ class Provenance(BaseModel):
     fetched_at: Optional[str] = None
 
 
+MAX_TOGETHER = 5  # composite keys kept per edge
+
+
+class Together(BaseModel):
+    """Column pairs (source column, target column) that were joined in one condition, and how many runs had them so."""
+    model_config = ConfigDict(extra="forbid")
+    columns: list[tuple[str, str]]
+    runs: Annotated[StrictInt, Field(ge=0)]
+
+
 class Evidence(BaseModel):
     """How often an edge was observed, for kinds that are mined from activity."""
     model_config = ConfigDict(extra="forbid")
@@ -90,6 +100,7 @@ class Evidence(BaseModel):
     first_seen: Optional[str] = None
     last_seen: Optional[str] = None
     sample_refs: list[str] = Field(default_factory=list)
+    together: list[Together] = Field(default_factory=list)  # composite keys this pair is part of
 
 
 class Edge(BaseModel):
@@ -360,6 +371,12 @@ def _add_evidence(old, new):
     """Evidence of the same edge from two mining runs: runs added, users the larger, newest sample refs first (5)."""
     both = _merge_evidence([old, new])
     both.sample_refs = list(dict.fromkeys([*new.sample_refs, *old.sample_refs]))[:5]
+    runs = {}
+    for t in [*old.together, *new.together]:
+        key = tuple(t.columns)
+        runs[key] = runs.get(key, 0) + t.runs
+    both.together = [Together(columns=list(k), runs=n)
+                     for k, n in sorted(runs.items(), key=lambda kv: (-kv[1], kv[0]))[:MAX_TOGETHER]]
     return both
 
 

@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useBulkReview, useSuggestions } from '../api/hooks'
-import type { Relationship, StoredStatus } from '../api/types'
+import type { StoredStatus } from '../api/types'
 import { messageOf, useGraphActions } from './actions'
 import { dayOf, pairLabel } from './mining'
+import { shortestNames } from './names'
+import { groupSuggestions, type SuggestionRow } from './suggestionGroups'
 
 const STATUSES: StoredStatus[] = ['proposed', 'accepted', 'rejected']
 
@@ -14,7 +16,9 @@ export function Suggestions() {
   const list = useSuggestions(status)
   const bulk = useBulkReview()
   const actions = useGraphActions()
-  const edges = list.data?.edges ?? []
+  const edges = useMemo(() => list.data?.edges ?? [], [list.data])
+  const rows = useMemo(() => groupSuggestions(edges), [edges])
+  const name = useMemo(() => shortestNames(edges.flatMap((e) => [e.source.table, e.target.table])), [edges])
   const counts = list.data?.counts
 
   async function review(ids: string[], to: StoredStatus) {
@@ -35,8 +39,8 @@ export function Suggestions() {
       if (!next.delete(id)) next.add(id)
       return next
     })
-  const allPicked = edges.length > 0 && edges.every((e) => picked.has(e.id))
-  const chosen = edges.filter((e) => picked.has(e.id)).map((e) => e.id)
+  const allPicked = rows.length > 0 && rows.every((r) => picked.has(r.key))
+  const chosen = [...new Set(rows.filter((r) => picked.has(r.key)).flatMap((r) => r.ids))]
 
   return (
     <div className="suggestions" data-testid="suggestions">
@@ -69,14 +73,14 @@ export function Suggestions() {
       </div>
       {error && <p className="error">{error}</p>}
       {list.isError && <p className="error">{list.error.message}</p>}
-      {list.isSuccess && edges.length === 0 && (
+      {list.isSuccess && rows.length === 0 && (
         <p className="hint">
           {status === 'proposed'
             ? 'No suggestions. Use Mine joins to read query history for joins between tables.'
             : `Nothing ${status}.`}
         </p>
       )}
-      {edges.length > 0 && (
+      {rows.length > 0 && (
         <table className="sg-table">
           <thead>
             <tr>
@@ -85,7 +89,7 @@ export function Suggestions() {
                   type="checkbox"
                   aria-label="Select all"
                   checked={allPicked}
-                  onChange={() => setPicked(allPicked ? new Set() : new Set(edges.map((e) => e.id)))}
+                  onChange={() => setPicked(allPicked ? new Set() : new Set(rows.map((r) => r.key)))}
                 />
               </th>
               <th>Join</th>
@@ -96,8 +100,16 @@ export function Suggestions() {
             </tr>
           </thead>
           <tbody>
-            {edges.map((e) => (
-              <Row key={e.id} edge={e} picked={picked.has(e.id)} onToggle={() => toggle(e.id)} onReview={review} />
+            {rows.map((r) => (
+              <Row
+                key={r.key}
+                row={r}
+                name={name}
+                status={status}
+                picked={picked.has(r.key)}
+                onToggle={() => toggle(r.key)}
+                onReview={review}
+              />
             ))}
           </tbody>
         </table>
@@ -107,39 +119,52 @@ export function Suggestions() {
 }
 
 function Row({
-  edge,
+  row,
+  name,
+  status,
   picked,
   onToggle,
   onReview,
 }: {
-  edge: Relationship
+  row: SuggestionRow
+  name: (table: string) => string
+  status: StoredStatus
   picked: boolean
   onToggle: () => void
   onReview: (ids: string[], to: StoredStatus) => Promise<void>
 }) {
   const actions = useGraphActions()
-  const ev = edge.evidence
-  const title = `${edge.source.table}.${edge.source.column} = ${edge.target.table}.${edge.target.column}${
-    ev?.sample_refs.length ? `\nstatements: ${ev.sample_refs.join(', ')}` : ''
+  const labels = row.columns.map(([s, t]) =>
+    pairLabel({ source: { table: row.source, column: s }, target: { table: row.target, column: t } }, name),
+  )
+  const refs = [...new Set(row.edges.flatMap((e) => e.evidence?.sample_refs ?? []))]
+  const title = `${row.columns.map(([s, t]) => `${row.source}.${s} = ${row.target}.${t}`).join('\n')}${
+    refs.length ? `\nstatements: ${refs.join(', ')}` : ''
   }`
+  const subject = row.composite ? `${labels[0]} and ${labels.length - 1} more` : labels[0]
   return (
     <tr className={picked ? 'picked' : undefined}>
       <td>
-        <input type="checkbox" aria-label={`Select ${pairLabel(edge)}`} checked={picked} onChange={onToggle} />
+        <input type="checkbox" aria-label={`Select ${subject}`} checked={picked} onChange={onToggle} />
       </td>
-      <td title={title}>{pairLabel(edge)}</td>
-      <td>{ev?.runs ?? ''}</td>
-      <td>{ev?.users ?? ''}</td>
-      <td>{dayOf(ev?.last_seen)}</td>
+      <td title={title}>
+        {row.composite && <span className="hint">composite key, {labels.length} columns</span>}
+        {labels.map((l) => (
+          <div key={l}>{l}</div>
+        ))}
+      </td>
+      <td>{row.runs}</td>
+      <td>{row.users || ''}</td>
+      <td>{dayOf(row.lastSeen)}</td>
       <td className="sg-actions">
         <button
-          onClick={() => void actions.showColumnEdge(edge.source.table, edge.target.table, edge.id)}
+          onClick={() => void actions.showColumnEdge(row.source, row.target, row.ids[0])}
           title="Show both tables and their columns in the graph"
         >
           Show
         </button>
-        {edge.status !== 'accepted' && <button onClick={() => void onReview([edge.id], 'accepted')}>Accept</button>}
-        {edge.status !== 'rejected' && <button onClick={() => void onReview([edge.id], 'rejected')}>Reject</button>}
+        {status !== 'accepted' && <button onClick={() => void onReview(row.ids, 'accepted')}>Accept</button>}
+        {status !== 'rejected' && <button onClick={() => void onReview(row.ids, 'rejected')}>Reject</button>}
       </td>
     </tr>
   )

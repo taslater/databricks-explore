@@ -1,6 +1,5 @@
 // Pure helpers for the mining panels: progress text, result summary, suggestion labels. No React, no fetch.
 import type { MiningPhase, MiningResult, MiningStatus, Relationship } from '../api/types'
-import { columnLabel } from './columns'
 
 const PHASE_TEXT: Record<MiningPhase, string> = {
   history: 'Reading query history',
@@ -41,11 +40,16 @@ export function resultLines(r: MiningResult): string[] {
   return lines
 }
 
-/** `orders.customer_id ↔ customers.id`, for a stored column edge. */
-export function pairLabel(r: Pick<Relationship, 'source' | 'target'>): string {
-  const side = (e: Relationship['source']) => (e.column ? columnLabel(e.table, e.column) : (e.table.split('.').pop() ?? e.table))
+/**
+ * `orders.customer_id ↔ customers.id`, for a stored column edge. Tables are named by `name` (see shortestNames),
+ * or by their last part when it is not given.
+ */
+export function pairLabel(r: Pick<Relationship, 'source' | 'target'>, name: (table: string) => string = lastPart): string {
+  const side = (e: Relationship['source']) => (e.column ? `${name(e.table)}.${e.column}` : name(e.table))
   return `${side(r.source)} ↔ ${side(r.target)}`
 }
+
+const lastPart = (table: string): string => table.split('.').pop() ?? table
 
 /** The date part of an ISO timestamp, for compact lists. */
 export const dayOf = (s: string | null | undefined): string => (s ? s.slice(0, 10) : '')

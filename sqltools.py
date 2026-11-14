@@ -256,6 +256,7 @@ class _Names:
     def __init__(self, catalog, schema, known):
         self.catalog = (catalog or "").lower() or None
         self.schema = (schema or "").lower() or None
+        self.conditions: list[list[JoinPair]] = []  # the pairs of each join condition read, for composite keys
         self.by_suffix: dict[str, set[str]] = {}
         for full in {k.lower() for k in known or ()}:
             parts = full.split(".")
@@ -393,13 +394,16 @@ def _conjuncts(cond):
 
 
 def _equalities(cond, scope, names: _Names, join_type: str):
+    got: list[JoinPair] = []
     for eq in _conjuncts(cond):
         left, right = _strip(eq.left), _strip(eq.right)
         if not (_is_column(left) and _is_column(right)):
             continue
         a, b = _resolve(left, scope, names), _resolve(right, scope, names)
         if a and b and a[:2] != b[:2] and a[2:] != b[2:]:
-            yield _pair(a[2], a[3], b[2], b[3], join_type)
+            got.append(_pair(a[2], a[3], b[2], b[3], join_type))
+            yield got[-1]
+    names.conditions.append(got)
 
 
 def _pair(t1, c1, t2, c2, join_type) -> JoinPair:
@@ -429,13 +433,16 @@ def _select_pairs(scope, names: _Names):
         if join.args.get("on") is not None:
             yield from _equalities(join.args["on"], scope, names, kind)
         elif join.args.get("using"):
+            got: list[JoinPair] = []
             for ident in join.args["using"]:
                 name = ident.name.lower()
                 one_left = len(preceding) == 1 and preceding[0] in sources
                 left = _trace(sources[preceding[0]], name, names) if one_left else None
                 right = _trace(sources[key], name, names) if key in sources else None
                 if left and right and left != right:
-                    yield _pair(*left, *right, kind)
+                    got.append(_pair(*left, *right, kind))
+                    yield got[-1]
+            names.conditions.append(got)
         elif not join.args.get("method"):
             implicit = True  # a comma or CROSS JOIN: its condition, if any, is in WHERE
         preceding.append(key)
@@ -464,7 +471,19 @@ def _merge_pairs(merge: exp.Merge, names: _Names):
 
 def join_pairs(sql: str, default_catalog: str | None = None, default_schema: str | None = None,
                known: Iterable[str] | None = None) -> list[JoinPair]:
-    """Column pairs a statement joins on, resolved through aliases, CTEs and subqueries to base tables.
+    """Column pairs a statement joins on, resolved through aliases, CTEs and subqueries to base tables (see join_analysis)."""
+    return join_analysis(sql, default_catalog, default_schema, known)[0]
+
+
+def join_analysis(sql: str, default_catalog: str | None = None, default_schema: str | None = None,
+                  known: Iterable[str] | None = None) -> tuple[list[JoinPair], list[tuple[tuple, ...]]]:
+    """The join pairs of a statement and its composite keys: `(pairs, composites)`.
+
+    A composite key is two or more different column pairs between the same two tables in one join condition
+    (`ON a.x = b.x AND a.y = b.y`, or `USING (x, y)`). Each is a sorted tuple of pair keys `(table, column, table,
+    column)`, and the same key found twice in a statement is listed once.
+
+    The pairs are the column pairs a statement joins on, resolved through aliases, CTEs and subqueries to base tables.
 
     Reads ON equalities (composite AND keys too), USING, comma and CROSS joins whose WHERE equates columns,
     MERGE ... ON, and equalities that correlate a subquery with its outer query. Anything that cannot be
@@ -487,8 +506,20 @@ def join_pairs(sql: str, default_catalog: str | None = None, default_schema: str
                 pairs = (p for scope in traverse_scope(tree) for p in _select_pairs(scope, names))
             for p in pairs:
                 found.setdefault(p[:4], p)
-        return list(found.values())
+        return list(found.values()), _composites(names.conditions)
     except sqlglot.errors.SqlglotError as e:
         raise ValueError(f"cannot parse SQL: {e}") from e
     except RecursionError as e:
         raise ValueError("cannot parse SQL: nested too deeply") from e
+
+
+def _composites(conditions) -> list[tuple[tuple, ...]]:
+    """Sorted pair-key tuples for each set of 2+ different pairs between one two tables inside one condition."""
+    out = set()
+    for cond in conditions:
+        by_tables: dict[tuple, set[tuple]] = {}
+        for p in cond:
+            if p.left_table != p.right_table:
+                by_tables.setdefault((p.left_table, p.right_table), set()).add(tuple(p[:4]))
+        out.update(tuple(sorted(keys)) for keys in by_tables.values() if len(keys) >= 2)
+    return sorted(out)

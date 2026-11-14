@@ -1,13 +1,19 @@
+import { useMemo } from 'react'
 import { useUsage } from '../api/hooks'
 import { useGraphActions } from './actions'
 import { useGraphStore } from './graphStore'
 import { dayOf } from './mining'
+import { shortestNames } from './names'
 
 /** Top tables by runs and distinct users, and top table pairs read together, for the mined window. */
 export function UsagePanel() {
   const usage = useUsage()
   const actions = useGraphActions()
   const u = usage.data
+  const name = useMemo(
+    () => shortestNames([...(u?.tables.map((t) => t.table) ?? []), ...(u?.pairs.flatMap((p) => p.tables) ?? [])]),
+    [u],
+  )
 
   function show(table: string) {
     const g = useGraphStore.getState()
@@ -40,7 +46,7 @@ export function UsagePanel() {
                 <tr key={t.table}>
                   <td title={t.table}>
                     <button className="link" onClick={() => show(t.table)}>
-                      {t.table}
+                      {name(t.table)}
                     </button>
                     <div className="usage-bar" style={{ width: `${(100 * t.runs) / maxRuns}%` }} />
                   </td>
@@ -64,7 +70,7 @@ export function UsagePanel() {
             <tbody>
               {u.pairs.map((p) => (
                 <tr key={p.tables.join('|')}>
-                  <td title={p.tables.join(' + ')}>{p.tables.map((t) => t.split('.').pop()).join(' + ')}</td>
+                  <td title={p.tables.join(' + ')}>{p.tables.map(name).join(' + ')}</td>
                   <td>{p.runs}</td>
                   <td>{p.users}</td>
                 </tr>
