@@ -93,13 +93,13 @@ The **Concepts** tab is a small business glossary over the catalog. It is shaped
   tidied    score  88  overlap       0  crossings  0  align 1.00
 == query grid: 12 nodes, 8 connectors
   perturbed score  28  overlap  107620  crossings  2  align 0.08
-  tidied    score  86  overlap       0  crossings  1  align 1.00
+  tidied    score  84  overlap       0  crossings  3  align 0.57
 == frames: 15 nodes, 5 connectors
   perturbed score  32  overlap   16182  crossings  0  align 0.29
-  tidied    score  86  overlap       0  crossings  1  align 1.00
+  tidied    score  88  overlap       0  crossings  0  align 0.92
 ```
 
-What tidy leaves is mostly connectors that pass through nodes. Those need a different arrangement, not a nudge, so Doctor reports them without a Fix.
+When tidy grows a node to fit its label, or finds a connector label with too little room, it pushes the nodes beyond that edge outward by the missing space instead of leaving them touching, and overlap separation leaves at least 16 px (more for a labeled connector). What tidy leaves is mostly connectors that pass through nodes. Those need a different arrangement, not a nudge, so Doctor reports them without a Fix.
 
 ## Use from an agent (MCP)
 A coding agent such as Claude Code can explore the catalog and work on canvases next to you, through an MCP server inside the app (`/mcp`, streamable HTTP, this computer only). Click **Agent access** in the top bar, then **Copy command** and paste it into a terminal once:
