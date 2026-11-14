@@ -22,7 +22,7 @@ Root: `databricks-explore` | files: 229
   - `def describe_json(path: Path) -> list[str]`
   - `def render() -> str`
   - `def main() -> int`
-- `pyproject.toml` (1,953 B)
+- `pyproject.toml` (2,164 B)
 - `README.md` (23,305 B)
   - Databricks Explorer (v0.5)
 - `uv.lock` (250,459 B)

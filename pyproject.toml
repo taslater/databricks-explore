@@ -33,6 +33,11 @@ dependencies = [
     "platformdirs>=4",
 ]
 
+[project.urls]
+Homepage = "https://github.com/taslater/databricks-explore"
+Issues = "https://github.com/taslater/databricks-explore/issues"
+Changelog = "https://github.com/taslater/databricks-explore/releases"
+
 [project.scripts]
 databricks-explore = "databricks_explore.cli:main"
 
