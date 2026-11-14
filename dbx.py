@@ -514,7 +514,17 @@ def api_get(explorer, path, query=None):
                           path=path, query=query)
 
 
-def table_definition(explorer, full_name):
-    """A table's `view_definition` from the tables API (the YAML of a metric view), or None when it has none."""
+def table_metric_info(explorer, full_name):
+    """One tables.get call for a metric view: {"definition": the `view_definition` YAML or None, "kinds": {column:
+    "dimension"|"measure"}}. The kinds come from each column's `type_json` metadata (`metric_view.type`)."""
     info = explorer._call("tables.get", lambda: explorer.w.tables.get(full_name), full_name=full_name)
-    return getattr(info, "view_definition", None)
+    kinds = {}
+    for col in getattr(info, "columns", None) or []:
+        try:
+            meta = (json.loads(col.type_json) or {}).get("metadata") or {}
+            kind = meta.get("metric_view.type")
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if kind in ("dimension", "measure"):
+            kinds[col.name] = kind
+    return {"definition": getattr(info, "view_definition", None), "kinds": kinds}

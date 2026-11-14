@@ -122,7 +122,7 @@ Root: `agent-aad4038916e6d0423` | files: 181
   - `def candidates(store, cid, metadata)`: Cached tables and columns whose name or comment mentions the concept's name or a synonym.
   - `def tag_plan(warehouse_id=None)`: The read-only SQL a tag suggestion run executes, for a confirm dialog. Nothing runs.
   - `def tag_run(store, result)`: Turn the rows of TAG_SQL into draft concepts, one per tag key and value, linked with `describes`.
-- `dbx.py` (26,940 B)
+- `dbx.py` (27,445 B)
   - Databricks access + local JSON cache. Every remote call is logged to data/logs/calls.jsonl.
   - `def now()`
   - `def is_internal(name)`: MV/streaming-table backing tables, e.g. __materialization_mat_<uuid>_<mv>_1. Not user-readable.
@@ -140,8 +140,8 @@ Root: `agent-aad4038916e6d0423` | files: 181
   - `def save_diagram(name, payload)`
   - `def load_diagram(name)`
   - `def api_get(explorer, path, query=None)`: GET a workspace REST path through the SDK's api_client, logged like every other call. Returns the parsed JSON.
-  - `def table_definition(explorer, full_name)`: A table's `view_definition` from the tables API (the YAML of a metric view), or None when it has none.
-- `demo.py` (33,852 B)
+  - `def table_metric_info(explorer, full_name)`: One tables.get call for a metric view: {"definition": the `view_definition` YAML or None, "kinds": {column:
+- `demo.py` (35,228 B)
   - Demo mode: a fake Databricks workspace with invented data, so every real route works offline.
   - `class DemoError(Exception)`: A statement the fake warehouse rejects (surfaces as a FAILED statement).
   - `def table_rows(full_name, n)`: n invented rows of a demo table as (columns, rows). Deterministic per table.
@@ -188,7 +188,7 @@ Root: `agent-aad4038916e6d0423` | files: 181
   - `def run(ex, p, progress=lambda phase, done=0, total=0: None)`: Execute a plan: read, extract, check foreign keys, store. Returns the result counts.
   - `def usage_summary(profile, limit=10)`: Top tables by runs and distinct users, and top table pairs read together, for the mined window.
   - `class Miner()`: Runs mining in a thread for one connection and reports progress. One run at a time.
-- `ontology.py` (20,696 B)
+- `ontology.py` (23,993 B)
   - Import from Databricks: Genie Ontology domains and pages, metric view measures and dimensions, and certification.
   - `def plan(warehouse_id=None)`: Every REST call and SQL statement an import run makes, for a confirm dialog. Nothing runs.
   - `def parse_metric_view(text)`: Measures and dimensions from a metric view's YAML: dicts of kind, name, label, comment and synonyms.
@@ -198,7 +198,7 @@ Root: `agent-aad4038916e6d0423` | files: 181
   - `def cached_certification(ex)`: The certification cache as the API returns it. Never queries; empty maps and a null `fetched_at` when nothing is cached.
   - `def refresh_certification(ex)`: Runs the one tag query, writes the cache (the {"fetched_at", "data"} file shape of the other cached metadata) and
 - `pytest.ini` (42 B)
-- `README.md` (13,823 B)
+- `README.md` (13,945 B)
   - Databricks Explorer (v0.4)
 - `relationships.py` (44,334 B)
   - Relationship store: one model for every edge between tables or columns, with provenance, in SQLite.
@@ -250,7 +250,7 @@ Root: `agent-aad4038916e6d0423` | files: 181
 
 ## contracts/
 
-- `contracts/api.md` (53,832 B)
+- `contracts/api.md` (55,180 B)
   - Explorer API contract
 - `contracts/canvas.schema.json` (14,720 B)
   - Explorer canvas
@@ -589,9 +589,9 @@ Root: `agent-aad4038916e6d0423` | files: 181
   - `def test_column_lineage_is_one_cached_query_and_refresh_rereads_it(client)`
   - `def test_a_bad_level_is_400(client)`
   - `def test_system_tables_in_demo_filter_like_the_real_ones(client)`
-- `tests/test_ontology.py` (27,980 B)
+- `tests/test_ontology.py` (37,610 B)
   - Ontology import: plan, parsing, the sync rules (create, update, keep edits, stale links), certification and routes.
-  - `class FakeExplorer()`: Answers GET paths from `rest`, the tables API from `defs`, and the two SQL statements from `views` and `cert`.
+  - `class FakeExplorer()`: Answers GET paths from `rest`, the tables API from `defs` (YAML) and `kinds` (column -> dimension|measure), and the
   - `def fake(monkeypatch, tmp_path)`
   - `def store()`
   - `def by_name(store)`
@@ -607,6 +607,20 @@ Root: `agent-aad4038916e6d0423` | files: 181
   - `def test_page_without_a_name_or_label_is_skipped(fake, store)`
   - `def test_name_clash_with_a_manual_concept(fake, store)`
   - `def test_same_display_name_in_two_metric_views(fake, store)`
+  - `def described(fake)`
+  - `def test_describe_supplies_display_name_synonyms_and_comment(described, store)`
+  - `def test_kinds_come_from_the_tables_api_columns_else_the_yaml(described, store)`
+  - `def test_a_column_missing_from_the_yaml_and_the_api_is_a_dimension(described, store)`
+  - `def test_a_failed_describe_falls_back_to_the_yaml(fake, store)`
+  - `def test_describe_fills_gaps_from_the_yaml_and_tolerates_odd_shapes(fake, store)`
+  - `def test_a_describe_with_no_usable_json_falls_back(fake, store)`
+  - `def test_describe_alone_is_enough_when_the_tables_api_fails(described, store)`
+  - `def test_a_view_with_no_describe_and_no_definition_is_unreadable(fake, store)`
+  - `def test_the_describe_statement_quotes_each_name_part(fake, store)`
+  - `def test_describe_runs_once_per_view_and_nothing_else_is_written(described, store)`
+  - `def test_a_rerun_after_describe_renames_the_old_concepts_instead_of_duplicating(fake, store)`: Before: the YAML kept no display names, so the concept was named by the column name. After: display_name.
+  - `def test_a_users_rename_survives_a_display_name_change(described, store)`
+  - `def test_a_case_only_display_name_change_updates_in_place(described, store)`
   - `def test_second_run_changes_nothing(fake, store)`
   - `def test_rerun_updates_what_the_source_changed_and_keeps_user_edits(fake, store)`
   - `def test_rerun_keeps_a_rename_and_matches_by_source_ref(fake, store)`

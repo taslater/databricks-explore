@@ -2,6 +2,9 @@
 
 No Databricks access: a fake Explorer answers the REST calls, the tables API and the SQL from dictionaries.
 """
+import json
+import re
+
 import pytest
 from databricks.sdk import errors
 
@@ -41,12 +44,14 @@ PAGES = {"pages": [PAGE, {"name": "knowledge/pages/p2", "domain": "domains/d2", 
 
 
 class FakeExplorer:
-    """Answers GET paths from `rest`, the tables API from `defs`, and the two SQL statements from `views` and `cert`."""
+    """Answers GET paths from `rest`, the tables API from `defs` (YAML) and `kinds` (column -> dimension|measure), and the
+    SQL from `views`, `cert` and `described` (view -> the DESCRIBE ... AS JSON document, or an Exception; absent fails)."""
 
     def __init__(self, rest=None, defs=None, views=(VIEW,), cert=(), warehouse_id="wh-1"):
         self.profile, self.warehouse_id = "dev", warehouse_id
         self.rest = {"/api/2.0/domains": DOMAINS, "/api/2.0/knowledge/pages": PAGES, **(rest or {})}
         self.defs = {VIEW: YAML, **(defs or {})}
+        self.kinds, self.described = {}, {}
         self.views, self.cert = views, cert
         self.calls = []
 
@@ -54,6 +59,12 @@ class FakeExplorer:
         self.calls.append(("sql", sql))
         if not self.warehouse_id:
             raise RuntimeError("No SQL warehouse selected.")
+        if sql.startswith("DESCRIBE TABLE EXTENDED"):
+            view = ".".join(re.findall(r"`([^`]+)`", sql.split(" AS JSON")[0]))
+            doc = self.described.get(view, RuntimeError("[INSUFFICIENT_PERMISSIONS] cannot describe"))
+            if isinstance(doc, Exception):
+                raise doc
+            return {"columns": [{"name": "json_metadata"}], "rows": [[doc if isinstance(doc, str) else json.dumps(doc)]]}
         if "METRIC_VIEW" in sql:
             cols = ["table_catalog", "table_schema", "table_name"]
             return {"columns": [{"name": c} for c in cols], "rows": [v.split(".") for v in self.views]}
@@ -75,15 +86,15 @@ def fake(monkeypatch, tmp_path):
             return value(query or {})
         return value
 
-    def table_definition(explorer, full_name):
+    def table_metric_info(explorer, full_name):
         explorer.calls.append(("table", full_name))
         value = explorer.defs[full_name]
         if isinstance(value, Exception):
             raise value
-        return value
+        return {"definition": value, "kinds": explorer.kinds.get(full_name, {})}
 
     monkeypatch.setattr(dbx, "api_get", api_get)
-    monkeypatch.setattr(dbx, "table_definition", table_definition)
+    monkeypatch.setattr(dbx, "table_metric_info", table_metric_info)
     return ex
 
 
@@ -102,12 +113,14 @@ def by_name(store):
 def test_plan_lists_every_call():
     plan = ontology.plan("wh-1")
     ids = [s["id"] for s in plan["steps"]]
-    assert ids == ["domains", "pages", "metric_views", "metric_definitions", "certification"]
+    assert ids == ["domains", "pages", "metric_views", "metric_definitions", "metric_describe", "certification"]
     rest = [s for s in plan["steps"] if s["kind"] == "rest"]
     assert all(s["method"] == "GET" for s in rest)
     assert [s["path"] for s in rest] == ["/api/2.0/domains", "/api/2.0/knowledge/pages", "/api/2.1/unity-catalog/tables/{full_name}"]
     sql = next(s for s in plan["steps"] if s["id"] == "metric_views")
     assert "system.information_schema.tables" in sql["sql"] and "METRIC_VIEW" in sql["sql"]
+    describe = next(s for s in plan["steps"] if s["id"] == "metric_describe")
+    assert describe["kind"] == "sql" and describe["sql"] == "DESCRIBE TABLE EXTENDED <catalog>.<schema>.<view> AS JSON"
     cert = next(s for s in plan["steps"] if s["id"] == "certification")
     assert cert["kind"] == "sql" and cert["sql"] == ontology.CERT_SQL
     assert plan["warehouse_id"] == "wh-1" and plan["row_cap"] == ontology.VIEW_CAP
@@ -185,7 +198,9 @@ def test_the_run_reads_only(fake, store):
     assert [c for c in fake.calls if c[0] not in ("GET", "table", "sql")] == []
     assert all(c[0] != "GET" or c[1] in ("/api/2.0/domains", "/api/2.0/knowledge/pages") for c in fake.calls)
     sqls = [c[1] for c in fake.calls if c[0] == "sql"]
-    assert len(sqls) == 2 and all(q.lstrip().upper().startswith("SELECT") for q in sqls)  # metric views, certification
+    assert len(sqls) == 3  # metric views, one DESCRIBE per view, certification
+    assert all(q.lstrip().upper().startswith(("SELECT", "DESCRIBE TABLE EXTENDED")) for q in sqls)
+    assert sqls[1] == "DESCRIBE TABLE EXTENDED `main`.`sales`.`sales_metrics` AS JSON"
 
 
 def test_pagination_follows_the_token(fake, store):
@@ -226,6 +241,158 @@ def test_same_display_name_in_two_metric_views(fake, store):
     fake.defs[other] = "measures:\n  - {name: total_revenue, display_name: Total revenue}\n"
     ontology.run(fake, store)
     assert {"Total revenue", "Total revenue (other_metrics)"} <= set(by_name(store))
+
+
+# ---------- metric view metadata from DESCRIBE TABLE EXTENDED ... AS JSON ----------
+
+# What the tables API's YAML keeps: names and expressions only. The rest comes from DESCRIBE.
+STRIPPED = """
+version: 1.1
+source: main.sales.orders
+dimensions:
+  - {name: order_month, expr: "date_trunc('month', order_date)"}
+  - {name: Market Segment, expr: segment}
+measures:
+  - {name: total_revenue, expr: SUM(amount)}
+"""
+DESCRIBED = {"table_name": "sales_metrics", "catalog_name": "main", "schema_name": "sales", "comment": "A view", "view_text": STRIPPED,
+             "columns": [
+                 {"name": "order_month", "type": {"name": "date"}, "comment": "Month the order was placed",
+                  "metadata": {"display_name": "Order month", "synonyms": ["month", "period"]}},
+                 {"name": "Market Segment", "type": {"name": "string"}, "comment": "Market segment of the customer.",
+                  "metadata": {"display_name": "Market segment", "synonyms": ["segment", "customer segment"]}},
+                 {"name": "total_revenue", "type": {"name": "decimal"}, "comment": "Sum of order amounts",
+                  "metadata": {"display_name": "Total revenue", "synonyms": ["sales", "turnover"]}}]}
+KINDS = {"order_month": "dimension", "Market Segment": "dimension", "total_revenue": "measure"}
+
+
+@pytest.fixture
+def described(fake):
+    fake.defs[VIEW], fake.described[VIEW], fake.kinds[VIEW] = STRIPPED, DESCRIBED, KINDS
+    return fake
+
+
+def test_describe_supplies_display_name_synonyms_and_comment(described, store):
+    ontology.run(described, store)
+    got = by_name(store)
+    seg = got["Market segment"]  # named by display_name, not the column name "Market Segment"
+    assert seg.synonyms == ["segment", "customer segment"] and seg.definition == "Market segment of the customer."
+    assert seg.provenance.source_ref == f"{VIEW}#Market Segment" and "Market Segment" not in got
+    rev = got["Total revenue"]
+    assert rev.synonyms == ["sales", "turnover"] and rev.definition == "Sum of order amounts"
+    assert [(e.target.column, e.relation) for e in store.concept_links(rev.id)] == [("total_revenue", "measures")]
+    assert [(e.target.column, e.relation) for e in store.concept_links(seg.id)] == [("Market Segment", "describes")]
+
+
+def test_kinds_come_from_the_tables_api_columns_else_the_yaml(described, store):
+    described.kinds[VIEW] = {"order_month": "measure"}  # the tables API wins over the YAML
+    ontology.run(described, store)
+    got = by_name(store)
+    assert [e.relation for e in store.concept_links(got["Order month"].id)] == ["measures"]
+    assert [e.relation for e in store.concept_links(got["Total revenue"].id)] == ["measures"]  # no API kind: the YAML says measure
+    assert [e.relation for e in store.concept_links(got["Market segment"].id)] == ["describes"]
+
+
+def test_a_column_missing_from_the_yaml_and_the_api_is_a_dimension(described, store):
+    described.kinds[VIEW] = {}
+    described.defs[VIEW] = "version: 1.1\nmeasures: [{name: other}]\n"
+    ontology.run(described, store)
+    assert [e.relation for e in store.concept_links(by_name(store)["Order month"].id)] == ["describes"]
+
+
+def test_a_failed_describe_falls_back_to_the_yaml(fake, store):
+    fake.defs[VIEW] = YAML  # comment, display_name and synonyms are in this YAML
+    fake.described[VIEW] = RuntimeError("[INSUFFICIENT_PERMISSIONS]")
+    report = ontology.run(fake, store)
+    assert report["sources"]["metric_views"] == {"status": "ok", "count": 1, "unreadable": 0}
+    assert by_name(store)["Total revenue"].synonyms == ["sales", "turnover"]
+
+
+def test_describe_fills_gaps_from_the_yaml_and_tolerates_odd_shapes(fake, store):
+    fake.defs[VIEW] = YAML
+    fake.described[VIEW] = {"columns": [{"name": "total_revenue", "comment": "", "metadata": {"synonyms": "oops"}},
+                                        {"comment": "no name"}, "junk", {"name": "region", "metadata": None}]}
+    ontology.run(fake, store)
+    got = by_name(store)
+    assert got["Total revenue"].synonyms == ["sales", "turnover"] and got["Total revenue"].definition == "Sum of order amounts"
+    assert "region" in got and len(store.concepts()) == 4  # two pages, and only the two named columns
+
+
+def test_a_describe_with_no_usable_json_falls_back(fake, store):
+    for bad in ("not json", "[]", {"columns": "x"}, {"no": "columns"}):
+        fake.described[VIEW] = bad
+        assert ontology.run(fake, store)["sources"]["metric_views"]["unreadable"] == 0
+    assert "Total revenue" in by_name(store)
+
+
+def test_describe_alone_is_enough_when_the_tables_api_fails(described, store):
+    described.defs[VIEW] = errors.PermissionDenied("no")
+    report = ontology.run(described, store)
+    assert report["unreadable"] == [] and "Market segment" in by_name(store)
+
+
+def test_a_view_with_no_describe_and_no_definition_is_unreadable(fake, store):
+    fake.defs[VIEW] = None
+    assert ontology.run(fake, store)["unreadable"][0]["reason"] == "the tables API returned no view definition"
+
+
+def test_the_describe_statement_quotes_each_name_part(fake, store):
+    fake.views = ("my cat.sales.we`ird",)
+    fake.defs["my cat.sales.we`ird"] = YAML
+    ontology.run(fake, store)
+    assert "DESCRIBE TABLE EXTENDED `my cat`.`sales`.`we``ird` AS JSON" in [c[1] for c in fake.calls if c[0] == "sql"]
+
+
+def test_describe_runs_once_per_view_and_nothing_else_is_written(described, store):
+    ontology.run(described, store)
+    assert len([c for c in described.calls if c[0] == "sql" and c[1].startswith("DESCRIBE")]) == 1
+
+
+def test_a_rerun_after_describe_renames_the_old_concepts_instead_of_duplicating(fake, store):
+    """Before: the YAML kept no display names, so the concept was named by the column name. After: display_name."""
+    fake.defs[VIEW] = STRIPPED
+    ontology.run(fake, store)  # DESCRIBE fails here: the older behavior
+    old = by_name(store)
+    assert "Market Segment" in old and "total_revenue" in old
+    ids = {c.provenance.source_ref: c.id for c in store.concepts() if c.provenance.origin == "ontology"
+           and c.provenance.source_ref.startswith(VIEW)}
+    fake.described[VIEW], fake.kinds[VIEW] = DESCRIBED, KINDS
+    report = ontology.run(fake, store)
+    got = by_name(store)
+    assert report["created"] == [] and "Market Segment" not in got and "total_revenue" not in got
+    assert {c.provenance.source_ref: c.id for c in store.concepts() if c.provenance.source_ref.startswith(VIEW)
+            and c.provenance.origin == "ontology"} == ids  # the same concepts, by source_ref
+    seg = got["Market segment"]
+    assert seg.id == ids[f"{VIEW}#Market Segment"] and seg.synonyms == ["segment", "customer segment"]
+    assert seg.definition == "Market segment of the customer."
+    assert sorted(next(u for u in report["updated"] if u["id"] == seg.id)["fields"]) == ["definition", "name", "synonyms"]
+    assert sum(len(store.concept_links(c.id)) for c in store.concepts()) == 3  # links unchanged
+    assert ontology.run(fake, store)["updated"] == []  # and a further rerun is quiet
+
+
+def test_a_users_rename_survives_a_display_name_change(described, store):
+    ontology.run(described, store)
+    seg = by_name(store)["Market segment"]
+    concepts.update(store, seg.id, concepts.parse_patch({"name": "Segment"}))
+    described.described[VIEW] = {**DESCRIBED, "columns": [
+        {**DESCRIBED["columns"][0]},
+        {**DESCRIBED["columns"][1], "metadata": {"display_name": "Customer segment", "synonyms": ["segment"]}},
+        DESCRIBED["columns"][2]]}
+    report = ontology.run(described, store)
+    got = by_name(store)
+    assert "Segment" in got and "Customer segment" not in got and report["created"] == []
+    entry = next(u for u in report["updated"] if u["id"] == seg.id)
+    assert entry["kept"] == ["name"] and entry["fields"] == ["synonyms"]
+
+
+def test_a_case_only_display_name_change_updates_in_place(described, store):
+    described.described[VIEW] = {**DESCRIBED, "columns": [
+        DESCRIBED["columns"][0],
+        {**DESCRIBED["columns"][1], "metadata": {"display_name": "MARKET SEGMENT"}}, DESCRIBED["columns"][2]]}
+    ontology.run(described, store)
+    described.described[VIEW] = DESCRIBED
+    report = ontology.run(described, store)
+    assert "Market segment" in by_name(store) and "MARKET SEGMENT" not in by_name(store) and report["created"] == []
 
 
 # ---------- reruns ----------
@@ -421,7 +588,7 @@ def client(tmp_path, monkeypatch, fake):
 
 def test_plan_and_run_routes(client):
     plan = client.get("/api/concepts/import/plan").json
-    assert plan["warehouse_id"] == "wh-1" and len(plan["steps"]) == 5
+    assert plan["warehouse_id"] == "wh-1" and len(plan["steps"]) == 6
     assert client.fake.calls == []  # a plan runs nothing
     run = client.post("/api/concepts/import/run").json
     assert len(run["created"]) == 6
@@ -559,7 +726,10 @@ def test_import_flow_in_demo_mode(demo_client):
     customer = next(x for x in c.get("/api/concepts?q=customer").json["concepts"] if x["name"] == "Customer")
     assert customer["domain"] == "Sales" and customer["status"] == "reviewed" and "client" in customer["synonyms"]
     assert c.get("/api/concepts?q=headcount").json["concepts"][0]["domain"] == "people"  # no display_name: the tag key
+    month = next(x for x in c.get("/api/concepts?q=month").json["concepts"] if x["name"] == "Order month")
+    assert month["synonyms"] == ["month", "period"]  # from DESCRIBE: the tables API's YAML has none
     revenue = c.get("/api/concepts?q=turnover").json["concepts"][0]
+    assert revenue["definition"] == "Sum of order amounts in dollars"
     link = c.get(f"/api/concepts/{revenue['id']}").json["links"][0]
     assert link["target"] == {"table": "demo.sales.sales_metrics", "column": "total_revenue"} and link["relation"] == "measures"
     again = c.post("/api/concepts/import/run").json

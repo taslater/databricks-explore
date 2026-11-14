@@ -36,6 +36,10 @@ FROM system.information_schema.tables
 WHERE table_type = 'METRIC_VIEW'
 ORDER BY table_catalog, table_schema, table_name"""
 
+# One row, one JSON string: per column `name`, `comment` and `metadata` {display_name, synonyms}, plus `view_text` (the YAML).
+# The tables API strips display_name, synonyms and the YAML comments from a metric view, so this is the only full source.
+METRIC_DESCRIBE_SQL = "DESCRIBE TABLE EXTENDED {view} AS JSON"
+
 CERT_SQL = f"""SELECT 'table' AS scope, catalog_name, schema_name, table_name, CAST(NULL AS STRING) AS column_name, tag_value
 FROM system.information_schema.table_tags
 WHERE tag_name = '{CERT_TAG}'
@@ -54,8 +58,12 @@ def plan(warehouse_id=None):
          "paginated": True},
         {"id": "metric_views", "kind": "sql", "label": "Metric views, through the selected SQL warehouse",
          "sql": METRIC_VIEWS_SQL},
-        {"id": "metric_definitions", "kind": "rest", "label": "Each metric view's definition, once per view found",
+        {"id": "metric_definitions", "kind": "rest", "label": "Each metric view's definition and column kinds (measure or dimension), once per view found",
          "method": "GET", "path": TABLE_PATH, "paginated": False},
+        {"id": "metric_describe", "kind": "sql",
+         "label": "Each metric view's column comments, display names and synonyms, once per view found, through the "
+                  "selected SQL warehouse (the definition above is the fallback when this fails)",
+         "sql": METRIC_DESCRIBE_SQL.format(view="<catalog>.<schema>.<view>")},
         {"id": "certification", "kind": "sql",
          "label": "Certification tags (system.certification_status), through the selected SQL warehouse; refreshes the local cache",
          "sql": CERT_SQL},
@@ -179,6 +187,74 @@ def parse_metric_view(text):
     if not out:
         raise ValueError("the definition has no measures or dimensions")
     return out
+
+
+def _quoted(view):
+    """A dotted full name with each part in backticks, for a statement."""
+    return ".".join("`" + part.replace("`", "``") + "`" for part in view.split("."))
+
+
+def _describe(ex, view):
+    """`DESCRIBE TABLE EXTENDED <view> AS JSON` as a dict with a `columns` list, or None when it cannot be read."""
+    try:
+        rows = ex.query(METRIC_DESCRIBE_SQL.format(view=_quoted(view)), None, 5).get("rows") or []
+        doc = json.loads(rows[0][0])
+    except Exception:
+        return None
+    return doc if isinstance(doc, dict) and isinstance(doc.get("columns"), list) else None
+
+
+def _synonyms(meta):
+    value = meta.get("synonyms")
+    if isinstance(value, str):  # a JSON list inside a string
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return []
+    return _strings(value)
+
+
+def _described_entries(doc, yaml_entries, kinds):
+    """Entries from a DESCRIBE document. A blank display name, comment or synonym list falls back to the YAML's; the kind
+    comes from the tables API, else the YAML, else `dimension`."""
+    by_name = {e["name"]: e for e in yaml_entries}
+    out = []
+    for col in doc["columns"]:
+        name = _text(col.get("name")) if isinstance(col, dict) else ""
+        if not name:
+            continue
+        meta = col["metadata"] if isinstance(col.get("metadata"), dict) else {}
+        y = by_name.get(name, {})
+        out.append({"kind": kinds.get(name) or y.get("kind") or "dimension", "name": name,
+                    "label": _text(meta.get("display_name")) or y.get("label") or name,
+                    "comment": _text(col.get("comment")) or y.get("comment", ""),
+                    "synonyms": _synonyms(meta) or y.get("synonyms", [])})
+    return out
+
+
+def _view_entries(ex, view):
+    """The measures and dimensions of one metric view: DESCRIBE first (on the warehouse), the YAML and the tables API's
+    column kinds as the fallback. Raises when neither source can be read."""
+    try:
+        info, info_error = dbx.table_metric_info(ex, view), None
+    except Exception as e:
+        info, info_error = {"definition": None, "kinds": {}}, e
+    kinds = info["kinds"]
+    doc = _describe(ex, view)
+    text = info["definition"] or (doc or {}).get("view_text")
+    try:
+        yaml_entries, yaml_error = parse_metric_view(text), None
+    except ValueError as e:
+        yaml_entries, yaml_error = [], e
+    if doc is not None:
+        entries = _described_entries(doc, yaml_entries, kinds)
+        if entries:
+            return entries
+    if not text:
+        raise info_error or ValueError("the tables API returned no view definition")
+    if yaml_error is not None:
+        raise yaml_error
+    return [{**e, "kind": kinds.get(e["name"]) or e["kind"]} for e in yaml_entries]
 
 
 def _metric_specs(view, entries):
@@ -361,7 +437,7 @@ def run(ex, store):
         views_ok = True
         for view in views:
             try:
-                metric_specs += _metric_specs(view, parse_metric_view(_definition(ex, view)))
+                metric_specs += _metric_specs(view, _view_entries(ex, view))
             except Exception as e:
                 reason = str(e) if isinstance(e, ValueError) else dbx.clean_error(e)
                 unreadable.add(view)
@@ -381,13 +457,6 @@ def run(ex, store):
     _drop_stale(store, existing, seen,
                 lambda ref: (views_ok and view_of(ref) not in unreadable) if view_of(ref) else pages_ok, report)
     return report
-
-
-def _definition(ex, view):
-    text = dbx.table_definition(ex, view)
-    if not text:
-        raise ValueError("the tables API returned no view definition")
-    return text
 
 
 # ---------- certification ----------

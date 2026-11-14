@@ -542,33 +542,43 @@ class FakeGenie:
 # Genie Ontology domains and pages over REST, one metric view whose YAML the tables API returns, and the certification tag.
 
 METRIC_VIEW = "demo.sales.sales_metrics"
+# Like the real tables API, the YAML it returns has lost display_name, comment and synonyms. Those come from the
+# warehouse: DESCRIBE TABLE EXTENDED <view> AS JSON (METRIC_VIEW_META below).
 METRIC_VIEW_YAML = """version: 1.1
 source: demo.sales.orders
 dimensions:
   - name: order_month
-    display_name: Order month
     expr: date_trunc('month', order_date)
-    comment: Calendar month in which the order was placed
-    synonyms: [month, period]
   - name: status
     expr: status
-    comment: Fulfillment status of the order
 measures:
   - name: total_revenue
-    display_name: Total revenue
     expr: SUM(amount)
-    comment: Sum of order amounts in dollars
-    synonyms: [sales, turnover]
   - name: order_count
-    display_name: Order count
     expr: COUNT(1)
-    comment: Number of orders
 """
 METRIC_VIEW_COLUMNS = [("order_month", "date", "Calendar month in which the order was placed"),
                        ("status", "string", "Fulfillment status of the order"),
                        ("total_revenue", "decimal(14,2)", "Sum of order amounts in dollars"),
                        ("order_count", "bigint", "Number of orders")]
+# column -> (metric_view.type, display_name or None, synonyms)
+METRIC_VIEW_META = {"order_month": ("dimension", "Order month", ["month", "period"]),
+                    "status": ("dimension", None, []),
+                    "total_revenue": ("measure", "Total revenue", ["sales", "turnover"]),
+                    "order_count": ("measure", "Order count", [])}
 TABLES[METRIC_VIEW] = ("VIEW", METRIC_VIEW_COLUMNS, "Sales metric view", 240)
+
+
+def _metric_view_describe():
+    """The one JSON string DESCRIBE TABLE EXTENDED ... AS JSON returns for the metric view."""
+    columns = []
+    for name, type_text, comment in METRIC_VIEW_COLUMNS:
+        _, label, synonyms = METRIC_VIEW_META[name]
+        meta = ({"display_name": label} if label else {}) | ({"synonyms": synonyms} if synonyms else {})
+        columns.append({"name": name, "type": {"name": type_text.split("(")[0]}, "nullable": True, "comment": comment,
+                        **({"metadata": meta} if meta else {})})
+    return json.dumps({"table_name": "sales_metrics", "catalog_name": "demo", "schema_name": "sales",
+                       "columns": columns, "comment": "Sales metric view", "view_text": METRIC_VIEW_YAML})
 
 ONTOLOGY_DOMAINS = [
     {"domain_id": "d-sales", "tag_key": "sales", "display_name": "Sales", "description": "Orders and customers"},
@@ -599,10 +609,13 @@ _result_for_before_ontology = result_for
 
 
 def _table_info(full_name):  # noqa: F811 - wraps the function above; the fake tables API looks it up by name
-    """The table's info, with the metric view's YAML as its view_definition."""
+    """The table's info, with the metric view's YAML as its view_definition and each column's metric_view.type metadata."""
     info = _table_info_before_ontology(full_name)
     if full_name == METRIC_VIEW:
         info.view_definition = METRIC_VIEW_YAML
+        for col in info.columns:
+            col.type_json = json.dumps({"name": col.name, "nullable": True, "metadata": {
+                "metric_view.type": METRIC_VIEW_META[col.name][0]}})
     return info
 
 
@@ -628,6 +641,8 @@ _ApiClient.do = _api_do_with_ontology
 def result_for(statement, params=None):  # noqa: F811 - wraps the function above; the fake warehouse looks it up by name
     """(columns, rows) as before, plus the metric view list and the certification tag rows."""
     low = " ".join(statement.split()).lower()
+    if low == "describe table extended `demo`.`sales`.`sales_metrics` as json":
+        return [{"name": "json_metadata", "type": "STRING"}], [[_metric_view_describe()]]
     if "table_type = 'metric_view'" in low:
         cols = [{"name": k, "type": "STRING"} for k in ("table_catalog", "table_schema", "table_name")]
         return cols, [METRIC_VIEW.split(".")]
