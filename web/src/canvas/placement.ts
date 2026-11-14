@@ -111,7 +111,7 @@ interface Box {
 
 /** Area of the canvas in view and the floating controls, from the live viewport and the DOM. */
 function liveView(viewport: { x: number; y: number; zoom: number }): { visible: Rect; keepOut: Rect[] } {
-  const el = typeof document !== 'undefined' ? document.querySelector('.react-flow') : null
+  const el = canvasFlowElement()
   const box = el?.getBoundingClientRect()
   const sw = box && box.width > 0 ? box.width : typeof window !== 'undefined' ? window.innerWidth : 1280
   const sh = box && box.height > 0 ? box.height : typeof window !== 'undefined' ? window.innerHeight : 800
@@ -157,4 +157,53 @@ export function placeNew(
 ): CanvasPoint {
   const { visible, keepOut } = liveView(viewport)
   return findFreePosition({ desired, size, obstacles: obstacleRects(windows), visible, keepOut })
+}
+
+/** The Canvas view's React Flow element, or null when the Canvas is not on screen (another tab is showing). */
+function canvasFlowElement(): Element | null {
+  return typeof document !== 'undefined' ? document.querySelector('.canvas-root .react-flow') : null
+}
+
+export interface Viewport {
+  x: number
+  y: number
+  zoom: number
+}
+
+/** Screen margins a revealed node keeps from the edges: room for the palette, the toolbars and the bottom bar. */
+export const REVEAL_MARGINS = { left: 88, top: 120, right: 24, bottom: 80 }
+
+/**
+ * The viewport that brings `rect` (canvas coordinates) into view at the same zoom, or null when it is already fully
+ * visible. The node is centered in the space between the margins; one too big for that space is shown from its
+ * top-left corner, so its title bar is on screen.
+ */
+export function revealViewport(
+  rect: Rect,
+  viewport: Viewport,
+  screen: { w: number; h: number },
+  margins: typeof REVEAL_MARGINS = REVEAL_MARGINS,
+): Viewport | null {
+  const z = viewport.zoom > 0 ? viewport.zoom : 1
+  const sx = rect.x * z + viewport.x
+  const sy = rect.y * z + viewport.y
+  const fits =
+    sx >= margins.left &&
+    sy >= margins.top &&
+    sx + rect.w * z <= screen.w - margins.right &&
+    sy + rect.h * z <= screen.h - margins.bottom
+  if (fits) return null
+  const availW = screen.w - margins.left - margins.right
+  const availH = screen.h - margins.top - margins.bottom
+  const left = margins.left + Math.max(0, (availW - rect.w * z) / 2)
+  const top = margins.top + Math.max(0, (availH - rect.h * z) / 2)
+  return { x: left - rect.x * z, y: top - rect.y * z, zoom: z }
+}
+
+/** revealViewport with the Canvas's size measured from the DOM (the window size when the Canvas is hidden). */
+export function revealOnCanvas(rect: Rect, viewport: Viewport): Viewport | null {
+  const box = canvasFlowElement()?.getBoundingClientRect()
+  const w = box && box.width > 0 ? box.width : typeof window !== 'undefined' ? window.innerWidth : 1280
+  const h = box && box.height > 0 ? box.height : typeof window !== 'undefined' ? window.innerHeight : 800
+  return revealViewport(rect, viewport, { w, h })
 }

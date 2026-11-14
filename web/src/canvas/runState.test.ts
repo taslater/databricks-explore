@@ -2,13 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { IDLE_RUN, scriptTally, submitStatement, useRunStore } from './runState'
 import * as api from '../api/client'
 
-vi.mock('../api/client', () => ({ submitQueryAsync: vi.fn() }))
+vi.mock('../api/client', () => ({ submitQueryAsync: vi.fn(), cancelQuery: vi.fn(() => Promise.resolve({})) }))
 
 const run = (id: string) => useRunStore.getState().runs[id] ?? IDLE_RUN
 
 beforeEach(() => {
   useRunStore.getState().clearAll()
   vi.mocked(api.submitQueryAsync).mockReset()
+  vi.mocked(api.cancelQuery).mockClear()
 })
 
 describe('run state', () => {
@@ -97,5 +98,26 @@ describe('run state', () => {
     s.setNotice('w1', 'Nothing to run.')
     expect(run('w1').tab).toBe('chart')
     expect(run('w1').notice).toBe('Nothing to run.')
+  })
+
+  it('cancels a deleted window\'s running statement on the warehouse, and only the unfinished ones', () => {
+    const s = useRunStore.getState()
+    const token = s.begin('w1', ['a', 'b'])
+    s.submitted('w1', token, 'done')
+    s.settle('w1', 0, 'SUCCEEDED')
+    s.nextStatement('w1')
+    s.submitted('w1', token, 'running')
+    useRunStore.getState().clearWindows(['w1'])
+    expect(vi.mocked(api.cancelQuery).mock.calls).toEqual([['running']])
+    expect(useRunStore.getState().runs.w1).toBeUndefined()
+  })
+
+  it('cancels running statements when every run is dropped (another canvas opened)', () => {
+    const s = useRunStore.getState()
+    s.submitted('w1', s.begin('w1', ['a']), 'st-a')
+    s.submitted('w2', s.begin('w2', ['b']), 'st-b')
+    s.settle('w2', 0, 'FAILED')
+    useRunStore.getState().clearAll()
+    expect(vi.mocked(api.cancelQuery).mock.calls).toEqual([['st-a']])
   })
 })

@@ -11,7 +11,7 @@ import {
   type NodeChange,
   type EdgeChange,
 } from '@xyflow/react'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useCertification, useConceptsForTables } from '../api/concepts'
 import { withCertification } from '../concepts/certification'
 import { useConceptsStore } from '../concepts/conceptsStore'
@@ -63,6 +63,14 @@ export function GraphView() {
 
 function GraphCanvas() {
   const rf = useReactFlow()
+  // The view unmounts when another tab shows. Keep its pan and zoom across that, so coming back looks the same.
+  const [initialViewport] = useState(() => useGraphStore.getState().viewport)
+  useEffect(
+    () => () => {
+      if (useGraphStore.getState().nodes.length > 0) useGraphStore.getState().setViewport(rf.getViewport())
+    },
+    [rf],
+  )
   const actions = useGraphActions()
   const rawNodes = useGraphStore((s) => s.nodes)
   const rawEdges = useGraphStore((s) => s.edges)
@@ -165,6 +173,7 @@ function GraphCanvas() {
       connectionLineStyle={CONNECTION_LINE_STYLE}
       zoomOnDoubleClick={false}
       deleteKeyCode={null}
+      defaultViewport={initialViewport ?? undefined}
       // Shift- or Cmd/Ctrl-click adds a node to the selection (Shift-drag on the pane still draws a box).
       multiSelectionKeyCode={MULTI_SELECT_KEYS}
       minZoom={0.05}

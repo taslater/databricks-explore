@@ -155,6 +155,7 @@ export const useRunStore = create<RunStore>()((set, get) => ({
     let changed = false
     for (const id of ids) {
       if (id in runs) {
+        cancelRunning(runs[id])
         delete runs[id]
         changed = true
       }
@@ -167,8 +168,25 @@ export const useRunStore = create<RunStore>()((set, get) => ({
     if (stale.length > 0) get().clearWindows(stale)
   },
 
-  clearAll: () => set({ runs: {} }),
+  clearAll: () => {
+    for (const run of Object.values(get().runs)) cancelRunning(run)
+    set({ runs: {} })
+  },
 }))
+
+/** Statement ids of a run that have started and not finished. */
+export function runningIds(run: WindowRun): string[] {
+  return run.ids.filter((_, i) => run.states[i] === null)
+}
+
+/**
+ * Cancels the statements of a run that are still running on the warehouse. Used when a window's run state is dropped
+ * (the window was deleted, or another canvas was opened): nobody would see the result, so it should not keep running.
+ * Failures are ignored; the statement may have just finished.
+ */
+function cancelRunning(run: WindowRun): void {
+  for (const id of runningIds(run)) api.cancelQuery(id).catch(() => undefined)
+}
 
 /** Submits one statement and records the answer in the store, whether or not the window is on screen. */
 export function submitStatement(id: string, token: number, body: QueryBody): void {

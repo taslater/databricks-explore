@@ -49,6 +49,9 @@ interface GraphState {
   layoutPending: boolean
   /** Fit the view on the next render where every visible node has been measured. */
   fitPending: boolean
+  /** UI only, not saved. The pan and zoom when the Graph view was last hidden, restored when it shows again. */
+  viewport: { x: number; y: number; zoom: number } | null
+  setViewport: (viewport: { x: number; y: number; zoom: number } | null) => void
 
   applyNodeChanges: (changes: NodeChange<FlowNode>[]) => void
   applyEdgeChanges: (changes: EdgeChange<FlowEdge>[]) => void
@@ -95,6 +98,8 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   status: { text: '', error: false },
   layoutPending: false,
   fitPending: false,
+  viewport: null,
+  setViewport: (viewport) => set({ viewport }),
 
   applyNodeChanges: (changes) => set({ nodes: applyNodeChanges(changes, get().nodes) }),
   applyEdgeChanges: (changes) => set({ edges: applyEdgeChanges(changes, get().edges) }),
@@ -179,7 +184,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
     }),
 
   clear: () =>
-    set({ nodes: [], edges: [], columnEdges: [], selection: null, hoverId: null, layoutPending: false, fitPending: false }),
+    set({ nodes: [], edges: [], columnEdges: [], selection: null, hoverId: null, layoutPending: false, fitPending: false, viewport: null }),
 
   requestLayout: () => set({ layoutPending: true }),
 

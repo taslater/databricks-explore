@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findFreePosition, PLACEMENT_GAP, type Rect } from './placement'
+import { findFreePosition, PLACEMENT_GAP, type Rect, revealViewport } from './placement'
 
 const size = { w: 300, h: 200 }
 const visible: Rect = { x: 0, y: 0, w: 1200, h: 800 }
@@ -66,5 +66,39 @@ describe('findFreePosition', () => {
     for (let x = 0; x < 1200; x += 300) for (let y = 0; y < 800; y += 200) obstacles.push({ x, y, w: 300, h: 200 })
     const p = findFreePosition({ desired: { x: 100, y: 100 }, size, obstacles, visible, keepOut })
     for (const o of obstacles) expect(hits(rectAt(p), o)).toBe(false)
+  })
+})
+
+describe('revealViewport', () => {
+  const screen = { w: 1200, h: 800 }
+  const vp = { x: 0, y: 0, zoom: 1 }
+
+  it('leaves the view alone when the node is already fully visible', () => {
+    expect(revealViewport({ x: 200, y: 200, w: 300, h: 200 }, vp, screen)).toBeNull()
+  })
+
+  it('pans a node below the view into the middle of the free space, at the same zoom', () => {
+    const next = revealViewport({ x: 200, y: 1500, w: 300, h: 200 }, vp, screen)
+    expect(next).not.toBeNull()
+    const { x, y, zoom } = next!
+    expect(zoom).toBe(1)
+    // On screen the node now sits between the margins: left 88, top 120, right 24, bottom 80.
+    const sx = 200 + x
+    const sy = 1500 + y
+    expect(sx).toBeGreaterThanOrEqual(88)
+    expect(sy).toBeGreaterThanOrEqual(120)
+    expect(sx + 300).toBeLessThanOrEqual(1200 - 24)
+    expect(sy + 200).toBeLessThanOrEqual(800 - 80)
+  })
+
+  it('shows a node too big for the space from its top-left corner, so the title bar is visible', () => {
+    const next = revealViewport({ x: 5000, y: 5000, w: 3000, h: 3000 }, { x: 0, y: 0, zoom: 0.5 }, screen)!
+    expect(5000 * 0.5 + next.x).toBe(88)
+    expect(5000 * 0.5 + next.y).toBe(120)
+    expect(next.zoom).toBe(0.5)
+  })
+
+  it('counts a node under the palette or toolbars as not visible', () => {
+    expect(revealViewport({ x: 10, y: 10, w: 100, h: 100 }, vp, screen)).not.toBeNull()
   })
 })
