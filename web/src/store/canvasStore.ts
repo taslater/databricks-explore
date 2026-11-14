@@ -1,8 +1,9 @@
 // Canvas state. `viewport` and `windows` are the serialized part and match
 // contracts/canvas.schema.json field for field (plain JSON, no React objects).
-// `selectedId` is UI-only and is never written to the canvas file.
+// Selection lives in the sketch store (src/sketch), which also owns sketch nodes and connectors.
 import { create } from 'zustand'
 import type { CanvasPoint, CanvasWindow } from '../api/types'
+import type { Geometry } from '../sketch/types'
 import { renameInWindows } from '../canvas/linking/refs'
 
 export interface CanvasViewport {
@@ -28,8 +29,6 @@ export const DEFAULT_TABLE_SIZE: CanvasSize = { w: 320, h: 300 }
 interface CanvasState {
   viewport: CanvasViewport
   windows: CanvasWindow[]
-  /** UI only. Not saved. */
-  selectedId: string | null
   /** UI only. Not saved. The window shown filling the canvas, or null. */
   maximizedId: string | null
   setMaximized: (id: string | null) => void
@@ -54,7 +53,9 @@ interface CanvasState {
   moveWindow: (id: string, position: CanvasPoint) => void
   resizeWindow: (id: string, position: CanvasPoint, size: CanvasSize) => void
   removeWindow: (id: string) => void
-  setSelected: (id: string | null) => void
+  /** Writes position, size, stacking order or lock to several windows at once. Unknown ids are ignored. */
+  patchGeometry: (patches: Record<string, Partial<Geometry> & { locked?: boolean }>) => void
+  removeWindows: (ids: string[]) => void
   setViewport: (viewport: CanvasViewport) => void
   /** Name of the saved canvas this state belongs to. Null for a new canvas, which does not autosave. */
   canvasName: string | null
@@ -125,7 +126,6 @@ function patch(windows: CanvasWindow[], id: string, change: Partial<CanvasWindow
 export const useCanvasStore = create<CanvasState>()((set, get) => ({
   viewport: DEFAULT_VIEWPORT,
   windows: [],
-  selectedId: null,
   maximizedId: null,
   setMaximized: (maximizedId) => set({ maximizedId }),
 
@@ -142,7 +142,7 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
       collapsed: false,
       editor_split: NEW_WINDOW_EDITOR_SPLIT,
     }
-    set({ windows: [...windows, win], selectedId: id })
+    set({ windows: [...windows, win] })
     return id
   },
 
@@ -164,7 +164,7 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
       text: '',
       collapsed: false,
     }
-    set({ windows: [...windows, win], selectedId: id })
+    set({ windows: [...windows, win] })
     return id
   },
 
@@ -180,7 +180,7 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
       table: fullName,
       collapsed: false,
     }
-    set({ windows: [...windows, win], selectedId: id })
+    set({ windows: [...windows, win] })
     return id
   },
 
@@ -226,16 +226,37 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
       }),
     }),
 
-  removeWindow: (id) => {
-    const { windows, selectedId, maximizedId } = get()
+  removeWindow: (id) => get().removeWindows([id]),
+
+  removeWindows: (ids) => {
+    const { windows, maximizedId } = get()
+    const dead = new Set(ids)
     set({
-      windows: windows.filter((w) => w.id !== id),
-      selectedId: selectedId === id ? null : selectedId,
-      maximizedId: maximizedId === id ? null : maximizedId,
+      windows: windows.filter((w) => !dead.has(w.id)),
+      maximizedId: maximizedId !== null && dead.has(maximizedId) ? null : maximizedId,
     })
   },
 
-  setSelected: (selectedId) => set({ selectedId }),
+  patchGeometry: (patches) =>
+    set({
+      windows: get().windows.map((w) => {
+        const p = patches[w.id]
+        if (!p) return w
+        const next: CanvasWindow = { ...w }
+        if (p.position) next.position = { x: p.position.x, y: p.position.y }
+        if (p.size) next.size = { w: p.size.w, h: p.size.h }
+        if ('z' in p) {
+          if (p.z === undefined) delete next.z
+          else next.z = p.z
+        }
+        if ('locked' in p) {
+          // An unlocked window carries no `locked` key, so a file that never used locking stays as it was.
+          if (p.locked) next.locked = true
+          else delete next.locked
+        }
+        return next
+      }),
+    }),
 
   setViewport: (viewport) => set({ viewport: { x: viewport.x, y: viewport.y, zoom: viewport.zoom } }),
 
@@ -246,7 +267,6 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
       canvasName: next.canvasName,
       viewport: { x: next.viewport.x, y: next.viewport.y, zoom: next.viewport.zoom },
       windows: next.windows,
-      selectedId: null,
       maximizedId: null,
     }),
 }))

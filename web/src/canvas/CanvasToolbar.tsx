@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useCanvases } from '../api/hooks'
 import { useCanvasStore } from '../store/canvasStore'
+import { useSketchStore } from '../sketch/sketchStore'
 import { useCanvasPersistence } from './persistence/useCanvasPersistence'
 import { usePersistStore, type PersistPhase } from './persistence/persistStore'
 
@@ -24,6 +25,7 @@ const PHASE_TITLE: Record<PersistPhase, string | undefined> = {
 export function CanvasToolbar() {
   const canvasName = useCanvasStore((s) => s.canvasName)
   const windowCount = useCanvasStore((s) => s.windows.length)
+  const sketchCount = useSketchStore((s) => s.nodes.length)
   const phase = usePersistStore((s) => s.phase)
   const message = usePersistStore((s) => s.message)
   const messageIsError = usePersistStore((s) => s.messageIsError)
@@ -48,9 +50,16 @@ export function CanvasToolbar() {
     void persistence.saveCurrent()
   }
 
+  async function onNew() {
+    if (canvasName === null && windowCount + sketchCount > 0) {
+      if (!window.confirm('Discard the unnamed canvas and start a new diagram?')) return
+    }
+    await persistence.newDiagram()
+  }
+
   async function onOpen() {
     if (!pick) return
-    if (canvasName === null && windowCount > 0) {
+    if (canvasName === null && windowCount + sketchCount > 0) {
       if (!window.confirm(`Discard the unnamed canvas and open "${pick}"?`)) return
     }
     await persistence.open(pick)
@@ -73,6 +82,9 @@ export function CanvasToolbar() {
       </select>
       <button onClick={() => void onOpen()} disabled={!pick}>
         Open
+      </button>
+      <button onClick={() => void onNew()} title="Start a blank sketch. No profile or warehouse needed.">
+        New diagram
       </button>
       <button onClick={onSave}>Save</button>
       <button onClick={() => void onSaveAs()}>Save as</button>

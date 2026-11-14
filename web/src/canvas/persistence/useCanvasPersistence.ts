@@ -4,8 +4,10 @@
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import * as api from '../../api/client'
+import type { CanvasDoc } from '../../api/types'
 import { useSaveCanvas, useSetWarehouse } from '../../api/hooks'
 import { useCanvasStore } from '../../store/canvasStore'
+import { useSketchStore } from '../../sketch/sketchStore'
 import { useUiStore } from '../../store/uiStore'
 import { fromCanvasFile, parseCanvasFile, toCanvasFile, type CanvasFile } from './canvasFile'
 import { usePersistStore } from './persistStore'
@@ -16,12 +18,33 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
+/** The profile a save records: the connected one, else the one the open file had, else none. */
+function saveProfile(): string | null {
+  return useUiStore.getState().connectedProfile ?? usePersistStore.getState().fileProfile
+}
+
 /** Validated file for the current state, plus its JSON for change detection. Throws on invalid state. */
-function buildFile(name: string, profile: string): { file: CanvasFile; json: string } {
+function buildFile(name: string, profile: string | null): { file: CanvasFile; json: string } {
   const { viewport, windows } = useCanvasStore.getState()
+  const { nodes: sketchNodes, edges } = useSketchStore.getState()
   const warehouseId = useUiStore.getState().warehouseId
-  const file = parseCanvasFile(toCanvasFile({ viewport, windows }, { name, profile, warehouseId }))
+  const file = parseCanvasFile(toCanvasFile({ viewport, windows, sketchNodes, edges }, { name, profile, warehouseId }))
   return { file, json: JSON.stringify(file) }
+}
+
+/** Puts a validated file into the canvas store and the sketch store. */
+function applyFile(file: CanvasFile) {
+  const loaded = fromCanvasFile(file)
+  useCanvasStore.getState().loadState(loaded)
+  useSketchStore.getState().load(loaded.sketchNodes, loaded.edges)
+}
+
+/** Lowest `diagram-N` that is not a saved canvas yet. */
+export function nextDiagramName(existing: readonly string[]): string {
+  const taken = new Set(existing.map((n) => n.toLowerCase()))
+  let n = 1
+  while (taken.has(`diagram-${n}`)) n++
+  return `diagram-${n}`
 }
 
 export interface CanvasPersistence {
@@ -31,6 +54,8 @@ export interface CanvasPersistence {
   saveAs: (name: string) => Promise<boolean>
   /** Loads a saved canvas into the store. Pending edits to the current canvas are saved first. */
   open: (name: string) => Promise<void>
+  /** Starts a blank canvas under a new `diagram-N` name. Needs no profile or warehouse. Saves pending edits first. */
+  newDiagram: () => Promise<void>
 }
 
 /**
@@ -70,12 +95,9 @@ export function useCanvasPersistence(): CanvasPersistence {
 
   /** Writes `name` with the current state. Skips the request when nothing changed since the last write. */
   async function writeCanvas(name: string, adopt: boolean): Promise<boolean> {
-    const profile = useUiStore.getState().connectedProfile
-    if (profile === null) {
-      usePersistStore.getState().setStatus('error', 'Connect to a profile before saving.', true)
-      return false
-    }
+    const profile = saveProfile()
     const { windows } = useCanvasStore.getState()
+    const { nodes: sketchNodes, edges: sketchEdges } = useSketchStore.getState()
     let built: { file: CanvasFile; json: string }
     try {
       built = buildFile(name, profile)
@@ -91,14 +113,19 @@ export function useCanvasPersistence(): CanvasPersistence {
 
     persist.setStatus('saving')
     try {
-      await latest.current.save(built.file)
+      await latest.current.save(built.file as unknown as CanvasDoc)
     } catch (e) {
       usePersistStore.getState().setStatus('error', errorText(e), true)
       return false
     }
 
     if (adopt) useCanvasStore.getState().setCanvasName(name)
-    if (useCanvasStore.getState().windows === windows) {
+    const after = useSketchStore.getState()
+    if (
+      useCanvasStore.getState().windows === windows &&
+      after.nodes === sketchNodes &&
+      after.edges === sketchEdges
+    ) {
       usePersistStore.getState().markSaved(built.json)
     } else {
       // Edits arrived while the request was in flight. Record what was written, then save again.
@@ -138,8 +165,13 @@ export function useCanvasPersistence(): CanvasPersistence {
     const unsubscribe = useCanvasStore.subscribe((s, prev) => {
       if (s.windows !== prev.windows) scheduleAutosave()
     })
+    // Sketch nodes and connectors are part of the file, so changing them saves too.
+    const unsubscribeSketch = useSketchStore.subscribe((s, prev) => {
+      if (s.nodes !== prev.nodes || s.edges !== prev.edges) scheduleAutosave()
+    })
     return () => {
       unsubscribe()
+      unsubscribeSketch()
       if (timer.current !== null) void enqueue(flushPending)
     }
     // The functions used here only read refs and stores, so subscribing once on mount is correct.
@@ -190,11 +222,12 @@ export function useCanvasPersistence(): CanvasPersistence {
         }
       }
 
-      // loadState schedules an autosave through the subscription. The baseline below turns that
-      // into a no-op, so opening a canvas never writes it back.
-      useCanvasStore.getState().loadState(fromCanvasFile(file))
+      // Loading schedules an autosave through the subscriptions. The baseline below turns that
+      // into a no-op, so opening a canvas never writes it back (a version 1 file stays version 1 until it is changed).
+      usePersistStore.setState({ fileProfile: file.profile ?? null })
+      applyFile(file)
       const after = useUiStore.getState()
-      const profile = after.connectedProfile ?? file.profile
+      const profile = saveProfile()
       let baseline: string
       try {
         baseline = buildFile(name, profile).json
@@ -206,7 +239,7 @@ export function useCanvasPersistence(): CanvasPersistence {
 
       const notices: string[] = []
       if (warehouseError) notices.push(warehouseError)
-      if (after.connectedProfile !== null && file.profile !== after.connectedProfile) {
+      if (after.connectedProfile !== null && file.profile && file.profile !== after.connectedProfile) {
         notices.push(
           `Saved under profile "${file.profile}". Connected to "${after.connectedProfile}", so saving records that profile.`,
         )
@@ -215,5 +248,21 @@ export function useCanvasPersistence(): CanvasPersistence {
     })
   }
 
-  return { saveCurrent, saveAs, open }
+  function newDiagram(): Promise<void> {
+    return enqueue(async () => {
+      await flushPending()
+      let existing: string[] = []
+      try {
+        existing = await latest.current.qc.fetchQuery({ queryKey: ['canvases'], queryFn: api.listCanvases, staleTime: 0 })
+      } catch {
+        // The list is only for picking a free name. The save below reports a server problem.
+      }
+      const name = nextDiagramName(existing)
+      usePersistStore.setState({ fileProfile: null })
+      applyFile(parseCanvasFile({ version: 2, name, profile: null, windows: [], edges: [] }))
+      await writeCanvas(name, true)
+    })
+  }
+
+  return { saveCurrent, saveAs, open, newDiagram }
 }

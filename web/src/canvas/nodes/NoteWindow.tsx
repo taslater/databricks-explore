@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { SideHandles } from '../../sketch/nodes/SideHandles'
 import { NodeResizer, type Node, type NodeProps } from '@xyflow/react'
 import Markdown, { type Components } from 'react-markdown'
 import type { CanvasWindow } from '../../api/types'
@@ -28,63 +29,66 @@ function NoteBody({ win, selected }: { win: CanvasWindow; selected: boolean }) {
   const resizeWindow = useCanvasStore((s) => s.resizeWindow)
 
   return (
-    <div className={`qw-node note-node${selected ? ' selected' : ''}`}>
-      <NodeResizer
-        isVisible={selected && !collapsed}
-        minWidth={220}
-        minHeight={120}
-        onResize={(_, p) => resizeWindow(id, { x: p.x, y: p.y }, { w: p.width, h: p.height })}
-      />
+    <>
+      <div className={`qw-node note-node${selected ? ' selected' : ''}`}>
+        <NodeResizer
+          isVisible={selected && !collapsed}
+          minWidth={220}
+          minHeight={120}
+          onResize={(_, p) => resizeWindow(id, { x: p.x, y: p.y }, { w: p.width, h: p.height })}
+        />
 
-      <div className="qw-header">
-        <button
-          className="qw-icon nodrag"
-          onClick={() => setCollapsed(id, !collapsed)}
-          aria-label={collapsed ? 'Expand window' : 'Collapse window'}
-          title={collapsed ? 'Expand' : 'Collapse'}
-        >
-          {collapsed ? '▸' : '▾'}
-        </button>
-        <WindowTitle id={id} title={win.title} />
-        {!collapsed && (
+        <div className="qw-header">
           <button
-            className="qw-icon qw-text nodrag"
-            onClick={() => setEditing((e) => !e)}
-            aria-pressed={editing}
-            title={editing ? 'Show the rendered Markdown' : 'Edit the Markdown'}
+            className="qw-icon nodrag"
+            onClick={() => setCollapsed(id, !collapsed)}
+            aria-label={collapsed ? 'Expand window' : 'Collapse window'}
+            title={collapsed ? 'Expand' : 'Collapse'}
           >
-            {editing ? 'Done' : 'Edit'}
+            {collapsed ? '▸' : '▾'}
           </button>
-        )}
-        <button
-          className="qw-icon nodrag"
-          onClick={() => removeWindow(id)}
-          aria-label="Delete window"
-          title="Delete window"
-        >
-          ✕
-        </button>
-      </div>
-
-      {!collapsed && (
-        <div className="note-body nodrag nowheel">
-          {editing ? (
-            <textarea
-              className="note-editor"
-              value={text}
-              aria-label="Note text (Markdown)"
-              placeholder="Write Markdown here"
-              autoFocus
-              onChange={(e) => setText(id, e.target.value)}
-            />
-          ) : (
-            <div className="note-preview" onDoubleClick={() => setEditing(true)}>
-              <NotePreview text={text} />
-            </div>
+          <WindowTitle id={id} title={win.title} />
+          {!collapsed && (
+            <button
+              className="qw-icon qw-text nodrag"
+              onClick={() => setEditing((e) => !e)}
+              aria-pressed={editing}
+              title={editing ? 'Show the rendered Markdown' : 'Edit the Markdown'}
+            >
+              {editing ? 'Done' : 'Edit'}
+            </button>
           )}
+          <button
+            className="qw-icon nodrag"
+            onClick={() => removeWindow(id)}
+            aria-label="Delete window"
+            title="Delete window"
+          >
+            ✕
+          </button>
         </div>
-      )}
-    </div>
+
+        {!collapsed && (
+          <div className="note-body nodrag nowheel">
+            {editing ? (
+              <textarea
+                className="note-editor"
+                value={text}
+                aria-label="Note text (Markdown)"
+                placeholder="Write Markdown here"
+                autoFocus
+                onChange={(e) => setText(id, e.target.value)}
+              />
+            ) : (
+              <div className="note-preview" onDoubleClick={() => setEditing(true)}>
+                <NotePreview text={text} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <SideHandles />
+    </>
   )
 }
 

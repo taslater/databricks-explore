@@ -1209,3 +1209,578 @@ tr.stale td {
   border: 1px solid #fff;
   cursor: crosshair;
 }
+
+/* ---- Sketch (src/sketch) ---------------------------------------------------------------- */
+.canvas-topleft {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.canvas-row {
+  display: flex;
+  gap: 6px;
+}
+
+.sk-editbar,
+.sk-palette {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 1px 3px rgba(31, 35, 40, 0.12);
+}
+
+.sk-editbar {
+  flex-wrap: wrap;
+}
+
+.sk-palette {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.sk-palette-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sk-palette-group:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.sk-palette button,
+.sk-arrange button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  background: #fff;
+  border-color: transparent;
+}
+
+.sk-palette button.active {
+  background: #ddf4ff;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sk-editbar button svg {
+  display: block;
+}
+
+.sk-snap {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  font-size: 13px;
+}
+
+.sk-menu {
+  position: relative;
+}
+
+.sk-menu-body {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  margin-top: 4px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(31, 35, 40, 0.2);
+  min-width: 190px;
+}
+
+.sk-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sk-arrange {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sk-arrange-row {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.sk-place-preview {
+  position: absolute;
+  z-index: 30;
+  border: 1.5px dashed var(--accent);
+  background: rgba(9, 105, 218, 0.08);
+  pointer-events: none;
+}
+
+.canvas-root.placing .react-flow__pane,
+.canvas-root.placing .react-flow__node {
+  cursor: crosshair;
+}
+
+.canvas-root.tool-hand .react-flow__pane {
+  cursor: grab;
+}
+
+/* Nodes */
+.sk-node {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  font-family: inherit;
+}
+
+.sk-outline {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+
+.sk-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  color: #1f2328;
+}
+
+.sk-label-shape,
+.sk-label-flat {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  overflow: hidden;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  resize: none;
+  font: inherit;
+}
+
+textarea.sk-editor {
+  outline: 1px solid var(--accent);
+  background: rgba(255, 255, 255, 0.85);
+  padding: 4px;
+  width: 100%;
+  height: 100%;
+}
+
+.sk-placeholder {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.sk-node.selected:not(.sk-frame) {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sk-text-node,
+.sk-node.sk-text {
+  /* the text tool has no fill; show its box while selected only */
+}
+
+.sk-node.sk-sticky {
+  border: 1px solid;
+  box-shadow: 2px 3px 6px rgba(31, 35, 40, 0.2);
+}
+
+.sk-lock {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 11px;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.sk-frame {
+  border: 2px dashed;
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.sk-frame.selected {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sk-frame-bg {
+  position: absolute;
+  inset: 0;
+  opacity: 0.35;
+  border-radius: 4px;
+}
+
+.sk-frame-header {
+  position: relative;
+  padding: 4px 8px;
+  font-weight: 600;
+  pointer-events: auto;
+  cursor: grab;
+  min-height: 24px;
+}
+
+.sk-frame-header .sk-text {
+  color: inherit;
+}
+
+.sk-frame-edge {
+  position: absolute;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.sk-frame-edge.top,
+.sk-frame-edge.bottom {
+  left: 0;
+  right: 0;
+  height: 8px;
+}
+
+.sk-frame-edge.top {
+  top: -5px;
+}
+
+.sk-frame-edge.bottom {
+  bottom: -5px;
+}
+
+.sk-frame-edge.left,
+.sk-frame-edge.right {
+  top: 0;
+  bottom: 0;
+  width: 8px;
+}
+
+.sk-frame-edge.left {
+  left: -5px;
+}
+
+.sk-frame-edge.right {
+  right: -5px;
+}
+
+.sk-frame .react-flow__resize-control {
+  pointer-events: auto;
+}
+
+/* Connection points */
+.sk-handle.react-flow__handle {
+  width: 10px;
+  height: 10px;
+  background: var(--accent);
+  border: 2px solid #fff;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.react-flow__node:hover .sk-handle,
+.react-flow__node.selected .sk-handle,
+.canvas-root.tool-connect .sk-handle {
+  opacity: 1;
+}
+
+.canvas-root.tool-connect .sk-handle.react-flow__handle {
+  width: 16px;
+  height: 16px;
+}
+
+/* Placeholder table */
+.sk-placeholder-node {
+  background: #fff;
+  border: 2px solid;
+  border-radius: 6px;
+  height: auto;
+  min-height: 60px;
+  font-size: 13px;
+  overflow: visible;
+}
+
+.ph-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 3px 3px 0 0;
+}
+
+.ph-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.ph-name::placeholder {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.ph-badge {
+  font-size: 11px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 8px;
+  padding: 0 7px;
+}
+
+.ph-linked {
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.ph-summary {
+  color: var(--accent);
+}
+
+.ph-cols {
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ph-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ph-row input {
+  min-width: 0;
+  padding: 1px 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+}
+
+.ph-row input:hover,
+.ph-row input:focus {
+  border-color: var(--border);
+  background: #fff;
+}
+
+.ph-col-name {
+  flex: 1.2;
+}
+
+.ph-col-type {
+  flex: 1;
+  color: var(--muted);
+}
+
+.ph-key {
+  width: 26px;
+  padding: 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #7c3aed;
+  background: #f6f8fa;
+  min-height: 18px;
+}
+
+.ph-del {
+  padding: 0 5px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.ph-add {
+  align-self: flex-start;
+  border-style: dashed;
+  background: transparent;
+  font-size: 12px;
+}
+
+.ph-mark {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ph-mark.new {
+  color: #16a34a;
+}
+
+.ph-mark.type {
+  color: #ca8a04;
+}
+
+.ph-row.st-new {
+  background: #f0fdf4;
+}
+
+.ph-row.st-type {
+  background: #fefce8;
+}
+
+.ph-row.st-existing {
+  color: var(--muted);
+  font-style: italic;
+  padding: 1px 4px;
+}
+
+/* Connectors */
+.sk-edge-label {
+  position: absolute;
+  pointer-events: all;
+  padding: 1px 6px;
+  font-size: 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  min-width: 24px;
+}
+
+.sk-edge-label.selected {
+  border-color: var(--accent);
+}
+
+.sk-edge-label textarea.sk-editor {
+  width: 120px;
+  height: 40px;
+}
+
+.react-flow__edge.edge-derived path.react-flow__edge-path {
+  stroke: #9aa4b2;
+  stroke-width: 1.25;
+}
+
+/* Properties panel */
+.props {
+  padding: 4px 10px 12px;
+  overflow: auto;
+}
+
+.props h4 {
+  margin: 8px 0 4px;
+  font-size: 13px;
+}
+
+.props .field,
+.props .check {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+.props .check {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.props textarea,
+.props select,
+.props input[type='text'],
+.props input:not([type]) {
+  width: 100%;
+}
+
+.seg {
+  display: flex;
+}
+
+.seg button {
+  border-radius: 0;
+  flex: 1;
+}
+
+.seg button.active {
+  background: #ddf4ff;
+  border-color: var(--accent);
+}
+
+.sk-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sk-swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid #8c959f;
+}
+
+.sk-swatch.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.sk-swatch.none {
+  background: linear-gradient(135deg, #fff 45%, #cf222e 45%, #cf222e 55%, #fff 55%);
+}
+
+.sk-geo {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+}
+
+.sk-geo label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.sk-geo input {
+  width: 100%;
+  min-width: 0;
+}
+
+.sk-help th {
+  text-align: left;
+  padding-right: 8px;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 12px;
+  vertical-align: top;
+}
+
+.sk-help td {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sk-diff {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+/* Export hides editing chrome */
+[data-exporting] .sk-node.selected,
+[data-exporting] .sk-frame.selected {
+  outline: none;
+}
+
+[data-exporting] .qw-node.selected {
+  border-color: var(--border);
+  box-shadow: 0 1px 3px rgba(31, 35, 40, 0.12);
+}

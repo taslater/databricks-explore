@@ -35,9 +35,12 @@ interface UiState {
   /** Set when the automatic reconnect on load fails. Cleared on the next connect. Not persisted. */
   restoreMessage: string | null
   pickMode: PickMode
+  /** Whether the Canvas tab shows the properties panel (the Details area). Not persisted. */
+  canvasDetailsOpen: boolean
   /** Drill-down position in the object picker. */
   drill: { catalog: string | null; schema: string | null }
   setView: (view: MainView) => void
+  setCanvasDetailsOpen: (open: boolean) => void
   setPickerCollapsed: (collapsed: boolean) => void
   setSelectedProfile: (profile: string | null) => void
   setConnectedProfile: (profile: string | null) => void
@@ -58,8 +61,10 @@ export const useUiStore = create<UiState>()(
       warehouseId: null,
       restoreMessage: null,
       pickMode: readPickMode(),
+      canvasDetailsOpen: false,
       drill: { catalog: null, schema: null },
       setView: (view) => set({ view }),
+      setCanvasDetailsOpen: (canvasDetailsOpen) => set({ canvasDetailsOpen }),
       setPickerCollapsed: (pickerCollapsed) => set({ pickerCollapsed }),
       setSelectedProfile: (selectedProfile) => set({ selectedProfile }),
       setConnectedProfile: (connectedProfile) =>

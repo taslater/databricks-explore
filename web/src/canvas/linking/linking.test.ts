@@ -61,7 +61,6 @@ describe('renameWindow store action', () => {
   beforeEach(() => {
     useCanvasStore.setState({
       windows: [win('w1', 'alpha', 'SELECT 1'), win('w2', 'beta', 'SELECT * FROM {{alpha}}')],
-      selectedId: null,
     })
   })
 
@@ -124,7 +123,6 @@ describe('{{ completion source', () => {
   beforeEach(() => {
     useCanvasStore.setState({
       windows: [win('w1', 'alpha', ''), win('w2', 'beta', ''), win('w3', 'notes', 'x', 'note')],
-      selectedId: null,
     })
   })
 
@@ -177,7 +175,6 @@ describe('{{ override with the SQL sources', () => {
   beforeEach(() => {
     useCanvasStore.setState({
       windows: [win('w1', 'alpha', ''), win('w2', 'beta', ''), win('w3', 'notes', 'x', 'note')],
-      selectedId: null,
     })
   })
 

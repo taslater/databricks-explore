@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { SideHandles } from '../../sketch/nodes/SideHandles'
 import { NodeResizer, type Node, type NodeProps } from '@xyflow/react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import CodeMirror from '@uiw/react-codemirror'
@@ -159,139 +160,142 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
     null
 
   return (
-    <div className={`qw-node${selected ? ' selected' : ''}`}>
-      <NodeResizer
-        isVisible={selected && !collapsed && !maximized}
-        minWidth={360}
-        minHeight={220}
-        onResize={(_, p) => resizeWindow(id, { x: p.x, y: p.y }, { w: p.width, h: p.height })}
-      />
+    <>
+      <div className={`qw-node${selected ? ' selected' : ''}`}>
+        <NodeResizer
+          isVisible={selected && !collapsed && !maximized}
+          minWidth={360}
+          minHeight={220}
+          onResize={(_, p) => resizeWindow(id, { x: p.x, y: p.y }, { w: p.width, h: p.height })}
+        />
 
-      <div className="qw-header">
-        {/* Drag grip: not nodrag, so the full header height is a handle for moving the window. */}
-        <span className="qw-grip" aria-hidden="true">
-          ⋮⋮
-        </span>
-        <button
-          className="qw-icon nodrag"
-          onClick={() => setCollapsed(id, !collapsed)}
-          aria-label={collapsed ? 'Expand window' : 'Collapse window'}
-          title={collapsed ? 'Expand' : 'Collapse'}
-        >
-          {collapsed ? '▸' : '▾'}
-        </button>
-        <TitleField id={id} title={win.title} />
-        <button
-          className="qw-icon nodrag"
-          onClick={() => setMaximized(maximized ? null : id)}
-          aria-label={maximized ? 'Restore window size' : 'Maximize window'}
-          aria-pressed={maximized}
-          title={maximized ? 'Restore size' : 'Maximize to fill the canvas'}
-        >
-          {maximized ? '⤡' : '⤢'}
-        </button>
-        <button
-          className="qw-icon nodrag"
-          onClick={() => removeWindow(id)}
-          aria-label="Delete window"
-          title="Delete window"
-        >
-          ✕
-        </button>
-      </div>
-
-      {!collapsed && (
-        <div className="qw-body">
-          {/* The toolbar's blank space drags the window. The buttons stay nodrag so they still click. */}
-          <div className="qw-toolbar">
-            <button
-              className="nodrag"
-              onClick={() => startRun('current')}
-              disabled={!canRun}
-              title="Run the selection, or the statement at the cursor (Cmd/Ctrl+Enter)"
-            >
-              Run
-            </button>
-            <button
-              className="nodrag"
-              onClick={() => startRun('all')}
-              disabled={!canRun}
-              title="Run every statement in order; stops at the first error (Shift+Cmd/Ctrl+Enter)"
-            >
-              Run all
-            </button>
-            <button className="nodrag" onClick={cancelRun} disabled={!canCancel}>
-              Cancel
-            </button>
-            <span className="hint">{statusText}</span>
-            {st?.state === 'SUCCEEDED' && <Summary rowCount={st.row_count} truncated={st.truncated} ms={st.ms} />}
-          </div>
-
-          {/* Editor on top, Results | Chart below. The splitter's position is saved as a percent. */}
-          <Group
-            orientation="vertical"
-            className="qw-split nodrag"
-            defaultLayout={{ editor: editorSplit, results: 100 - editorSplit }}
-            onLayoutChanged={(layout, meta) => {
-              // Only a drag by the user is saved. The library also reports the initial layout.
-              if (meta.isUserInteraction && layout.editor !== undefined) setEditorSplit(id, layout.editor)
-            }}
+        <div className="qw-header">
+          {/* Drag grip: not nodrag, so the full header height is a handle for moving the window. */}
+          <span className="qw-grip" aria-hidden="true">
+            ⋮⋮
+          </span>
+          <button
+            className="qw-icon nodrag"
+            onClick={() => setCollapsed(id, !collapsed)}
+            aria-label={collapsed ? 'Expand window' : 'Collapse window'}
+            title={collapsed ? 'Expand' : 'Collapse'}
           >
-            <Panel id="editor" minSize="90px">
-              <div className="qw-editor nowheel">
-                <CodeMirror
-                  value={sqlText}
-                  extensions={extensions}
-                  onChange={(v) => {
-                    setSql(id, v)
-                    setNotice(null)
-                  }}
-                  onCreateEditor={(view) => {
-                    viewRef.current = view
-                  }}
-                  height="100%"
-                  theme="light"
-                  placeholder="SELECT ...  (Cmd/Ctrl+Enter runs the statement or selection)"
-                />
-              </div>
-            </Panel>
-
-            <Separator className="qw-splitter" />
-
-            <Panel id="results" minSize="120px">
-              <div className="qw-results-pane">
-                <div className="qw-tabs" role="tablist">
-                  <button
-                    role="tab"
-                    className="qw-tab"
-                    aria-selected={tab === 'results'}
-                    onClick={() => setTab('results')}
-                  >
-                    Results
-                  </button>
-                  <button
-                    role="tab"
-                    className="qw-tab"
-                    aria-selected={tab === 'chart'}
-                    onClick={() => setTab('chart')}
-                  >
-                    Chart
-                  </button>
-                </div>
-
-                <div className="qw-results nowheel">
-                  {tab === 'results' ? (
-                    <ResultPane st={st} running={running} errorText={errorText} />
-                  ) : (
-                    <ChartTab windowId={id} result={st?.state === 'SUCCEEDED' ? st : null} />
-                  )}
-                </div>
-              </div>
-            </Panel>
-          </Group>
+            {collapsed ? '▸' : '▾'}
+          </button>
+          <TitleField id={id} title={win.title} />
+          <button
+            className="qw-icon nodrag"
+            onClick={() => setMaximized(maximized ? null : id)}
+            aria-label={maximized ? 'Restore window size' : 'Maximize window'}
+            aria-pressed={maximized}
+            title={maximized ? 'Restore size' : 'Maximize to fill the canvas'}
+          >
+            {maximized ? '⤡' : '⤢'}
+          </button>
+          <button
+            className="qw-icon nodrag"
+            onClick={() => removeWindow(id)}
+            aria-label="Delete window"
+            title="Delete window"
+          >
+            ✕
+          </button>
         </div>
-      )}
-    </div>
+
+        {!collapsed && (
+          <div className="qw-body">
+            {/* The toolbar's blank space drags the window. The buttons stay nodrag so they still click. */}
+            <div className="qw-toolbar">
+              <button
+                className="nodrag"
+                onClick={() => startRun('current')}
+                disabled={!canRun}
+                title="Run the selection, or the statement at the cursor (Cmd/Ctrl+Enter)"
+              >
+                Run
+              </button>
+              <button
+                className="nodrag"
+                onClick={() => startRun('all')}
+                disabled={!canRun}
+                title="Run every statement in order; stops at the first error (Shift+Cmd/Ctrl+Enter)"
+              >
+                Run all
+              </button>
+              <button className="nodrag" onClick={cancelRun} disabled={!canCancel}>
+                Cancel
+              </button>
+              <span className="hint">{statusText}</span>
+              {st?.state === 'SUCCEEDED' && <Summary rowCount={st.row_count} truncated={st.truncated} ms={st.ms} />}
+            </div>
+
+            {/* Editor on top, Results | Chart below. The splitter's position is saved as a percent. */}
+            <Group
+              orientation="vertical"
+              className="qw-split nodrag"
+              defaultLayout={{ editor: editorSplit, results: 100 - editorSplit }}
+              onLayoutChanged={(layout, meta) => {
+                // Only a drag by the user is saved. The library also reports the initial layout.
+                if (meta.isUserInteraction && layout.editor !== undefined) setEditorSplit(id, layout.editor)
+              }}
+            >
+              <Panel id="editor" minSize="90px">
+                <div className="qw-editor nowheel">
+                  <CodeMirror
+                    value={sqlText}
+                    extensions={extensions}
+                    onChange={(v) => {
+                      setSql(id, v)
+                      setNotice(null)
+                    }}
+                    onCreateEditor={(view) => {
+                      viewRef.current = view
+                    }}
+                    height="100%"
+                    theme="light"
+                    placeholder="SELECT ...  (Cmd/Ctrl+Enter runs the statement or selection)"
+                  />
+                </div>
+              </Panel>
+
+              <Separator className="qw-splitter" />
+
+              <Panel id="results" minSize="120px">
+                <div className="qw-results-pane">
+                  <div className="qw-tabs" role="tablist">
+                    <button
+                      role="tab"
+                      className="qw-tab"
+                      aria-selected={tab === 'results'}
+                      onClick={() => setTab('results')}
+                    >
+                      Results
+                    </button>
+                    <button
+                      role="tab"
+                      className="qw-tab"
+                      aria-selected={tab === 'chart'}
+                      onClick={() => setTab('chart')}
+                    >
+                      Chart
+                    </button>
+                  </div>
+
+                  <div className="qw-results nowheel">
+                    {tab === 'results' ? (
+                      <ResultPane st={st} running={running} errorText={errorText} />
+                    ) : (
+                      <ChartTab windowId={id} result={st?.state === 'SUCCEEDED' ? st : null} />
+                    )}
+                  </div>
+                </div>
+              </Panel>
+            </Group>
+          </div>
+        )}
+      </div>
+      <SideHandles />
+    </>
   )
 }
 
