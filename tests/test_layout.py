@@ -427,7 +427,11 @@ def test_layered_does_not_overlap_nodes_outside_the_subset():
 def test_place_relations():
     c = canvas([node("anchor", 400, 300, 200, 100), node("n", 0, 0, 100, 40), node("m", 0, 100, 100, 40)])
     right, _ = layout.arrange(c, ["n"], "place", relation="right_of", anchor="anchor", gap=50)
-    assert pos(right, "n") == (650, 330)  # right of the anchor, centered on it
+    assert pos(right, "n") == (650, 300)  # right of the anchor, top-aligned with it
+    centered, _ = layout.arrange(c, ["n"], "place", relation="right_of", anchor="anchor", gap=50, align="center")
+    assert pos(centered, "n") == (650, 330)
+    ended, _ = layout.arrange(c, ["n"], "place", relation="right_of", anchor="anchor", gap=50, align="end")
+    assert pos(ended, "n") == (650, 360)
     below, _ = layout.arrange(c, ["n"], "place", relation="below", anchor="anchor", gap=20)
     assert pos(below, "n") == (450, 420)
     left, _ = layout.arrange(c, ["n"], "place", relation="left_of", anchor="anchor", gap=10, align="start")
@@ -437,11 +441,39 @@ def test_place_relations():
     assert layout.doctor(above)["metrics"]["overlap_area"] == 0
 
 
-def test_place_shifts_along_the_direction_to_clear_a_bystander():
+def test_place_beside_an_anchor_moves_down_to_clear_a_bystander():
     c = canvas([node("anchor", 0, 0), node("n", 900, 900), node("block", 160, 0)])
     fixed, _ = layout.arrange(c, ["n"], "place", relation="right_of", anchor="anchor", gap=40)
-    assert pos(fixed, "n")[0] >= 160 + 120
+    assert pos(fixed, "n") == (160, 100)  # beside the anchor's column, below the bystander, not past it
     assert layout.doctor(fixed)["metrics"]["overlap_area"] == 0
+    left, _ = layout.arrange(canvas([node("anchor", 400, 0), node("n", 0, 900), node("block", 240, 0)]), ["n"], "place",
+                             relation="left_of", anchor="anchor", gap=40)
+    assert pos(left, "n") == (240, 100)
+
+
+def test_place_beside_an_anchor_goes_along_the_side_when_down_is_too_far():
+    c = canvas([node("anchor", 0, 0), node("n", 900, 900), node("wall", 160, 0, 120, layout.PLACE_DOWN_MAX + 500)])
+    fixed, _ = layout.arrange(c, ["n"], "place", relation="right_of", anchor="anchor", gap=40)
+    assert pos(fixed, "n") == (320, 0)
+
+
+def test_place_below_still_shifts_along_its_own_direction():
+    c = canvas([node("anchor", 0, 0), node("n", 900, 900), node("block", 0, 100)])
+    fixed, _ = layout.arrange(c, ["n"], "place", relation="below", anchor="anchor", gap=40)
+    assert pos(fixed, "n")[1] >= 100 + 60
+
+
+def test_a_tall_window_placed_right_of_a_short_sticky_lines_up_with_its_top_and_stays_beside_it():
+    row = [node("r1", 0, 0, 400, 120), node("r2", 440, 0, 400, 120)]
+    sticky = node("s", 0, 200, 160, 160, "sticky")
+    c = canvas(row + [sticky, node("q", 900, 900, 760, 520, "query")])
+    fixed, _ = layout.arrange(c, ["q"], "place", relation="right_of", anchor="s", gap=40)
+    assert pos(fixed, "q") == (200, 200)
+    assert layout.doctor(fixed)["metrics"]["overlap_area"] == 0
+    blocked = canvas(row + [sticky, node("q", 900, 900, 760, 520, "query"), node("x", 200, 150, 300, 100)])
+    out, _ = layout.arrange(blocked, ["q"], "place", relation="right_of", anchor="s", gap=40)
+    assert pos(out, "q")[0] == 200 and pos(out, "q")[1] == 290  # down past the bystander, not to x=1260
+    assert layout.doctor(out)["metrics"]["overlap_area"] == 0
 
 
 def test_place_inside_grows_the_frame():

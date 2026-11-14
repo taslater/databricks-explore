@@ -33,6 +33,7 @@ LABEL_CHAR_W = 6.7     # connector labels: 12 px text, estimated character width
 LABEL_LINE_H = 15.6    # one line of a connector label
 LABEL_PAD = (14.0, 6.0)  # horizontal and vertical padding plus border of a connector label box
 LABEL_STEP = 4         # px a connector label is nudged at a time along its segment
+PLACE_DOWN_MAX = 600.0  # a node placed beside an anchor is moved down at most this far to clear what is in the way
 SHARE_TOL = 1.0        # px: two connector segments closer than this and parallel run along each other
 
 PENALTY = {  # score points per issue: (each, cap)
@@ -1426,14 +1427,16 @@ def _layout_layered(ns: list[dict], edges: list[dict], direction: str, gap: floa
 
 
 def _shift_clear(ctx: _Ctx, movers: dict[str, tuple[float, float]], obstacles: list[dict], gap: float,
-                 axes: tuple = ("x-", "x+", "y-", "y+")) -> tuple[float, float]:
-    """Smallest rigid shift of the proposed boxes that clears every obstacle. (0, 0) when nothing is in the way."""
+                 axes: tuple = ("x-", "x+", "y-", "y+"), then: tuple = (), max_first: Optional[float] = None) -> tuple[float, float]:
+    """Smallest rigid shift of the proposed boxes that clears every obstacle. (0, 0) when nothing is in the way.
+
+    The shift is the smallest one along `axes`. With `then`, `axes` is tried first, and only when it needs more than
+    `max_first` px (or finds nothing) is the smallest shift along `then` used instead."""
     boxes = {i: (p[0], p[1], p[0] + _w(ctx.by[i]), p[1] + _h(ctx.by[i])) for i, p in movers.items()}
 
     def hits(dx, dy):
         for i, b in boxes.items():
             sb = (b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy)
-            n = ctx.by[i]
             for o in obstacles:
                 ob = _box(o)
                 ox, oy = _inter(sb, ob)
@@ -1448,24 +1451,31 @@ def _shift_clear(ctx: _Ctx, movers: dict[str, tuple[float, float]], obstacles: l
         return (0.0, 0.0)
     bx = (min(b[0] for b in boxes.values()), min(b[1] for b in boxes.values()),
           max(b[2] for b in boxes.values()), max(b[3] for b in boxes.values()))
-    cands = []
-    for o in obstacles:
-        ob = _box(o)
-        if "x+" in axes:
-            cands.append((ob[2] + gap - bx[0], 0.0))
-        if "x-" in axes:
-            cands.append((ob[0] - gap - bx[2], 0.0))
-        if "y+" in axes:
-            cands.append((0.0, ob[3] + gap - bx[1]))
-        if "y-" in axes:
-            cands.append((0.0, ob[1] - gap - bx[3]))
-    cands.sort(key=lambda c: (abs(c[0]) + abs(c[1]), c))
-    for dx, dy in cands:
-        if not hits(dx, dy):
-            return (dx, dy)
+
+    def smallest(group: tuple, limit: Optional[float] = None):
+        cands = []
+        for o in obstacles:
+            ob = _box(o)
+            if "x+" in group:
+                cands.append((ob[2] + gap - bx[0], 0.0))
+            if "x-" in group:
+                cands.append((ob[0] - gap - bx[2], 0.0))
+            if "y+" in group:
+                cands.append((0.0, ob[3] + gap - bx[1]))
+            if "y-" in group:
+                cands.append((0.0, ob[1] - gap - bx[3]))
+        cands.sort(key=lambda c: (abs(c[0]) + abs(c[1]), c))
+        for dx, dy in cands:
+            if (limit is None or abs(dx) + abs(dy) <= limit) and not hits(dx, dy):
+                return (dx, dy)
+        return None
+    for group, limit in ((axes, max_first if then else None), (then, None)):
+        if group and (found := smallest(group, limit)) is not None:
+            return found
+    group = then or axes
     allb = [_box(o) for o in obstacles]
-    far = max(b[2] for b in allb) + gap - bx[0] if "x+" in axes else (max(b[3] for b in allb) + gap - bx[1])
-    return (far, 0.0) if "x+" in axes else (0.0, far)
+    far = max(b[2] for b in allb) + gap - bx[0] if "x+" in group else (max(b[3] for b in allb) + gap - bx[1])
+    return (far, 0.0) if "x+" in group else (0.0, far)
 
 
 def arrange(canvas: dict, ids: Optional[Iterable[str]], mode: str, grid: Optional[float] = None, **opts) -> tuple[dict, list[dict]]:
@@ -1481,7 +1491,8 @@ def arrange(canvas: dict, ids: Optional[Iterable[str]], mode: str, grid: Optiona
     gap = _num(opts.get("gap"), 40.0)
     if gap < 0:
         raise LayoutError("gap must be 0 or more")
-    align = opts.get("align") or ("center" if mode in ("place", "layered") else "start")
+    side_by_side = mode == "place" and (opts.get("relation") or opts.get("rel")) in ("right_of", "left_of")
+    align = opts.get("align") or ("center" if mode in ("place", "layered") and not side_by_side else "start")
     if align not in ("start", "center", "end"):
         raise LayoutError("align must be start, center or end")
     # a frame in the set carries its members, so members whose frame is also in the set are not laid out themselves
@@ -1599,7 +1610,10 @@ def _arrange_place(ctx: _Ctx, movers: list[dict], opts: dict, gap: float, align:
     holders = {a for i in stack for a in _ancestors(i, ctx.parent)} | _ancestors(anchor["id"], ctx.parent)
     obstacles = [n for n in ctx.nodes if n["id"] not in keep and n["id"] not in holders]
     axis = {"right_of": ("x+",), "left_of": ("x-",), "below": ("y+",), "above": ("y-",)}[rel]
-    dx, dy = _shift_clear(ctx, target, obstacles, gap, axis)
+    if horizontal:  # beside the anchor: when blocked, move down first and only then along the requested side
+        dx, dy = _shift_clear(ctx, target, obstacles, gap, ("y+",), axis, PLACE_DOWN_MAX)
+    else:
+        dx, dy = _shift_clear(ctx, target, obstacles, gap, axis)
     for i, p in target.items():
         ctx.set_pos(i, p[0] + dx, p[1] + dy)
 

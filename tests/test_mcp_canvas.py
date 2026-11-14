@@ -309,3 +309,16 @@ def test_tidy_tool_offers_fit_labels_and_place_labels(agent):
     assert "[fix: tidy rules=fit_labels ids=a]" in agent.ok("doctor", name="d")
     agent.ok("tidy", name="d", rules=["fit_labels"])
     assert "label_overflow" not in agent.ok("doctor", name="d")
+
+
+def test_place_right_of_top_aligns_by_default_and_takes_align(agent):
+    agent.ok("create_canvas", name="d")
+    agent.ok("add_nodes", name="d", nodes=[{"type": "sticky", "id": "s", "label": "note", "w": 160, "h": 160, "at": {"x": 0, "y": 300}} ])
+    agent.ok("add_nodes", name="d", nodes=[
+        {"type": "query", "id": "q", "sql": "select 1", "place": {"relation": "right_of", "anchor": "s"}},
+        {"type": "shape", "id": "c", "label": "C", "h": 40, "place": {"relation": "left_of", "anchor": "s", "align": "center"}}])
+    b = boxes(saved())
+    assert b["q"][0] == b["s"][2] + 40 and b["q"][1] == b["s"][1]          # beside the sticky, tops equal
+    assert abs((b["c"][1] + b["c"][3]) / 2 - (b["s"][1] + b["s"][3]) / 2) <= 1  # align: center still works
+    agent.ok("update_nodes", name="d", updates=[{"id": "q", "place": {"relation": "right_of", "anchor": "s", "align": "end"}}])
+    assert boxes(saved())["q"][3] == boxes(saved())["s"][3]
