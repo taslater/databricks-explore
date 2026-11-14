@@ -12,7 +12,7 @@ import io
 import math
 from typing import Any, Callable, Iterable, Optional
 
-RULES = ("fit_labels", "frames", "overlaps", "align", "spacing", "grid", "handles", "place_labels")
+RULES = ("fit_labels", "frames", "overlaps", "lines", "align", "spacing", "grid", "handles", "place_labels")
 ARRANGE_MODES = ("grid", "row", "column", "layered", "place")
 PLACE_RELATIONS = ("right_of", "left_of", "below", "above", "inside")
 
@@ -39,12 +39,13 @@ SHARE_TOL = 1.0        # px: two connector segments closer than this and paralle
 PENALTY = {  # score points per issue: (each, cap)
     "overlap": (8, 40), "edge_through_node": (6, 24), "bad_handle_side": (3, 15), "outside_frame": (4, 16),
     "near_alignment": (1.5, 12), "uneven_spacing": (3, 12), "label_overflow": (2, 10), "edge_crossings": (1.5, 15),
-    "far_away": (2, 6), "off_grid": (0.5, 5), "label_collision": (2, 10),
+    "far_away": (2, 6), "off_grid": (0.5, 5), "label_collision": (2, 10), "derived_through_node": (3, 12),
 }
 SEVERITY = {
     "overlap": "error", "edge_through_node": "error", "bad_handle_side": "warning", "outside_frame": "warning",
     "near_alignment": "warning", "uneven_spacing": "warning", "label_overflow": "warning",
     "edge_crossings": "warning", "far_away": "info", "off_grid": "info", "label_collision": "warning",
+    "derived_through_node": "warning",
 }
 
 
@@ -751,6 +752,62 @@ def _label_collisions(canvas: dict) -> list[tuple[str, str, str]]:
     return out
 
 
+# ---------------------------------------------------------------- derived lines
+#
+# The page draws a dashed line from each table card to every query window whose SQL reads that table (web/src/canvas/
+# linking/tableEdges.ts). They are not saved, so the doctor derives them the same way: {{title}} references expanded,
+# the tables read found with sqlglot (sqltools.tables_read), matched to cards by name without regard to case.
+
+def derived_reads(canvas: dict) -> list[dict]:
+    """The derived "reads" lines of a canvas: {id, source (a table card), target (a query window)}, one per pair.
+
+    A query window whose SQL cannot be parsed or expanded has none. Nothing is run and nothing is read but the SQL."""
+    from . import sqltools
+
+    nodes = _nodes(canvas)
+    cards: dict[str, list[str]] = {}
+    for n in nodes:
+        if n.get("type") == "table" and isinstance(n.get("table"), str) and n["table"]:
+            cards.setdefault(n["table"].lower(), []).append(n["id"])
+    if not cards:
+        return []
+    by_title = {n["title"]: n.get("sql") or "" for n in nodes
+                if n.get("type") == "query" and isinstance(n.get("title"), str) and isinstance(n.get("sql", ""), str)}
+    out: list[dict] = []
+    for n in nodes:
+        sql = n.get("sql")
+        if n.get("type") != "query" or not isinstance(sql, str) or not sql.strip():
+            continue
+        try:
+            names = sqltools.tables_read(sqltools.expand_refs(sql, by_title) if by_title else sql)
+        except Exception:  # SQL that does not parse draws no lines, as on the page
+            continue
+        seen: set[str] = set()
+        for name in names:
+            for cid in cards.get(name.lower(), []):
+                if cid not in seen:
+                    seen.add(cid)
+                    out.append({"id": f"table:{cid}>{n['id']}", "source": cid, "target": n["id"]})
+    return out
+
+
+def _derived_hits(canvas: dict, nodes: list[dict]) -> list[tuple[dict, dict, list]]:
+    """(derived line, node it passes behind, the line's route) for every non-frame node other than its two ends."""
+    by = {n["id"]: n for n in nodes}
+    out = []
+    for e in derived_reads(canvas):
+        a, b = by.get(e["source"]), by.get(e["target"])
+        if a is None or b is None:
+            continue
+        pts = _route({"line": "straight"}, _box(a), _box(b))
+        for n in nodes:
+            if n["id"] in (e["source"], e["target"]) or n.get("type") == "frame":
+                continue
+            if _seg_hits_box(pts[0], pts[1], _box(n)):
+                out.append((e, n, pts))
+    return out
+
+
 # ---------------------------------------------------------------- doctor
 
 def _issue(kind: str, key: str, nodes: list[str], message: str, fix: Optional[dict] = None, **extra) -> dict:
@@ -805,6 +862,11 @@ def doctor(canvas: dict, grid: Optional[float] = None) -> dict:
                 issues.append(_issue("edge_through_node", f'{e["id"]}|{n["id"]}', [e["source"], e["target"], n["id"]],
                                      f'connector {e["id"]} ({e["source"]} to {e["target"]}) passes through {_label(n)}',
                                      None, edges=[e["id"]]))
+    for e, n, _ in _derived_hits(canvas, nodes):
+        a, b = by[e["source"]], by[e["target"]]
+        issues.append(_issue("derived_through_node", f'{e["id"]}|{n["id"]}', [e["source"], e["target"], n["id"]],
+                             f'derived line from {_label(a)} to {_label(b)} (the query reads the table) passes behind {_label(n)}',
+                             None if locked[n["id"]] else _tidy_fix(["lines"], [n["id"]]), derived=e["id"]))
     crossings = 0
     crossing_nodes: list[str] = []
     for i in range(len(polys)):
@@ -1108,6 +1170,49 @@ def _rule_align(ctx: _Ctx) -> bool:
     return _apply_moves(ctx, moves)
 
 
+def _rule_lines(ctx: _Ctx) -> bool:
+    """Moves a node that a derived reads line passes behind off the line: the smallest shift (up, down, left or right, in
+    steps of the grid or 8 px) that clears the line by 8 px and lands on nothing else and inside the same frame. A node
+    that may not move, or that has no such spot within 800 px, stays."""
+    changed = False
+    step = ctx.grid or 8.0
+    skip: set = set()  # (line, node) pairs with no spot to move to
+    for _ in range(2 * len(ctx.nodes) + 2):
+        ctx.refresh()
+        todo = [(e, n, pts) for e, n, pts in _derived_hits(ctx.canvas, ctx.nodes)
+                if ctx.movable(n["id"]) and (e["id"], n["id"]) not in skip]
+        if not todo:
+            break
+        e, n, pts = todo[0]
+        b = _box(n)
+        parent = ctx.by.get(ctx.parent.get(n["id"], ""))
+        related = {n["id"]} | _ancestors(n["id"], ctx.parent)
+        others = [_box(m) for m in ctx.nodes if m["id"] not in related]
+        spot = None
+        for k in range(1, int(800 // step) + 1):
+            d = k * step
+            for dx, dy in ((0, -d), (0, d), (-d, 0), (d, 0)):
+                nb = (b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy)
+                if _seg_hits_box(pts[0], pts[1], nb, inset=-8.0):
+                    continue
+                if any(_inter(nb, o)[0] > OVERLAP_TOL and _inter(nb, o)[1] > OVERLAP_TOL for o in others):
+                    continue
+                if parent is not None:
+                    fb = _box(parent)
+                    if nb[0] < fb[0] or nb[1] < fb[1] or nb[2] > fb[2] or nb[3] > fb[3]:
+                        continue
+                spot = (dx, dy)
+                break
+            if spot:
+                break
+        if spot is None:
+            skip.add((e["id"], n["id"]))
+            continue
+        ctx.move(n["id"], *spot)
+        changed = True
+    return changed
+
+
 def _rule_spacing(ctx: _Ctx) -> bool:
     ctx.refresh()
     moves, _ = _plan_spacing(ctx.nodes, ctx.parent, ctx.grid, ctx.movable_map())
@@ -1229,7 +1334,7 @@ def _place_labels_pass(ctx: _Ctx, widened: set) -> tuple[bool, bool]:
     return changed, False
 
 
-_RULE_FNS = {"fit_labels": _rule_fit_labels, "frames": _rule_frames, "overlaps": _rule_overlaps, "align": _rule_align,
+_RULE_FNS = {"fit_labels": _rule_fit_labels, "frames": _rule_frames, "overlaps": _rule_overlaps, "lines": _rule_lines, "align": _rule_align,
              "spacing": _rule_spacing, "grid": _rule_grid, "handles": _rule_handles, "place_labels": _rule_place_labels}
 
 

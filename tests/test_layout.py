@@ -929,3 +929,50 @@ def test_render_wraps_a_long_label_inside_the_box_and_is_deterministic():
                                   _png(canvas([node("m", 0, 0, 200, 100, "sticky", label="")]))).getbbox()
     assert (ink[3] - ink[1]) > (short[3] - short[1])  # more than one line of text is drawn
     assert ink[0] >= 30 and ink[2] <= 570 and ink[3] <= _png(c).height - 30  # and all of it stays inside the box
+
+
+# ---------------------------------------------------------------- derived reads lines (table card to the query that reads it)
+
+def reading(blocker_at=(400, 100), table="Dev.CRM.Orders", sql="select * from dev.crm.orders", **blocker_extra):
+    return canvas([node("orders", 0, 0, 320, 300, "table", table=table, title="orders"),
+                   node("q", 800, 0, 400, 300, "query", sql=sql, title="q"),
+                   node("sticky", *blocker_at, 160, 100, "sticky", label="note", **blocker_extra)])
+
+
+def test_derived_reads_pairs_a_table_card_with_the_query_that_reads_it():
+    assert [(e["source"], e["target"]) for e in layout.derived_reads(reading())] == [("orders", "q")]  # matched without regard to case
+    assert layout.derived_reads(reading(sql="select 1")) == [] and layout.derived_reads(reading(sql="selec ((")) == []
+    assert layout.derived_reads(canvas([node("q", 0, 0, 100, 100, "query", sql="select * from a.b.c", title="q")])) == []
+
+
+def test_derived_reads_expands_title_references():
+    c = canvas([node("t", 0, 0, 320, 300, "table", table="dev.crm.orders", title="t"),
+                node("a", 400, 0, 300, 300, "query", sql="select * from dev.crm.orders", title="base"),
+                node("b", 800, 0, 300, 300, "query", sql="select * from {{base}}", title="top")])
+    assert [(e["source"], e["target"]) for e in layout.derived_reads(c)] == [("t", "a"), ("t", "b")]
+
+
+def test_doctor_warns_when_a_derived_line_passes_behind_a_node():
+    r = layout.doctor(reading())
+    [i] = [i for i in r["issues"] if i["kind"] == "derived_through_node"]
+    assert i["severity"] == "warning" and set(i["nodes"]) == {"orders", "q", "sticky"} and "passes behind" in i["message"]
+    assert i["fix"] == {"tool": "tidy", "rules": ["lines"], "ids": ["sticky"]} and r["score"] < 100
+    assert "derived_through_node" not in kinds(layout.doctor(reading(blocker_at=(400, 600))))  # off the line: fine
+    assert "derived_through_node" not in kinds(layout.doctor(reading(sql="select 1")))
+
+
+def test_tidy_moves_the_blocking_node_off_the_derived_line_by_the_least():
+    c = reading()
+    out, changes = layout.tidy(c)
+    assert "derived_through_node" not in kinds(layout.doctor(out)) and [ch["id"] for ch in changes] == ["sticky"]
+    assert pos(out, "orders") == (0, 0) and pos(out, "q") == (800, 0)
+    assert layout.doctor(out)["metrics"]["overlap_area"] == 0 and layout.tidy(out)[1] == []
+    assert layout.tidy(c, rules=["overlaps"])[1] == []  # only the lines rule does it
+
+
+def test_tidy_leaves_a_locked_blocker_and_says_so_in_the_issue():
+    c = reading(locked=True)
+    out, changes = layout.tidy(c)
+    assert changes == [] and pos(out, "sticky") == (400, 100)
+    [i] = [i for i in layout.doctor(c)["issues"] if i["kind"] == "derived_through_node"]
+    assert i["fix"] is None
