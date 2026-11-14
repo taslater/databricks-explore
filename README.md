@@ -163,7 +163,7 @@ Layout of the source: `src/databricks_explore/` (the Python package: `app.py`, `
 Releases go to PyPI and GitHub from the `release` workflow when a tag `v<version>` is pushed. The tag must equal `__version__` in `src/databricks_explore/__init__.py`, the one place the version is defined. One-time setup, done by the owner:
 1. On GitHub, create the environment `pypi` (Settings, Environments) and add a required reviewer, so every publish waits for approval.
 2. On pypi.org, add a pending publisher for the project `databricks-explore` with this repository, the workflow `release.yml` and the environment `pypi` (Account settings, Publishing).
-3. Bump `__version__`, merge, then `git tag v0.5.0 && git push origin v0.5.0`. Approve the `publish` job when it waits.
+3. Bump `__version__`, merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`. Approve the `publish` job when it waits.
 
 The CI workflow (`ci.yml`) runs the Python tests on Linux, Windows and macOS, the web checks, builds the wheel and sdist, and installs the wheel as a tool on all three systems to run the demo server and the MCP interop script against it.
 
