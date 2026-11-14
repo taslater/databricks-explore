@@ -53,7 +53,7 @@ def test_example_round_trips_unchanged(cdir):
 def test_example_round_trips_through_routes(client):
     resp = client.post("/api/canvases", json=example())
     assert resp.status_code == 200
-    assert resp.get_json() == {"saved": "hours"}
+    assert resp.get_json()["saved"] == "hours"
     resp = client.get("/api/canvases/hours")
     assert resp.status_code == 200
     assert resp.get_json() == EXAMPLE
@@ -174,7 +174,7 @@ def test_overwrite_replaces_existing_canvas(client):
     changed = example()
     changed["profile"] = "prod"
     resp = client.post("/api/canvases", json=changed)
-    assert resp.get_json() == {"saved": "hours"}
+    assert resp.get_json()["saved"] == "hours"
     assert client.get("/api/canvases/hours").get_json()["profile"] == "prod"
     assert client.get("/api/canvases").get_json() == ["hours"]
 
@@ -293,7 +293,7 @@ def test_v2_round_trips_unchanged(cdir):
 
 def test_v2_round_trips_through_routes(client):
     body = example_v2()
-    assert client.post("/api/canvases", json=body).get_json() == {"saved": "hours"}
+    assert client.post("/api/canvases", json=body).get_json()["saved"] == "hours"
     assert client.get("/api/canvases/hours").get_json() == body
 
 

@@ -4,9 +4,12 @@ The pydantic models mirror contracts/canvas.schema.json. Checks the schema canno
 (unique window titles and ids, links and connectors that point at existing ids) run in check_references().
 Validated bodies are stored exactly as received, so save followed by load returns the same object.
 Version 2 adds the sketch node types and a top-level `edges` list of user-drawn connectors.
+Each canvas also has a revision number (a counter in data/canvas_history/<name>/meta.json, never inside the canvas file)
+that every save bumps, and agent writes keep the replaced file as a snapshot so they can be undone.
 """
 import json
 import os
+import threading
 from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, ValidationError, model_validator
@@ -18,6 +21,8 @@ CANVASES = dbx.DATA / "canvases"
 CANVASES.mkdir(parents=True, exist_ok=True)
 
 NAME_PATTERN = r"^[A-Za-z0-9_.-]+$"
+KEEP_SNAPSHOTS = 20  # per canvas
+LOCK = threading.RLock()  # one writer at a time, so an agent's read-modify-write cannot interleave with a save
 
 
 class CanvasInvalid(ValueError):
@@ -211,8 +216,48 @@ def list_canvases() -> list[str]:
     return sorted(p.stem for p in CANVASES.glob("*.json"))
 
 
-def save_canvas(data) -> str:
-    """Validate and write data/canvases/<name>.json, storing the body exactly as received."""
+def history_dir(name: str):
+    """data/canvas_history/<name>/: the revision counter and the snapshots of one canvas."""
+    return CANVASES.parent / "canvas_history" / dbx.safe(name)
+
+
+def _meta(name: str) -> dict:
+    try:
+        meta = json.loads((history_dir(name) / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _snapshots(name: str) -> list:
+    d = history_dir(name)
+    return sorted(d.glob("[0-9]*.json")) if d.is_dir() else []
+
+
+def _atomic_write(path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.parent / (path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)  # overwrite; never leaves a half-written file behind
+
+
+def revision_info(name: str) -> dict:
+    """{"name", "revision", "by", "snapshots"} for a saved canvas. `by` is ui, agent or undo (None before any save)."""
+    with LOCK:
+        if dbx.safe(name) != name or not path_for(name).is_file():
+            raise CanvasNotFound(f"canvas not found: {name}")
+        meta = _meta(name)
+        rev = meta.get("revision")
+        return {"name": name, "revision": rev if isinstance(rev, int) else 0, "by": meta.get("by"),
+                "snapshots": len(_snapshots(name))}
+
+
+def write_canvas(data, by: str = "ui", snapshot: bool = False) -> tuple[str, int]:
+    """Validate and write data/canvases/<name>.json, storing the body exactly as received. Returns (name, revision).
+
+    Every write bumps the revision and records who made it (`by`). With `snapshot`, the file being replaced is kept
+    first (the newest KEEP_SNAPSHOTS are kept), which is what undo_canvas restores.
+    """
     name = parse_canvas(data).name
     # On Windows (and macOS by default) "Hours" and "hours" are the same file. Refuse
     # rather than silently overwrite a different canvas.
@@ -224,10 +269,37 @@ def save_canvas(data) -> str:
     except ValueError as e:  # NaN or Infinity cannot be stored as JSON
         raise CanvasInvalid(f"(root): {e}") from e
     path = path_for(name)
-    tmp = path.parent / (path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)  # overwrite; never leaves a half-written file behind
-    return name
+    with LOCK:
+        meta = _meta(name)
+        old = meta.get("revision") if isinstance(meta.get("revision"), int) else 0
+        if snapshot and path.is_file():
+            _atomic_write(history_dir(name) / f"{old:08d}.json", path.read_text(encoding="utf-8"))
+            for stale in _snapshots(name)[:-KEEP_SNAPSHOTS]:
+                stale.unlink(missing_ok=True)
+        _atomic_write(path, text)
+        _atomic_write(history_dir(name) / "meta.json", json.dumps({"revision": old + 1, "by": by}))
+        return name, old + 1
+
+
+def save_canvas(data) -> str:
+    """Validate and write data/canvases/<name>.json, storing the body exactly as received."""
+    return write_canvas(data)[0]
+
+
+def undo_canvas(name: str) -> dict:
+    """Put back the newest snapshot of a canvas (the state before an agent's last write) and drop that snapshot.
+
+    Returns {"name", "revision", "snapshots"} (snapshots left). CanvasInvalid when there is nothing to undo.
+    """
+    with LOCK:
+        revision_info(name)  # CanvasNotFound for an unknown canvas
+        snaps = _snapshots(name)
+        if not snaps:
+            raise CanvasInvalid(f"nothing to undo for canvas {name}")
+        data = json.loads(snaps[-1].read_text(encoding="utf-8"))
+        _, rev = write_canvas(data, by="undo")
+        snaps[-1].unlink(missing_ok=True)
+        return {"name": name, "revision": rev, "snapshots": len(_snapshots(name))}
 
 
 def load_canvas(name: str) -> dict:

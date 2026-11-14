@@ -541,7 +541,8 @@ def canvas_list():
 def canvas_save():
     body = request.get_json(silent=True)
     try:
-        return jsonify({"saved": canvases.save_canvas(body)})
+        name, revision = canvases.write_canvas(body)
+        return jsonify({"saved": name, "revision": revision})
     except canvases.CanvasInvalid as e:
         return jsonify({"error": str(e)}), 400
 
@@ -554,6 +555,18 @@ def canvas_get(name):
         return jsonify({"error": str(e)}), 404
     except canvases.CanvasInvalid as e:
         return jsonify({"error": str(e)}), 400
+
+
+@app.get("/api/canvases/<name>/revision")
+def canvas_revision(name):
+    """The canvas's revision, who wrote it last (ui, agent or undo) and how many undo snapshots exist. The page polls this."""
+    return jsonify(canvases.revision_info(name))
+
+
+@app.post("/api/canvases/<name>/undo")
+def canvas_undo(name):
+    """Restore the state before the last agent write. Another undo goes one agent write further back."""
+    return jsonify(canvases.undo_canvas(name))
 
 
 # ---- Layout: doctor, tidy, arrange, describe, render. Each takes {"canvas": {...}} or {"name": "<saved>"}. ----
