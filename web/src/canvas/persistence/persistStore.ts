@@ -19,6 +19,8 @@ interface PersistStatusState {
   savedJson: string | null
   /** Profile named in the file that was last opened. A save made with no connection keeps it. */
   fileProfile: string | null
+  /** Counts canvases opened from the list. The view fits itself to the content each time it changes. */
+  openSeq: number
   setStatus: (phase: PersistPhase, message?: string | null, isError?: boolean) => void
   markSaved: (json: string) => void
 }
@@ -29,6 +31,7 @@ export const usePersistStore = create<PersistStatusState>()((set) => ({
   messageIsError: false,
   savedJson: null,
   fileProfile: null,
+  openSeq: 0,
   setStatus: (phase, message = null, isError = false) =>
     set({ phase, message, messageIsError: isError }),
   markSaved: (json) => set({ phase: 'saved', savedJson: json, message: null, messageIsError: false }),

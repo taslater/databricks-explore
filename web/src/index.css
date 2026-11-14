@@ -2750,3 +2750,54 @@ button.as-link {
   color: var(--error);
   border-color: var(--error);
 }
+
+/* ---- In-app dialogs (shared/Dialog.tsx) ------------------------------------------------- */
+/* Above other modals, so a confirm opened from inside one (the agent access panel) is on top. */
+.app-dialog-backdrop {
+  z-index: 60;
+}
+
+.app-dialog {
+  width: min(440px, 92vw);
+}
+
+.app-dialog h3 {
+  margin: 0 0 8px;
+}
+
+.app-dialog-message {
+  margin: 0 0 14px;
+}
+
+.app-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.app-dialog-field input {
+  padding: 4px 6px;
+}
+
+.app-dialog-preview {
+  margin: 6px 0 10px;
+  min-height: 1.3em;
+}
+
+.app-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+button.app-dialog-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+button.app-dialog-danger {
+  background: var(--error);
+  border-color: var(--error);
+  color: #fff;
+}

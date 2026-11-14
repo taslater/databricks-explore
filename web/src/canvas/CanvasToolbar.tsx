@@ -4,6 +4,8 @@ import { useCanvasStore } from '../store/canvasStore'
 import { useSketchStore } from '../sketch/sketchStore'
 import { useCanvasPersistence } from './persistence/useCanvasPersistence'
 import { usePersistStore, type PersistPhase } from './persistence/persistStore'
+import { ConfirmDialog, NameDialog } from '../shared/Dialog'
+import { toCanvasName } from '../shared/canvasName'
 import { ArrangeMenu } from './layout/ArrangeMenu'
 import { LayoutDoctor } from './layout/LayoutDoctor'
 import { useLayoutUi } from './layout/layoutStore'
@@ -24,6 +26,14 @@ const PHASE_TITLE: Record<PersistPhase, string | undefined> = {
   error: undefined,
 }
 
+/** The dialog showing over the toolbar, if any. */
+type DialogState =
+  | null
+  | { kind: 'name'; initial: string; error?: string }
+  | { kind: 'replace'; name: string }
+  | { kind: 'discard-new' }
+  | { kind: 'discard-open'; name: string }
+
 /** Save, Save as, Open, the canvas name, the save status, and the layout Doctor and Arrange buttons. Mounted in a React Flow panel. */
 export function CanvasToolbar() {
   const canvasName = useCanvasStore((s) => s.canvasName)
@@ -32,43 +42,61 @@ export function CanvasToolbar() {
   const phase = usePersistStore((s) => s.phase)
   const message = usePersistStore((s) => s.message)
   const messageIsError = usePersistStore((s) => s.messageIsError)
-  const canvases = useCanvases()
+  const canvases = useCanvases(true)
   const persistence = useCanvasPersistence()
   const [pick, setPick] = useState('')
+  const [dialog, setDialog] = useState<DialogState>(null)
   const doctorOpen = useLayoutUi((s) => s.panelOpen)
   const setDoctorOpen = useLayoutUi((s) => s.setPanelOpen)
   const layoutNote = useLayoutUi((s) => s.note)
 
-  async function onSaveAs() {
-    const entered = window.prompt('Canvas name (letters, digits, _ . -)', canvasName ?? '')?.trim()
-    if (!entered) return
-    if (entered !== canvasName && canvases.data?.includes(entered)) {
-      if (!window.confirm(`Replace the saved canvas "${entered}"?`)) return
+  const hasUnnamedWork = canvasName === null && windowCount + sketchCount > 0
+
+  /** Writes under `name`. Returns the reason it failed, or null after closing the dialog. */
+  async function saveUnder(name: string): Promise<string | null> {
+    const reason = await persistence.saveAs(name)
+    if (reason === null) setDialog(null)
+    return reason
+  }
+
+  /** Name dialog: asks before replacing another saved canvas, using a list fetched just now (an agent may have added some). */
+  async function onNameChosen(name: string): Promise<string | null> {
+    if (name !== canvasName) {
+      const list = (await canvases.refetch()).data ?? canvases.data
+      if (list?.includes(name)) {
+        setDialog({ kind: 'replace', name })
+        return null
+      }
     }
-    await persistence.saveAs(entered)
+    return saveUnder(name)
+  }
+
+  async function onReplaceConfirmed(name: string) {
+    const reason = await saveUnder(name)
+    if (reason !== null) setDialog({ kind: 'name', initial: name, error: reason })
+  }
+
+  function onSaveAs() {
+    setDialog({ kind: 'name', initial: canvasName ?? '' })
   }
 
   function onSave() {
     if (canvasName === null) {
-      void onSaveAs()
+      onSaveAs()
       return
     }
     void persistence.saveCurrent()
   }
 
-  async function onNew() {
-    if (canvasName === null && windowCount + sketchCount > 0) {
-      if (!window.confirm('Discard the unnamed canvas and start a new diagram?')) return
-    }
-    await persistence.newDiagram()
+  function onNew() {
+    if (hasUnnamedWork) setDialog({ kind: 'discard-new' })
+    else void persistence.newDiagram()
   }
 
-  async function onOpen() {
+  function onOpen() {
     if (!pick) return
-    if (canvasName === null && windowCount + sketchCount > 0) {
-      if (!window.confirm(`Discard the unnamed canvas and open "${pick}"?`)) return
-    }
-    await persistence.open(pick)
+    if (hasUnnamedWork) setDialog({ kind: 'discard-open', name: pick })
+    else void persistence.open(pick)
   }
 
   return (
@@ -77,6 +105,9 @@ export function CanvasToolbar() {
         <select
           value={pick}
           onChange={(e) => setPick(e.target.value)}
+          // An agent can add canvases at any time, so opening the list asks the server again.
+          onMouseDown={() => void canvases.refetch()}
+          onFocus={() => void canvases.refetch()}
           aria-label="Saved canvases"
           disabled={!canvases.data}
         >
@@ -87,14 +118,14 @@ export function CanvasToolbar() {
             </option>
           ))}
         </select>
-        <button onClick={() => void onOpen()} disabled={!pick}>
+        <button onClick={onOpen} disabled={!pick}>
           Open
         </button>
-        <button onClick={() => void onNew()} title="Start a blank sketch. No profile or warehouse needed.">
+        <button onClick={onNew} title="Start a blank sketch. No profile or warehouse needed.">
           New diagram
         </button>
         <button onClick={onSave}>Save</button>
-        <button onClick={() => void onSaveAs()}>Save as</button>
+        <button onClick={onSaveAs}>Save as</button>
         <button
           onClick={() => setDoctorOpen(!doctorOpen)}
           aria-pressed={doctorOpen}
@@ -122,6 +153,55 @@ export function CanvasToolbar() {
         )}
       </div>
       {doctorOpen && <LayoutDoctor />}
+      {dialog?.kind === 'name' && (
+        <NameDialog
+          title={canvasName === null ? 'Save canvas' : 'Save canvas as'}
+          label="Canvas name"
+          placeholder="Returns tour"
+          initial={dialog.initial}
+          initialError={dialog.error}
+          convert={toCanvasName}
+          previewText={(name) => `Saved as ${name}`}
+          onSubmit={onNameChosen}
+          onCancel={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === 'replace' && (
+        <ConfirmDialog
+          title="Replace canvas"
+          message={`Replace the saved canvas "${dialog.name}"? Its current contents are overwritten.`}
+          confirmLabel="Replace"
+          destructive
+          onConfirm={() => void onReplaceConfirmed(dialog.name)}
+          onCancel={() => setDialog({ kind: 'name', initial: dialog.name })}
+        />
+      )}
+      {dialog?.kind === 'discard-new' && (
+        <ConfirmDialog
+          title="Discard unnamed canvas"
+          message="Discard the unnamed canvas and start a new diagram?"
+          confirmLabel="Discard"
+          destructive
+          onConfirm={() => {
+            setDialog(null)
+            void persistence.newDiagram()
+          }}
+          onCancel={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === 'discard-open' && (
+        <ConfirmDialog
+          title="Discard unnamed canvas"
+          message={`Discard the unnamed canvas and open "${dialog.name}"?`}
+          confirmLabel="Discard"
+          destructive
+          onConfirm={() => {
+            setDialog(null)
+            void persistence.open(dialog.name)
+          }}
+          onCancel={() => setDialog(null)}
+        />
+      )}
     </div>
   )
 }
