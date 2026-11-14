@@ -5,6 +5,7 @@ const VIEWS: { id: MainView; label: string }[] = [
   { id: 'graph', label: 'Graph' },
   { id: 'canvas', label: 'Canvas' },
   { id: 'concepts', label: 'Concepts' },
+  { id: 'ask', label: 'Ask' },
 ]
 
 export function TopBar() {
