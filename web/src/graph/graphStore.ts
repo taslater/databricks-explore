@@ -33,6 +33,8 @@ interface GraphState {
   /** Column-to-column edges from `level=column` responses. Drawn when both nodes show their columns. */
   columnEdges: FlowEdge[]
   drawer: Drawer
+  /** Show columns is on for the whole graph: new nodes show their columns as they arrive. Not part of a saved diagram. */
+  columnsOn: boolean
   /** The confirm dialog for a mining run is open. */
   mineDialog: boolean
   /** Draw the concepts linked to the tables on the graph (the Concepts toggle). Not part of a saved diagram. */
@@ -59,6 +61,7 @@ interface GraphState {
   updateEdgeInfo: (id: string, patch: Partial<GraphEdge>) => void
   setFocusSchema: (schema: string | null) => void
   setDrawer: (drawer: Drawer) => void
+  setColumnsOn: (on: boolean) => void
   setMineDialog: (open: boolean) => void
   setShowConcepts: (show: boolean) => void
   /** Stores a node's columns and shows them. */
@@ -81,6 +84,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   edges: [],
   columnEdges: [],
   drawer: null,
+  columnsOn: false,
   mineDialog: false,
   showConcepts: false,
   focusSchema: null,
@@ -105,6 +109,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
     set((s) => ({ edges: apply(s.edges), columnEdges: apply(s.columnEdges) }))
   },
   setDrawer: (drawer) => set({ drawer }),
+  setColumnsOn: (columnsOn) => set({ columnsOn }),
   setMineDialog: (mineDialog) => set({ mineDialog }),
   setShowConcepts: (showConcepts) => set({ showConcepts }),
   setColumns: (id, columns) =>
