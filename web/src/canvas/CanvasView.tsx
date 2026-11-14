@@ -26,6 +26,8 @@ import { EditBar } from '../sketch/panels/EditBar'
 import { Palette } from '../sketch/panels/Palette'
 import { isPlacingTool, type SketchHost, type Tool } from '../sketch/types'
 import { deriveLinks } from './persistence/canvasFile'
+import { usePersistStore } from './persistence/persistStore'
+import { contentBounds, FIT_MIN_ZOOM, fitViewport, insetsFor, type ScreenRect, type Side } from './fitView'
 import { QueryWindow, type QueryFlowNode } from './nodes/QueryWindow'
 import { NoteWindow, type NoteFlowNode } from './nodes/NoteWindow'
 import { TableCard, type TableFlowNode } from './nodes/TableCard'
@@ -100,6 +102,21 @@ function writeFlag(key: string, on: boolean) {
   }
 }
 
+/** The floating panels that can cover content, by the side of the canvas they hang from. */
+const FLOATING_PANELS: readonly { selector: string; side: Side }[] = [
+  { selector: '.react-flow__panel.top-left', side: 'top' },
+  { selector: '.canvas-toolbar', side: 'top' },
+  { selector: '.sk-palette', side: 'left' },
+  { selector: '.react-flow__panel.bottom-center', side: 'bottom' },
+  { selector: '.canvas-controls', side: 'bottom' },
+  { selector: '.react-flow__minimap', side: 'bottom' },
+]
+
+function screenRect(el: Element): ScreenRect {
+  const r = el.getBoundingClientRect()
+  return { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
+}
+
 /** Canvas: React Flow with query windows, notes, table cards, sketch shapes and connectors. */
 export function CanvasView() {
   return (
@@ -164,6 +181,31 @@ function CanvasInner() {
       return !on
     })
   }
+
+  // Opening a canvas fits the view to its content, clear of the toolbars floating over the canvas. Waits a frame
+  // so the toolbars have laid out. The ref records the last open that was fitted, so StrictMode's second run still fits.
+  const openSeq = usePersistStore((s) => s.openSeq)
+  const fittedSeq = useRef(openSeq)
+  useEffect(() => {
+    if (openSeq === fittedSeq.current) return
+    const frame = requestAnimationFrame(() => {
+      fittedSeq.current = openSeq
+      const root = wrapRef.current
+      if (!root) return
+      const items = [...useCanvasStore.getState().windows, ...useSketchStore.getState().nodes]
+      const bounds = contentBounds(items.map((n) => ({ x: n.position.x, y: n.position.y, w: n.size.w, h: n.size.h })))
+      if (bounds === null) return
+      const wrap = screenRect(root)
+      const panels = FLOATING_PANELS.flatMap(({ selector, side }) =>
+        [...root.querySelectorAll(selector)].map((el) => ({ side, rect: screenRect(el) })),
+      )
+      const viewport = fitViewport(bounds, { width: wrap.right - wrap.left, height: wrap.bottom - wrap.top }, insetsFor(wrap, panels), {
+        minZoom: FIT_MIN_ZOOM,
+      })
+      setViewport(viewport)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [openSeq, setViewport])
 
   const maximized = maximizedId !== null && windows.some((w) => w.id === maximizedId)
   const frame = useMemo(() => (maximized ? maximizedFrame(viewport, box) : null), [maximized, viewport, box])
@@ -303,6 +345,7 @@ function CanvasInner() {
         onEdgeDoubleClick={interactions.onEdgeDoubleClick}
         connectionMode={flow.connectionMode}
         viewport={viewport}
+        minZoom={FIT_MIN_ZOOM}
         onMove={(_, vp) => setViewport(vp)}
         // Backspace would delete a window and its SQL. The Delete key is handled in useSketchKeys instead,
         // and removes only sketch nodes, connectors and table cards.

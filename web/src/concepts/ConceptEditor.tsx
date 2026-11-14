@@ -12,6 +12,7 @@ import { fmtTime } from '../graph/format'
 import { Candidates } from './Candidates'
 import { useConceptsStore } from './conceptsStore'
 import { LinksSection } from './LinksSection'
+import { ConfirmDialog } from '../shared/Dialog'
 import { bodyOf, draftOf, EMPTY_DRAFT, isDirty, type Draft } from './model'
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -47,6 +48,7 @@ export function ConceptEditor({ id, names, domains }: EditorProps) {
 function Form({ concept, names, domains }: { concept: ConceptDetail | null; names: ReadonlyMap<string, string>; domains: string[] }) {
   const [draft, setDraft] = useState<Draft>(concept ? draftOf(concept) : EMPTY_DRAFT)
   const [error, setError] = useState<string | null>(null)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const create = useCreateConcept()
   const patch = usePatchConcept()
   const del = useDeleteConcept()
@@ -69,11 +71,11 @@ function Form({ concept, names, domains }: { concept: ConceptDetail | null; name
     }
   }
 
+  const linkCount = concept ? concept.links.length + concept.incoming.length : 0
+
   async function remove() {
     if (!concept) return
-    const n = concept.links.length + concept.incoming.length
-    const ok = window.confirm(`Delete "${concept.name}"${n ? ` and its ${n} link${n === 1 ? '' : 's'}` : ''}?`)
-    if (!ok) return
+    setConfirmingDelete(false)
     setError(null)
     try {
       await del.mutateAsync(concept.id)
@@ -158,12 +160,22 @@ function Form({ concept, names, domains }: { concept: ConceptDetail | null; name
           {concept && dirty && <button type="button" onClick={() => setDraft(draftOf(concept))}>Revert</button>}
           {!concept && <button type="button" onClick={() => select(null)}>Cancel</button>}
           {concept && (
-            <button type="button" className="danger" onClick={() => void remove()} disabled={del.isPending}>
+            <button type="button" className="danger" onClick={() => setConfirmingDelete(true)} disabled={del.isPending}>
               Delete
             </button>
           )}
         </div>
       </form>
+      {concept && confirmingDelete && (
+        <ConfirmDialog
+          title="Delete concept"
+          message={`Delete "${concept.name}"${linkCount ? ` and its ${linkCount} link${linkCount === 1 ? '' : 's'}` : ''}?`}
+          confirmLabel="Delete"
+          destructive
+          onConfirm={() => void remove()}
+          onCancel={() => setConfirmingDelete(false)}
+        />
+      )}
       {concept ? (
         <>
           <LinksSection concept={concept} names={names} />

@@ -10,6 +10,7 @@ import { useMiningWatcher } from './MiningPanel'
 import { useSuggestions } from '../api/hooks'
 import { useGraphActions } from './actions'
 import { useGraphStore } from './graphStore'
+import { NameDialog } from '../shared/Dialog'
 
 interface GraphToolbarProps {
   /** The picker is collapsed, so the show-picker button sits in the top-left corner. Leave room for it. */
@@ -27,6 +28,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
   const status = useGraphStore((s) => s.status)
   const connected = useUiStore((s) => s.connectedProfile)
   const [selected, setSelected] = useState('')
+  const [naming, setNaming] = useState(false)
   const actions = useGraphActions()
   const drawer = useGraphStore((s) => s.drawer)
   const showConcepts = useGraphStore((s) => s.showConcepts)
@@ -53,17 +55,18 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
     }
   }
 
-  async function saveAs() {
-    const name = window.prompt('Diagram name?')?.trim()
-    if (!name) return
+  /** Saves under `name`. Returns an error message for the dialog to show, or null when it saved. */
+  async function saveAs(name: string): Promise<string | null> {
     const g = useGraphStore.getState()
     try {
       await save.mutateAsync(
         toDiagramBody(name, { nodes: g.nodes, edges: g.edges, focusSchema: g.focusSchema }),
       )
       useGraphStore.getState().setStatus(`saved ${name}`)
+      setNaming(false)
+      return null
     } catch (e) {
-      useGraphStore.getState().setStatus(messageOf(e), true)
+      return messageOf(e)
     }
   }
 
@@ -85,7 +88,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
       <button onClick={load} disabled={!selected} style={NOWRAP}>
         Load
       </button>
-      <button onClick={saveAs} disabled={save.isPending} style={NOWRAP}>
+      <button onClick={() => setNaming(true)} disabled={save.isPending} style={NOWRAP}>
         Save diagram
       </button>
       {diagrams.isError && <span className="error">{diagrams.error.message}</span>}
@@ -131,6 +134,14 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
       >
         {status.text || (connected ? '' : 'not connected')}
       </span>
+      {naming && (
+        <NameDialog
+          title="Save diagram"
+          label="Diagram name"
+          onSubmit={saveAs}
+          onCancel={() => setNaming(false)}
+        />
+      )}
     </div>
   )
 }

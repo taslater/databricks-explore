@@ -3,6 +3,7 @@ import { undoAgentChange } from '../../api/agent'
 import { useCanvasStore } from '../../store/canvasStore'
 import { useUiStore } from '../../store/uiStore'
 import { POLL_MS, pollNow, reloadInPlace } from './canvasSync'
+import { useCanvasDraft } from './draft'
 import { useSyncStore } from './syncStore'
 
 /**
@@ -17,6 +18,7 @@ export function AgentCanvasSync() {
   const conflict = useSyncStore((s) => s.conflict)
   const [problem, setProblem] = useState<string | null>(null)
   const watching = view === 'canvas' && name !== null
+  useCanvasDraft() // the unnamed canvas's draft and the unsaved-work warning, in every view
 
   useEffect(() => {
     if (!watching) return

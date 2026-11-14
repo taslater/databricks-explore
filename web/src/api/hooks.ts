@@ -165,8 +165,19 @@ export function useCancelQuery() {
 
 // ---- Canvases (A2) --------------------------------------------------------
 
-export function useCanvases() {
-  return useQuery({ queryKey: ['canvases'], queryFn: api.listCanvases })
+/** How often the saved-canvases list asks the server again while the page is showing, so a canvas an agent made appears. */
+export const CANVAS_LIST_POLL_MS = 5000
+
+/**
+ * The saved canvases. With `live`, the list also refetches on window focus and every few seconds while the page is
+ * visible, because an agent can create canvases through the MCP server without this page doing anything.
+ */
+export function useCanvases(live = false) {
+  return useQuery({
+    queryKey: ['canvases'],
+    queryFn: api.listCanvases,
+    ...(live ? { refetchOnWindowFocus: 'always' as const, refetchInterval: CANVAS_LIST_POLL_MS } : {}),
+  })
 }
 
 export function useCanvas(name: string | null) {

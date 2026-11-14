@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getAgentAccess, newAgentToken } from '../api/agent'
+import { ConfirmDialog } from './Dialog'
 
 /** The command with the token hidden, for showing on screen. */
 export function maskToken(command: string, token: string): string {
@@ -16,6 +17,7 @@ export function AgentAccessPanel({ onClose }: { onClose: () => void }) {
     onSuccess: (data) => qc.setQueryData(['agent-access'], data),
   })
   const [revealed, setRevealed] = useState(false)
+  const [confirmingToken, setConfirmingToken] = useState(false)
   const [copied, setCopied] = useState<'done' | 'failed' | null>(null)
   const data = access.data
 
@@ -30,7 +32,7 @@ export function AgentAccessPanel({ onClose }: { onClose: () => void }) {
   }
 
   function onNewToken() {
-    if (!window.confirm('Make a new token? Agents that use the current one are refused until you give them the new command.')) return
+    setConfirmingToken(false)
     setCopied(null)
     rotate.mutate()
   }
@@ -56,7 +58,7 @@ export function AgentAccessPanel({ onClose }: { onClose: () => void }) {
               <label>
                 <input type="checkbox" checked={revealed} onChange={(e) => setRevealed(e.target.checked)} /> Show token
               </label>
-              <button onClick={onNewToken} disabled={rotate.isPending}>
+              <button onClick={() => setConfirmingToken(true)} disabled={rotate.isPending}>
                 New token
               </button>
               <span className="spacer" />
@@ -74,6 +76,16 @@ export function AgentAccessPanel({ onClose }: { onClose: () => void }) {
           <span className="spacer" />
           <button onClick={onClose}>Close</button>
         </div>
+        {confirmingToken && (
+          <ConfirmDialog
+            title="New token"
+            message="Make a new token? Agents that use the current one are refused until you give them the new command."
+            confirmLabel="Make new token"
+            destructive
+            onConfirm={onNewToken}
+            onCancel={() => setConfirmingToken(false)}
+          />
+        )}
       </div>
     </div>
   )

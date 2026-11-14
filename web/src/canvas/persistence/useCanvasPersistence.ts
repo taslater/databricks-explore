@@ -61,8 +61,11 @@ export function nextDiagramName(existing: readonly string[]): string {
 export interface CanvasPersistence {
   /** Writes the current canvas under its own name. Caller handles unnamed canvases. */
   saveCurrent: () => Promise<void>
-  /** Writes the current canvas under a new name and makes that the canvas name. Resolves true on success. */
-  saveAs: (name: string) => Promise<boolean>
+  /**
+   * Writes the current canvas under a new name and makes that the canvas name. Resolves null on success, or the reason
+   * the save failed (the server's refusal, for example). A failure leaves the status line as it was.
+   */
+  saveAs: (name: string) => Promise<string | null>
   /** Loads a saved canvas into the store. Pending edits to the current canvas are saved first. */
   open: (name: string) => Promise<void>
   /** Starts a blank canvas under a new `diagram-N` name. Needs no profile or warehouse. Saves pending edits first. */
@@ -224,10 +227,16 @@ export function useCanvasPersistence(): CanvasPersistence {
     })
   }
 
-  function saveAs(name: string): Promise<boolean> {
+  function saveAs(name: string): Promise<string | null> {
     return enqueue(async () => {
       await flushPending()
-      return writeCanvas(name, true)
+      const { phase, message, messageIsError } = usePersistStore.getState()
+      if (await writeCanvas(name, true)) return null
+      // The reason goes to the caller's dialog. Put the status line back, so the toolbar does not repeat it.
+      const failed = usePersistStore.getState()
+      const reason = failed.messageIsError && failed.message ? failed.message : 'The canvas was not saved.'
+      usePersistStore.getState().setStatus(phase, message, messageIsError)
+      return reason
     })
   }
 
@@ -281,6 +290,7 @@ export function useCanvasPersistence(): CanvasPersistence {
         return
       }
       usePersistStore.getState().markSaved(baseline)
+      usePersistStore.setState((s) => ({ openSeq: s.openSeq + 1 }))
       useSyncStore.getState().setConflict(null)
       if (revision !== null) useSyncStore.getState().setKnown(name, revision)
 
