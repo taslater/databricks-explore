@@ -583,6 +583,20 @@ Stored `join_mined` edges at column level, most evidence first (runs, then users
 
 Errors: 400 for an unknown status.
 
+### `GET /api/relationships/joins?table=<name>`
+
+How one table is known to join to others, for completion and for listing a pair's key sets. Local only: the table's cached Unity Catalog metadata (no warehouse) plus the stored edges, and no SQL text. Columns are read from the asked table's side.
+
+```json
+{"table": "demo.sales.order_items",
+ "joins": [{"table": "demo.sales.returns",
+            "keys": [{"pairs": [{"here": "order_id", "there": "order_id"}], "source": "mined", "status": "proposed", "runs": 37, "name": null},
+                     {"pairs": [{"here": "order_id", "there": "order_id"}, {"here": "line_no", "there": "line_no"}], "source": "mined", "status": "proposed", "runs": 20, "name": null}]}],
+ "errors": []}
+```
+
+`source` is `fk` (a foreign key this table declares, one key per constraint, `status` `derived`, `name` the constraint), `mined` or `manual`. A key lists every column pair of one join condition, so a composite key is one key. A mined single-pair key's `runs` counts every statement that used the pair, composite ones included, as the suggestions list does; a composite key's `runs` counts the statements that used exactly that set. A composite key's `status` is `rejected` if any member edge is, `accepted` if all are, else `proposed`. Rejected keys are returned and marked. A `manual` table-level edge has no pairs. Foreign keys that other tables declare against this one are found from those tables. When the table cannot be read, the stored keys still come back and `errors` says why. Errors: 400 for a missing or malformed table.
+
 ### `POST /api/relationships/bulk`
 
 Sets one status on several stored edges, all or none. Body `{"ids": ["e_..."], "status": "accepted"}` with 1 to 1000 ids and a `status` of `proposed`, `accepted` or `rejected`. Response `{"updated": 2}`. Errors: 400 (empty, a derived id, an unknown key), 404 (an id that does not exist; nothing is changed).

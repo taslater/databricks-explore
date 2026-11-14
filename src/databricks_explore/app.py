@@ -218,6 +218,21 @@ def relationships_for_table():
     return jsonify({**out, "errors": [*out["errors"], *notes]})
 
 
+@app.get("/api/relationships/joins")
+def relationship_joins():
+    """How one table is known to join to others: declared foreign keys, mined joins and manual edges, with columns."""
+    table = relationships.check_table(request.args.get("table", ""))
+    info, errors = None, []
+    if not table.startswith("ph:"):  # a placeholder has no catalog metadata
+        try:
+            info = ex().object(table, refresh())["data"]
+        except Exception as err:  # stored edges still answer
+            errors.append(f"tables.get: {dbx.clean_error(err)}")
+    with rel_store() as store:
+        out = relationships.join_keys(store, table, info)
+    return jsonify({**out, "errors": errors})
+
+
 @app.get("/api/relationships/suggestions")
 def relationship_suggestions():
     statuses = request.args.get("status", "proposed").split(",")
