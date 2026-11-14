@@ -36,13 +36,17 @@ export function exportFrame(bounds: { x: number; y: number; width: number; heigh
   return { width, height, tx: PADDING - bounds.x, ty: PADDING - bounds.y, scale }
 }
 
-function download(href: string, filename: string) {
+/** Saves a data URL as a file. Goes through a Blob, which browsers handle better than a long data URL. */
+async function download(dataUrl: string, filename: string) {
+  const blob = await (await fetch(dataUrl)).blob()
+  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = href
+  a.href = url
   a.download = filename
   document.body.appendChild(a)
   a.click()
   a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 /** Renders and downloads the picture. Throws an Error with a message for the user when there is nothing to draw. */
@@ -59,7 +63,7 @@ export async function exportDiagram(req: ExportRequest, filename: string): Promi
     if (!(e instanceof Element)) return true
     if (e.classList.contains('sketch-export-hide')) return false
     if (e.classList.contains('react-flow__node')) return keepNodes.has(e.getAttribute('data-id') ?? '')
-    if (e.classList.contains('react-flow__edge')) return edgeIds.has(e.getAttribute('data-id') ?? '')
+    if (e.classList.contains('react-flow__edge')) return edgeIds.has((e.getAttribute('data-testid') ?? '').replace(/^rf__edge-/, ''))
     const label = e.getAttribute('data-edge-id')
     if (label !== null) return edgeIds.has(label)
     return true
@@ -81,7 +85,7 @@ export async function exportDiagram(req: ExportRequest, filename: string): Promi
       },
     }
     const href = req.format === 'png' ? await toPng(viewport, options) : await toSvg(viewport, options)
-    download(href, filename)
+    await download(href, filename)
   } finally {
     req.root.removeAttribute('data-exporting')
   }

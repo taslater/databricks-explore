@@ -333,7 +333,10 @@ function CanvasInner() {
               </button>
               {maximized && <button onClick={() => setMaximized(null)}>Restore window</button>}
             </div>
-            <EditBar fileStem={canvasName ?? 'diagram'}>
+          </div>
+        </Panel>
+        <Panel position="bottom-center">
+          <EditBar fileStem={canvasName ?? 'diagram'}>
               <button
                 onClick={() => setCanvasDetailsOpen(!canvasDetailsOpen)}
                 aria-pressed={canvasDetailsOpen}
@@ -341,8 +344,7 @@ function CanvasInner() {
               >
                 Properties
               </button>
-            </EditBar>
-          </div>
+          </EditBar>
         </Panel>
         <Panel position="center-left">
           <Palette />

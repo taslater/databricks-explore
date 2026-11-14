@@ -18,7 +18,8 @@ const LINES: { kind: LineKind; label: string }[] = [
 /** What an end of a connector is: its table name in the relationship store (or null), and its columns. */
 function useEnd(id: string): { like: TableLike | null; table: string | null; label: string; columns: string[] } {
   const node: SketchNode | undefined = useSketchStore((s) => s.nodes.find((n) => n.id === id))
-  const hostNode = useSketchStore((s) => s.host.nodes().find((h) => h.id === id))
+  const host = useSketchStore((s) => s.host)
+  const hostNode = node ? undefined : host.nodes().find((h) => h.id === id)
   const like: TableLike | null = node
     ? { type: node.type, placeholder: node.placeholder }
     : hostNode

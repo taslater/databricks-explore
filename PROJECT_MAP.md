@@ -99,7 +99,7 @@ Root: `agent-a540397cae09db224` | files: 126
   - `def render() -> str`
   - `def main() -> int`
 - `pytest.ini` (42 B)
-- `README.md` (6,173 B)
+- `README.md` (8,303 B)
   - Databricks Explorer (v0.4)
 - `relationships.py` (25,748 B)
   - Relationship store: one model for every edge between tables or columns, with provenance, in SQLite.
@@ -338,7 +338,7 @@ Root: `agent-a540397cae09db224` | files: 126
 ## web/src/
 
 - `web/src/App.tsx` (298 B)
-- `web/src/index.css` (27,531 B)
+- `web/src/index.css` (27,812 B)
 - `web/src/main.tsx` (686 B)
 
 ## web/src/api/
@@ -352,7 +352,7 @@ Root: `agent-a540397cae09db224` | files: 126
 ## web/src/canvas/
 
 - `web/src/canvas/CanvasToolbar.tsx` (3,640 B)
-- `web/src/canvas/CanvasView.tsx` (14,713 B)
+- `web/src/canvas/CanvasView.tsx` (14,767 B)
 - `web/src/canvas/maximize.test.ts` (1,420 B)
 - `web/src/canvas/maximize.ts` (1,063 B)
 - `web/src/canvas/ResultsGrid.tsx` (10,716 B)
@@ -440,7 +440,7 @@ Root: `agent-a540397cae09db224` | files: 126
 
 ## web/src/sketch/
 
-- `web/src/sketch/export.ts` (3,891 B)
+- `web/src/sketch/export.ts` (4,188 B)
 - `web/src/sketch/flow.tsx` (3,684 B)
 - `web/src/sketch/history.ts` (2,579 B)
 - `web/src/sketch/model.ts` (14,680 B)
@@ -467,7 +467,7 @@ Root: `agent-a540397cae09db224` | files: 126
 ## web/src/sketch/panels/
 
 - `web/src/sketch/panels/ArrangeControls.tsx` (2,676 B)
-- `web/src/sketch/panels/EdgeProperties.tsx` (9,394 B)
+- `web/src/sketch/panels/EdgeProperties.tsx` (9,433 B)
 - `web/src/sketch/panels/EditBar.tsx` (4,857 B)
 - `web/src/sketch/panels/icons.tsx` (3,350 B)
 - `web/src/sketch/panels/Palette.tsx` (1,914 B)
