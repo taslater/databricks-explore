@@ -271,16 +271,16 @@ def test_the_bearer_token_never_reaches_an_error_message():
 
 # ---------------------------------------------------------------- shaping and validation
 
-ANSWER = ("The **orders** table has 0 rows. [ucstate_prod.shop.orders](https://h.example/explore/data/ucstate_prod/shop/orders?isDbOne=true&o=1) "
+ANSWER = ("The **orders** table has 0 rows. [main.shop.orders](https://h.example/explore/data/main/shop/orders?isDbOne=true&o=1) "
           "[Query Result](https://h.example/one/chat/threads/c#embed-query_1)\n"
           "Also https://h.example/explore/data/main/sales/items and again "
-          "[x](https://h.example/explore/data/UCSTATE_PROD/shop/Orders) and [bad](https://h.example/explore/data/main/sales).")
+          "[x](https://h.example/explore/data/MAIN/shop/Orders) and [bad](https://h.example/explore/data/main/sales).")
 
 
 def test_tables_are_parsed_in_order_without_repeats():
     got = genie.tables_from_markdown(ANSWER)
-    assert [t["name"] for t in got] == ["ucstate_prod.shop.orders", "main.sales.items"]
-    assert got[0]["url"].startswith("https://h.example/explore/data/ucstate_prod/shop/orders?isDbOne=true")
+    assert [t["name"] for t in got] == ["main.shop.orders", "main.sales.items"]
+    assert got[0]["url"].startswith("https://h.example/explore/data/main/shop/orders?isDbOne=true")
     assert genie.tables_from_markdown(None) == [] and genie.tables_from_markdown("no links") == []
 
 
@@ -295,7 +295,7 @@ def test_shape_poll_for_a_completed_turn():
     out = genie.shape_poll(sc)
     assert out["status"] == "completed" and out["progress_steps"] == [] and out["error"] is None
     assert out["query_items"] == [{"item_id": "i1", "sql": "SELECT 1"}]
-    assert [t["name"] for t in out["tables"]][0] == "ucstate_prod.shop.orders"
+    assert [t["name"] for t in out["tables"]][0] == "main.shop.orders"
     assert out["deep_link"].endswith("/c")
 
 

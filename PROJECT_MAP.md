@@ -9,7 +9,7 @@ Root: `databricks-explore` | files: 218
 - `.gitignore` (345 B)
 - `AGENTS.md` (711 B)
   - AGENTS.md
-- `app.py` (23,297 B)
+- `app.py` (23,479 B)
   - Local Databricks relationship explorer.  Run:  uv run --with-requirements requirements.txt app.py
   - `def local_only()`: Every route, not only /mcp: refuse a Host or Origin that is not this machine. A DNS-rebinding page reaches
   - `def ex()`
@@ -224,7 +224,7 @@ Root: `databricks-explore` | files: 218
   - `def cached_certification(ex)`: The certification cache as the API returns it. Never queries; empty maps and a null `fetched_at` when nothing is cached.
   - `def refresh_certification(ex)`: Runs the one tag query, writes the cache (the {"fetched_at", "data"} file shape of the other cached metadata) and
 - `pytest.ini` (42 B)
-- `README.md` (19,411 B)
+- `README.md` (19,479 B)
   - Databricks Explorer (v0.4)
 - `relationships.py` (44,334 B)
   - Relationship store: one model for every edge between tables or columns, with provenance, in SQLite.
@@ -561,7 +561,7 @@ Root: `databricks-explore` | files: 218
   - `def test_wrong_method_on_a_real_route_is_405_with_allow(client)`
   - `def test_other_exceptions_are_still_500(client)`
   - `def test_a_body_that_is_not_json_is_a_client_error(client)`
-- `tests/test_genie.py` (18,273 B)
+- `tests/test_genie.py` (18,225 B)
   - genie.py: the MCP client against a fake HTTP layer, and the response shaping. No network.
   - `def rpc(result=None, error=None, rid=1)`
   - `def tool_result(sc, is_error=False)`

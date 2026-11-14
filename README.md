@@ -10,7 +10,7 @@ uv run --with-requirements requirements.txt app.py
 # open http://127.0.0.1:8765
 ```
 
-Dev mode with hot reload: run the server as above, then in a second terminal `cd web && npm run dev` and open http://127.0.0.1:5173 (Vite proxies `/api` to the Flask server).
+Dev mode with hot reload: run the server as above with `--debug` (the Werkzeug reloader and debugger, off by default), then in a second terminal `cd web && npm run dev` and open http://127.0.0.1:5173 (Vite proxies `/api` to the Flask server).
 
 ## Run without Databricks
 Demo mode serves invented catalogs, tables, views, foreign keys, lineage and query results from a fake workspace. It never contacts Databricks, so it is safe for trying the UI, screenshots and tests.
