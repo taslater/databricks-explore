@@ -53,9 +53,15 @@ export function ageDays(s: string | null | undefined, now: number = Date.now()):
   return Number.isNaN(t) ? null : Math.floor((now - t) / 86400000)
 }
 
+/** A lineage or provenance time for display: `2026-10-26 14:02`. No `T`, no seconds or fraction, no zone. Unparseable text passes through. */
+export function fmtTime(s: string | null | undefined): string {
+  if (!s) return 'unknown'
+  return /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s) ? s.slice(0, 16).replace('T', ' ') : s
+}
+
 export function fmtAge(s: string | null | undefined, now: number = Date.now()): string {
   const d = ageDays(s, now)
-  return d === null || !s ? 'unknown' : `${s.slice(0, 16)} (${d}d ago)`
+  return d === null || !s ? 'unknown' : `${fmtTime(s)} (${d}d ago)`
 }
 
 const SHORT_TYPE_REPLACEMENTS: Array<[string, string]> = [

@@ -15,6 +15,9 @@ interface GraphToolbarProps {
   showPickerToggle: boolean
 }
 
+/** Buttons keep their label on one line; only the status text gives way when the bar is full. */
+const NOWRAP = { whiteSpace: 'nowrap', flexShrink: 0 } as const
+
 /** Saved diagrams, load, save, and a status line. Same controls as the legacy header. */
 export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
   const qc = useQueryClient()
@@ -77,28 +80,30 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
           </option>
         ))}
       </select>
-      <button onClick={load} disabled={!selected}>
+      <button onClick={load} disabled={!selected} style={NOWRAP}>
         Load
       </button>
-      <button onClick={saveAs} disabled={save.isPending}>
+      <button onClick={saveAs} disabled={save.isPending} style={NOWRAP}>
         Save diagram
       </button>
       {diagrams.isError && <span className="error">{diagrams.error.message}</span>}
       <span className="toolbar-sep" />
       <button
+        style={NOWRAP}
         onClick={() => useGraphStore.getState().setMineDialog(true)}
         disabled={!connected}
         title="Read query history for joins between tables. Shows the SQL first."
       >
         Mine joins…
       </button>
-      <button onClick={() => toggleDrawer('suggestions')} aria-pressed={drawer === 'suggestions'} disabled={!connected}>
+      <button style={NOWRAP} onClick={() => toggleDrawer('suggestions')} aria-pressed={drawer === 'suggestions'} disabled={!connected}>
         Suggestions{proposed ? ` (${proposed})` : ''}
       </button>
-      <button onClick={() => toggleDrawer('usage')} aria-pressed={drawer === 'usage'} disabled={!connected}>
+      <button style={NOWRAP} onClick={() => toggleDrawer('usage')} aria-pressed={drawer === 'usage'} disabled={!connected}>
         Usage
       </button>
       <button
+        style={NOWRAP}
         onClick={() => void actions.setAllColumns(!allColumns)}
         disabled={!hasNodes}
         title="Show or hide the columns of every table on the graph"
@@ -107,6 +112,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
       </button>
       <span className="spacer" />
       <span
+        style={{ flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
         className={`graph-status${status.error ? ' error' : ''}`}
         title={status.text}
         role="status"

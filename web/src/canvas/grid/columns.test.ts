@@ -11,6 +11,7 @@ import {
   formatTimestamp,
   headerMinWidth,
   MAX_AUTO_WIDTH,
+  typeLabel,
 } from './columns'
 
 describe('columnKind', () => {
@@ -151,5 +152,39 @@ describe('buildColumnDefs', () => {
     expect(defs[0].comparator).toBe(compareNumeric)
     const getter = defs[0].filterValueGetter as (p: { data: Record<string, string | null> }) => number | null
     expect(getter({ data: { c0: '42' } })).toBe(42)
+  })
+})
+
+describe('typeLabel', () => {
+  it('uses SQL names for manifest names', () => {
+    const names = ['BYTE', 'SHORT', 'INT', 'LONG', 'FLOAT', 'DOUBLE', 'STRING', 'BOOLEAN', 'DATE', 'TIMESTAMP',
+      'TIMESTAMP_NTZ', 'BINARY', 'ARRAY', 'MAP', 'STRUCT', 'INTERVAL', 'VARIANT']
+    expect(names.map((type) => typeLabel({ type }))).toEqual(['tinyint', 'smallint', 'int', 'bigint', 'float',
+      'double', 'string', 'boolean', 'date', 'timestamp', 'timestamp_ntz', 'binary', 'array', 'map', 'struct',
+      'interval', 'variant'])
+  })
+  it('keeps decimal precision from the type text, but not the parameters of nested types', () => {
+    expect(typeLabel({ type: 'DECIMAL', type_text: 'DECIMAL(38, 10)' })).toBe('decimal(38,10)')
+    expect(typeLabel({ type: 'DECIMAL' })).toBe('decimal')
+    expect(typeLabel({ type: 'ARRAY', type_text: 'ARRAY<STRING>' })).toBe('array')
+  })
+})
+
+describe('columns without a manifest type name', () => {
+  const defs = buildColumnDefs([
+    { name: 'ts', type: null as unknown as string, type_text: 'TIMESTAMP_NTZ' },
+    { name: 'v', type: null as unknown as string, type_text: 'VARIANT' },
+  ])
+  it('reads the kind and label from type_text', () => {
+    expect(typeLabel({ type: null as unknown as string, type_text: 'timestamp_ntz' })).toBe('timestamp_ntz')
+    expect(defs[0].filter).toBe('agDateColumnFilter')
+    expect(defs[0].comparator).toBe(compareText)
+    expect(defs[1].filter).toBeUndefined()
+  })
+  it('shows TIMESTAMP_NTZ like TIMESTAMP and filters it by calendar day', () => {
+    const fmt = defs[0].valueFormatter as (p: { value: string }) => string
+    expect(fmt({ value: '2026-11-13T22:15:30.500' })).toBe('2026-11-13 22:15:30.500')
+    expect(dateFilterComparator(new Date(2026, 10, 13), '2026-11-13T22:15:30.500')).toBe(0)
+    expect(dateFilterComparator(new Date(2026, 10, 14), '2026-11-13T22:15:30.500')).toBe(-1)
   })
 })

@@ -353,6 +353,8 @@ export interface QueryBody {
 export interface QueryColumn {
   name: string
   type: string
+  /** The warehouse's SQL type text, e.g. `decimal(38,10)`. Absent on old results. */
+  type_text?: string | null
 }
 
 export interface QueryResult {

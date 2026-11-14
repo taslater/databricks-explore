@@ -4,7 +4,7 @@ import { useEdge, useObject } from '../api/hooks'
 import type { EdgeFlow, GraphEdge, Producer, RelationshipStatus } from '../api/types'
 import { fetchCurrentEdge, messageOf, sendToCanvas, useGraphActions } from './actions'
 import { DERIVED_KINDS, KIND_LABEL, KIND_STYLE, STORED_KINDS } from './edgeStyles'
-import { ageDays, fmtAge, lastPart } from './format'
+import { ageDays, fmtAge, fmtTime, lastPart } from './format'
 import { DEFAULT_STALE_DAYS, useGraphStore } from './graphStore'
 import { canReview, patchIds } from './relationships'
 import type { FlowEdge, FlowNode } from './types'
@@ -277,9 +277,9 @@ function EdgeProvenance({ info }: { info: GraphEdge }) {
           {counts.length > 0 && <div>{counts.join(' · ')}</div>}
           {(ev.first_seen || ev.last_seen) && (
             <div>
-              {ev.first_seen ? `first seen ${ev.first_seen}` : ''}
+              {ev.first_seen ? `first seen ${fmtTime(ev.first_seen)}` : ''}
               {ev.first_seen && ev.last_seen ? ' · ' : ''}
-              {ev.last_seen ? `last seen ${ev.last_seen}` : ''}
+              {ev.last_seen ? `last seen ${fmtTime(ev.last_seen)}` : ''}
             </div>
           )}
           {ev.sample_refs.length > 0 && <div className="hint">samples: {ev.sample_refs.join(', ')}</div>}

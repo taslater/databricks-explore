@@ -20,6 +20,28 @@ export function columnKind(type: string | undefined): ColumnKind {
   return 'text'
 }
 
+/** Warehouse type name (manifest) to the SQL name shown in the header. Names not listed show lowercased. */
+const SQL_TYPE_NAMES: Record<string, string> = {
+  BYTE: 'tinyint',
+  SHORT: 'smallint',
+  LONG: 'bigint',
+  CHAR: 'string',
+}
+
+/** The type name of a column: `type`, or the base name of `type_text` when the manifest had none. */
+export function columnTypeName(c: Pick<QueryColumn, 'type' | 'type_text'>): string {
+  if (c.type) return c.type.toUpperCase()
+  return (c.type_text ?? '').split(/[(<\s]/)[0].toUpperCase()
+}
+
+/** Header label for a column in SQL terms (`bigint`, `decimal(38,10)`, `timestamp_ntz`). Sorting still uses `columnKind`. */
+export function typeLabel(c: Pick<QueryColumn, 'type' | 'type_text'>): string {
+  const name = columnTypeName(c)
+  const text = (c.type_text ?? '').trim().toLowerCase()
+  if (name === 'DECIMAL' && /^decimal\s*\(/.test(text)) return text.replace(/\s+/g, '')
+  return SQL_TYPE_NAMES[name] ?? name.toLowerCase()
+}
+
 const TS = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.(\d+))?(.*)$/
 
 /**
@@ -131,15 +153,16 @@ export function headerMinWidth(name: string): number {
 export function buildColumnDefs(columns: QueryColumn[]): ColDef<Row>[] {
   return columns.map((c, i): ColDef<Row> => {
     const field = `c${i}`
-    const kind = columnKind(c.type)
+    const kind = columnKind(columnTypeName(c))
+    const label = typeLabel(c)
     const base: ColDef<Row> = {
       field,
       headerName: c.name,
       minWidth: headerMinWidth(c.name),
-      headerTooltip: `${c.name}: ${c.type}`,
+      headerTooltip: `${c.name}: ${c.type_text || label}`,
       headerComponentParams: {
         innerHeaderComponent: ColumnLabel,
-        innerHeaderComponentParams: { typeText: c.type?.toLowerCase() ?? '' },
+        innerHeaderComponentParams: { typeText: label },
       },
       valueFormatter: (p) => displayValue(p.value, kind),
       cellClass: (p) => cellClasses(p.value, kind),

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { DiagramFile, GraphEdge } from '../api/types'
 import { fromDiagram, toDiagramBody } from './diagram'
 import { deriveFlow } from './derive'
-import { ageDays, parseTs, shortType } from './format'
+import { ageDays, fmtAge, fmtTime, parseTs, shortType } from './format'
 import { computeLayout, type LayoutEdge, type LayoutNode } from './layout'
 import { DEFAULT_FILTERS, useGraphStore } from './graphStore'
 import type { EdgeFilters, FlowEdge, FlowNode } from './types'
@@ -183,6 +183,14 @@ describe('timestamps and labels', () => {
     expect(ageDays('2026-11-10T00:00:00Z', NOW)).toBe(1)
     expect(Number.isNaN(parseTs(undefined))).toBe(true)
     expect(ageDays(null, NOW)).toBeNull()
+  })
+
+  it('formats times without T, seconds or fraction', () => {
+    expect(fmtTime('2026-11-10 19:06:48.0')).toBe('2026-11-10 19:06')
+    expect(fmtTime('2026-11-10T19:06:48.000Z')).toBe('2026-11-10 19:06')
+    expect(fmtTime(null)).toBe('unknown')
+    expect(fmtTime('yesterday')).toBe('yesterday')
+    expect(fmtAge('2026-10-26T14:02:52Z', NOW)).toBe('2026-10-26 14:02 (15d ago)')
   })
 
   it('shortens picker type tags like the legacy list', () => {

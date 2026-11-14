@@ -1,6 +1,7 @@
 // Runs once on page load. Reconnects to the profile the user last connected to and
 // re-applies their SQL warehouse, so a page reload does not drop the connection.
 // It never opens a browser (interactive=false) and never picks a profile the user did not connect to.
+// With nothing remembered (empty localStorage), it still adopts the profile the server reports as connected.
 import type { QueryClient } from '@tanstack/react-query'
 import { useUiStore } from '../store/uiStore'
 import * as api from './client'
@@ -15,7 +16,19 @@ export async function restoreSession(qc: QueryClient): Promise<void> {
 
   const ui = useUiStore.getState()
   const target = ui.lastConnectedProfile
-  if (target === null) return
+  if (target === null) {
+    try {
+      const current = await api.getSession()
+      if (current.profile === null) return
+      useUiStore.getState().setConnectedProfile(current.profile)
+      if (useUiStore.getState().warehouseId === null && current.warehouse_id !== null) {
+        useUiStore.getState().setWarehouseId(current.warehouse_id)
+      }
+    } catch {
+      // No server session to adopt. The Connect button still works.
+    }
+    return
+  }
 
   let session: SessionResponse
   try {

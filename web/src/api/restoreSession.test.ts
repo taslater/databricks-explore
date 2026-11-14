@@ -31,11 +31,26 @@ beforeEach(async () => {
 const qc = () => new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
 describe('restoreSession', () => {
-  it('does nothing when the user never connected', async () => {
+  it('stays disconnected when nothing is remembered and the server has no connection', async () => {
+    api.getSession.mockResolvedValue({ profile: null, warehouse_id: null })
     await restoreSession(qc())
-    expect(api.getSession).not.toHaveBeenCalled()
     expect(api.connect).not.toHaveBeenCalled()
     expect(useUiStore.getState().connectedProfile).toBeNull()
+  })
+
+  it('takes the connection from the server when localStorage is empty', async () => {
+    api.getSession.mockResolvedValue({ profile: 'dev', warehouse_id: 'wh1' })
+    await restoreSession(qc())
+    expect(api.connect).not.toHaveBeenCalled()
+    expect(useUiStore.getState().connectedProfile).toBe('dev')
+    expect(useUiStore.getState().warehouseId).toBe('wh1')
+  })
+
+  it('ignores a failing session call when nothing is remembered', async () => {
+    api.getSession.mockRejectedValue(new Error('down'))
+    await restoreSession(qc())
+    expect(useUiStore.getState().connectedProfile).toBeNull()
+    expect(useUiStore.getState().restoreMessage).toBeNull()
   })
 
   it('keeps the server connection when it is still on the same profile (plain reload)', async () => {
