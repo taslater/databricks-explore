@@ -84,7 +84,7 @@ export function GraphDetails() {
         </div>
       </section>
 
-      <p className="hint">Click a node or edge for details. Double-click a node to expand it. Drag to arrange.</p>
+      <p className="hint">Click a node or edge for details. Shift-click to select several. Double-click a node to expand it. Drag to arrange.</p>
 
       <div className="btns">
         <button

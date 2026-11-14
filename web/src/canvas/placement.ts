@@ -10,6 +10,8 @@ export interface Rect {
   h: number
 }
 
+/** Clearance kept around a floating control, in screen px. */
+const PANEL_MARGIN = 8
 /** Empty space kept around every existing node. */
 export const PLACEMENT_GAP = 24
 /** Spacing of the grid of spots tried inside the visible area. */
@@ -118,8 +120,25 @@ function liveView(viewport: { x: number; y: number; zoom: number }): { visible: 
   const toCanvas = (r: Rect): Rect => ({ x: (r.x - viewport.x) / z, y: (r.y - viewport.y) / z, w: r.w / z, h: r.h / z })
   return {
     visible: toCanvas({ x: 0, y: 0, w: sw, h: sh }),
-    keepOut: SCREEN_KEEP_OUT.map(toCanvas),
+    keepOut: screenKeepOut(el, box).map(toCanvas),
   }
+}
+
+/**
+ * Screen rectangles of the floating controls, relative to the canvas: every React Flow panel (the window buttons,
+ * the canvas toolbar, the sketch palette, the bottom edit bar, the zoom controls, the minimap), measured from the DOM.
+ * Falls back to fixed strips when nothing can be measured.
+ */
+function screenKeepOut(el: Element | null | undefined, box: DOMRect | undefined): readonly Rect[] {
+  if (!el || !box) return SCREEN_KEEP_OUT
+  const out: Rect[] = []
+  for (const p of Array.from(el.querySelectorAll('.react-flow__panel'))) {
+    const r = p.getBoundingClientRect()
+    if (r.width > 0 && r.height > 0) {
+      out.push({ x: r.left - box.left - PANEL_MARGIN, y: r.top - box.top - PANEL_MARGIN, w: r.width + 2 * PANEL_MARGIN, h: r.height + 2 * PANEL_MARGIN })
+    }
+  }
+  return out.length > 0 ? out : SCREEN_KEEP_OUT
 }
 
 /** Rectangles of the windows given and of the sketch nodes now on the canvas. */
