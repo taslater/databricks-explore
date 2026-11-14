@@ -1,5 +1,6 @@
 import type { Edge, Node } from '@xyflow/react'
 import type { GraphEdge, GraphEdgeKind } from '../api/types'
+import type { ColumnInfo } from './columns'
 
 /** Data stored on a React Flow node. Fields marked "derived" are filled in by deriveFlow and never saved. */
 export type TableNodeData = {
@@ -12,7 +13,14 @@ export type TableNodeData = {
   focus: boolean
   selfRef: boolean
   selfRefLastSeen?: string
+  /** Columns, once loaded. Shown while `showColumns` is set. */
+  columns?: ColumnInfo[]
+  showColumns?: boolean
+  /** Show every column of a wide table, not just the ones with an edge and the first few. */
+  allColumns?: boolean
   // derived
+  /** Names of the columns that have a column edge (set by deriveFlow). */
+  involved?: string[]
   showSchema?: boolean
   external?: boolean
   via?: string

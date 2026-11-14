@@ -1,6 +1,7 @@
 // Turns the stored graph (nodes, edges, filters) into what React Flow draws.
 // Pure: the same inputs always give the same output, so it can be unit tested.
 import { MarkerType } from '@xyflow/react'
+import { columnHandles, findColumn, visibleColumns } from './columns'
 import { ageDays, EDGE_COLORS } from './format'
 import { estimateSize } from './layout'
 import type { EdgeFilters, FlowEdge, FlowNode } from './types'
@@ -8,6 +9,8 @@ import type { EdgeFilters, FlowEdge, FlowNode } from './types'
 export interface DeriveInput {
   nodes: FlowNode[]
   edges: FlowEdge[]
+  /** Column-to-column edges. Drawn between column handles when both nodes show their columns. */
+  columnEdges?: FlowEdge[]
   focusSchema: string | null
   filters: EdgeFilters
   staleDays: number
@@ -28,6 +31,10 @@ function nodeLines(n: FlowNode, showSchema: boolean, via: string | undefined): s
   const lines = [`${n.data.selfRef ? '↻ ' : ''}${n.data.name}`]
   if (showSchema) lines.push(n.data.schema)
   if (via) lines.push(`via ${via}`)
+  if (n.data.showColumns && n.data.columns) {
+    const shown = visibleColumns(n.data.columns, n.data.involved ?? [], !!n.data.allColumns)
+    lines.push(...shown.map((c) => `${c.name}  ${c.type}`))
+  }
   return lines
 }
 
@@ -102,6 +109,21 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
   const sizeById = new Map<string, { width: number; height: number }>()
   for (const n of input.nodes) sizeById.set(n.id, nodeSize(n, focusSchema, via.get(n.id)))
 
+  // Columns that have a column edge, per node: they always show, even on a wide table.
+  const involved = new Map<string, Set<string>>()
+  for (const e of input.columnEdges ?? []) {
+    const info = e.data!.info
+    for (const [id, col] of [
+      [e.source, info.source_column],
+      [e.target, info.target_column],
+    ] as const) {
+      if (!col) continue
+      const set = involved.get(id) ?? new Set<string>()
+      set.add(col)
+      involved.set(id, set)
+    }
+  }
+
   const nodes: FlowNode[] = input.nodes.map((n) => {
     const edges = edgesByNode.get(n.id) ?? []
     const hidden = !n.data.focus && edges.length > 0 && edges.every((e) => edgeHidden.get(e.id))
@@ -115,9 +137,53 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
         external,
         via: via.get(n.id) || undefined,
         faded: hoverId !== null && !neighborhood.has(n.id),
+        involved: n.data.showColumns ? [...(involved.get(n.id) ?? [])] : undefined,
       },
     }
   })
+  const outNode = new Map(nodes.map((n) => [n.id, n]))
+
+  // Column edges: drawn only when both nodes show a row for their column.
+  const columnEdges: FlowEdge[] = []
+  const covered = new Set<string>() // kind|a|b of table pairs a visible column edge already draws
+  for (const e of input.columnEdges ?? []) {
+    const info = e.data!.info
+    const src = outNode.get(e.source)
+    const tgt = outNode.get(e.target)
+    if (!src || !tgt) continue
+    const row = (n: FlowNode, name: string | undefined) =>
+      n.data.showColumns && n.data.columns
+        ? findColumn(visibleColumns(n.data.columns, n.data.involved ?? [], !!n.data.allColumns), name)
+        : undefined
+    const from = row(src, info.source_column)
+    const to = row(tgt, info.target_column)
+    const stale = info.kind === 'lineage' && (ageDays(info.last_seen, now) ?? -1) > input.staleDays
+    const filtered =
+      !(filters[info.kind] ?? false) ||
+      (stale && !filters.showStale) ||
+      (info.status === 'rejected' && !filters.showRejected)
+    const hidden = !from || !to || filtered || !!src.hidden || !!tgt.hidden
+    if (!hidden) covered.add([info.kind, ...[e.source, e.target].sort()].join('|'))
+    const color = stale ? EDGE_COLORS.stale : (EDGE_COLORS[info.kind] ?? '#999')
+    const srcSize = sizeById.get(e.source) ?? { width: 0, height: 0 }
+    const tgtSize = sizeById.get(e.target) ?? { width: 0, height: 0 }
+    const handles = columnHandles(
+      nodeCenter(src, srcSize).x,
+      nodeCenter(tgt, tgtSize).x,
+      e.source === e.target,
+      from?.name ?? info.source_column ?? '',
+      to?.name ?? info.target_column ?? '',
+    )
+    columnEdges.push({
+      ...e,
+      type: stale ? 'stale' : info.kind,
+      hidden,
+      sourceHandle: handles.sourceHandle,
+      targetHandle: handles.targetHandle,
+      markerEnd: info.directed === false ? undefined : { type: MarkerType.ArrowClosed, color },
+      data: { ...e.data!, stale, faded: hoverId !== null && e.source !== hoverId && e.target !== hoverId },
+    })
+  }
 
   const edges: FlowEdge[] = input.edges.map((e) => {
     const info = e.data!.info
@@ -131,10 +197,12 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
       src && tgt
         ? handlesFor(nodeCenter(src, srcSize), nodeCenter(tgt, tgtSize), e.source === e.target)
         : { sourceHandle: 'src-r', targetHandle: 'tgt-l' }
+    // A table edge gives way to the column edges of the same kind that now draw the same link in more detail.
+    const drawnInColumns = covered.has([info.kind, ...[e.source, e.target].sort()].join('|'))
     return {
       ...e,
       type: stale ? 'stale' : info.kind,
-      hidden: edgeHidden.get(e.id) === true,
+      hidden: edgeHidden.get(e.id) === true || drawnInColumns,
       sourceHandle: handles.sourceHandle,
       targetHandle: handles.targetHandle,
       // An undirected edge (directed === false) has no arrowheads.
@@ -148,5 +216,5 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
     }
   })
 
-  return { nodes, edges }
+  return { nodes, edges: [...edges, ...columnEdges] }
 }

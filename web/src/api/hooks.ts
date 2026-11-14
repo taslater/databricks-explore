@@ -181,3 +181,66 @@ export function useSaveCanvas() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['canvases'] }),
   })
 }
+
+// ---- Query-history mining -------------------------------------------------
+
+/** The plan for the confirm dialog: window and SQL. Only fetched while `enabled`. */
+export function useMiningPlan(windowDays: number, full: boolean, enabled: boolean) {
+  const profile = useConnectedProfile()
+  return useQuery({
+    queryKey: ['mining-plan', profile, windowDays, full],
+    queryFn: () => api.getMiningPlan(windowDays, full),
+    enabled: enabled && profile !== null && Number.isInteger(windowDays) && windowDays >= 1 && windowDays <= 365,
+    staleTime: 0,
+    retry: false,
+  })
+}
+
+/** Polls while a run is going, so progress moves. */
+export function useMiningStatus() {
+  const profile = useConnectedProfile()
+  return useQuery({
+    queryKey: ['mining-status', profile],
+    queryFn: api.getMiningStatus,
+    enabled: profile !== null,
+    refetchInterval: (q) => (q.state.data?.state === 'running' ? 700 : false),
+  })
+}
+
+export function useStartMining() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (v: { windowDays: number; full: boolean }) => api.startMining(v.windowDays, v.full),
+    onSuccess: (status) => {
+      const profile = useUiStore.getState().connectedProfile
+      qc.setQueryData(['mining-status', profile], status)
+      void qc.invalidateQueries({ queryKey: ['mining-status'] })
+    },
+  })
+}
+
+export function useUsage(enabled = true) {
+  const profile = useConnectedProfile()
+  return useQuery({
+    queryKey: ['usage', profile],
+    queryFn: () => api.getUsage(10),
+    enabled: enabled && profile !== null,
+  })
+}
+
+export function useSuggestions(status: 'proposed' | 'accepted' | 'rejected', enabled = true) {
+  const profile = useConnectedProfile()
+  return useQuery({
+    queryKey: ['suggestions', profile, status],
+    queryFn: () => api.getSuggestions(status),
+    enabled: enabled && profile !== null,
+  })
+}
+
+export function useBulkReview() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: api.bulkReview,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['suggestions'] }),
+  })
+}

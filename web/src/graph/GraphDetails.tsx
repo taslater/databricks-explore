@@ -20,7 +20,9 @@ export function GraphDetails() {
     s.selection?.kind === 'node' ? s.nodes.find((n) => n.id === s.selection?.id) : undefined,
   )
   const selectedEdge = useGraphStore((s) =>
-    s.selection?.kind === 'edge' ? s.edges.find((e) => e.id === s.selection?.id) : undefined,
+    s.selection?.kind === 'edge'
+      ? (s.edges.find((e) => e.id === s.selection?.id) ?? s.columnEdges.find((e) => e.id === s.selection?.id))
+      : undefined,
   )
   const actions = useGraphActions()
 
@@ -188,6 +190,23 @@ function EdgeDetails({ edge, staleDays }: { edge: FlowEdge; staleDays: number })
 }
 
 function EdgeBody({ info, staleDays }: { info: GraphEdge; staleDays: number }) {
+  if (info.source_column && info.target_column) {
+    const from = `${info.source}.${info.source_column}`
+    const to = `${info.target}.${info.target_column}`
+    return (
+      <div>
+        <h3>Column {KIND_LABEL[info.kind]}</h3>
+        <p>
+          {from}
+          <br />
+          {info.directed === false ? '↔' : '→'} {to}
+        </p>
+        {info.kind === 'lineage' && (
+          <LineageDetails source={info.source} target={info.target} bidir={false} staleDays={staleDays} />
+        )}
+      </div>
+    )
+  }
   if (info.kind === 'fk') {
     const child = info.child_columns ?? []
     const parent = info.parent_columns ?? []

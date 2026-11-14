@@ -5,6 +5,9 @@ import { useDiagrams, useSaveDiagram } from '../api/hooks'
 import { useUiStore } from '../store/uiStore'
 import { messageOf } from './actions'
 import { toDiagramBody, fromDiagram } from './diagram'
+import { useMiningWatcher } from './MiningPanel'
+import { useSuggestions } from '../api/hooks'
+import { useGraphActions } from './actions'
 import { useGraphStore } from './graphStore'
 
 interface GraphToolbarProps {
@@ -20,6 +23,13 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
   const status = useGraphStore((s) => s.status)
   const connected = useUiStore((s) => s.connectedProfile)
   const [selected, setSelected] = useState('')
+  const actions = useGraphActions()
+  const drawer = useGraphStore((s) => s.drawer)
+  const allColumns = useGraphStore((s) => s.nodes.length > 0 && s.nodes.every((n) => n.data.showColumns || n.id.startsWith('ph:')))
+  const hasNodes = useGraphStore((s) => s.nodes.length > 0)
+  const proposed = useSuggestions('proposed').data?.counts.proposed
+  useMiningWatcher()
+  const toggleDrawer = (d: 'suggestions' | 'usage') => useGraphStore.getState().setDrawer(drawer === d ? null : d)
 
   async function load() {
     if (!selected) return
@@ -74,6 +84,27 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
         Save diagram
       </button>
       {diagrams.isError && <span className="error">{diagrams.error.message}</span>}
+      <span className="toolbar-sep" />
+      <button
+        onClick={() => useGraphStore.getState().setMineDialog(true)}
+        disabled={!connected}
+        title="Read query history for joins between tables. Shows the SQL first."
+      >
+        Mine joins…
+      </button>
+      <button onClick={() => toggleDrawer('suggestions')} aria-pressed={drawer === 'suggestions'} disabled={!connected}>
+        Suggestions{proposed ? ` (${proposed})` : ''}
+      </button>
+      <button onClick={() => toggleDrawer('usage')} aria-pressed={drawer === 'usage'} disabled={!connected}>
+        Usage
+      </button>
+      <button
+        onClick={() => void actions.setAllColumns(!allColumns)}
+        disabled={!hasNodes}
+        title="Show or hide the columns of every table on the graph"
+      >
+        {allColumns ? 'Hide columns' : 'Show columns'}
+      </button>
       <span className="spacer" />
       <span
         className={`graph-status${status.error ? ' error' : ''}`}

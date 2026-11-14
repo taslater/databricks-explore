@@ -2,6 +2,7 @@
 import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange } from '@xyflow/react'
 import { create } from 'zustand'
 import type { GraphEdge, RelationsResponse } from '../api/types'
+import type { ColumnInfo } from './columns'
 import { nameOf, schemaOf } from './format'
 import { computeLayout } from './layout'
 import { nodeSize, viaMap } from './derive'
@@ -23,9 +24,17 @@ export const DEFAULT_FILTERS: EdgeFilters = {
   showRejected: false,
 }
 
+/** The panel open at the bottom of the graph: mining, suggested relationships, usage. */
+export type Drawer = 'suggestions' | 'mining' | 'usage' | null
+
 interface GraphState {
   nodes: FlowNode[]
   edges: FlowEdge[]
+  /** Column-to-column edges from `level=column` responses. Drawn when both nodes show their columns. */
+  columnEdges: FlowEdge[]
+  drawer: Drawer
+  /** The confirm dialog for a mining run is open. */
+  mineDialog: boolean
   focusSchema: string | null
   selection: Selection
   hoverId: string | null
@@ -47,6 +56,14 @@ interface GraphState {
   /** Changes fields of one edge's info (status, note) after the server accepted the change. */
   updateEdgeInfo: (id: string, patch: Partial<GraphEdge>) => void
   setFocusSchema: (schema: string | null) => void
+  setDrawer: (drawer: Drawer) => void
+  setMineDialog: (open: boolean) => void
+  /** Stores a node's columns and shows them. */
+  setColumns: (id: string, columns: ColumnInfo[]) => void
+  setShowColumns: (id: string, show: boolean) => void
+  setAllColumns: (id: string, all: boolean) => void
+  /** Adds column edges, or replaces the ones with the same id (fresh status, note, evidence). */
+  mergeColumnEdges: (edges: GraphEdge[]) => void
   /** Adds the nodes and edges of one relationships response. Existing nodes and edges stay in place, but an edge already on screen takes the fresh info (status, note, evidence). */
   mergeRelations: (resp: RelationsResponse) => void
   clear: () => void
@@ -59,6 +76,9 @@ interface GraphState {
 export const useGraphStore = create<GraphState>()((set, get) => ({
   nodes: [],
   edges: [],
+  columnEdges: [],
+  drawer: null,
+  mineDialog: false,
   focusSchema: null,
   selection: null,
   hoverId: null,
@@ -75,10 +95,33 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   setHover: (hoverId) => set({ hoverId }),
   setStaleDays: (staleDays) => set({ staleDays }),
   setFilter: (key, value) => set((s) => ({ filters: { ...s.filters, [key]: value } })),
-  updateEdgeInfo: (id, patch) =>
+  updateEdgeInfo: (id, patch) => {
+    const apply = (list: FlowEdge[]) =>
+      list.map((e) => (e.id === id ? { ...e, data: { ...e.data!, info: { ...e.data!.info, ...patch } } } : e))
+    set((s) => ({ edges: apply(s.edges), columnEdges: apply(s.columnEdges) }))
+  },
+  setDrawer: (drawer) => set({ drawer }),
+  setMineDialog: (mineDialog) => set({ mineDialog }),
+  setColumns: (id, columns) =>
     set((s) => ({
-      edges: s.edges.map((e) => (e.id === id ? { ...e, data: { ...e.data!, info: { ...e.data!.info, ...patch } } } : e)),
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, columns, showColumns: true } } : n)),
     })),
+  setShowColumns: (id, show) =>
+    set((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, showColumns: show } } : n)) })),
+  setAllColumns: (id, all) =>
+    set((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, allColumns: all } } : n)) })),
+  mergeColumnEdges: (edges) =>
+    set((s) => {
+      const fresh = new Map(edges.map((e) => [e.id, e]))
+      const kept = s.columnEdges.map((e) =>
+        fresh.has(e.id) ? { ...e, data: { ...e.data!, info: fresh.get(e.id)! } } : e,
+      )
+      const have = new Set(kept.map((e) => e.id))
+      for (const e of edges) {
+        if (!have.has(e.id)) kept.push({ id: e.id, source: e.source, target: e.target, data: { info: e } })
+      }
+      return { columnEdges: kept }
+    }),
   setFocusSchema: (focusSchema) => set({ focusSchema }),
 
   mergeRelations: (resp) =>
@@ -126,7 +169,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
     }),
 
   clear: () =>
-    set({ nodes: [], edges: [], selection: null, hoverId: null, layoutPending: false, fitPending: false }),
+    set({ nodes: [], edges: [], columnEdges: [], selection: null, hoverId: null, layoutPending: false, fitPending: false }),
 
   requestLayout: () => set({ layoutPending: true }),
 
@@ -163,6 +206,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
     set({
       nodes: payload.nodes,
       edges: payload.edges,
+      columnEdges: [],
       focusSchema: payload.focusSchema,
       selection: null,
       hoverId: null,

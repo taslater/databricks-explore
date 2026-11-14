@@ -1209,3 +1209,209 @@ tr.stale td {
   border: 1px solid #fff;
   cursor: crosshair;
 }
+
+/* ---- Graph: columns on nodes, mining dialog and panel ---- */
+
+.tbl-node.with-columns {
+  text-align: left;
+  min-width: 190px;
+}
+
+.tbl-node.with-columns .tbl-name,
+.tbl-node.with-columns .tbl-sub {
+  text-align: center;
+}
+
+.tbl-cols-btn,
+.tbl-more {
+  font-size: 10px;
+  padding: 0 4px;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.tbl-cols {
+  margin: 4px -8px -8px;
+  border-top: 1px solid #8a9aa9;
+  background: rgba(255, 255, 255, 0.55);
+  padding-bottom: 4px;
+}
+
+.tbl-col {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 1px 8px;
+  height: 16px;
+  line-height: 14px;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+
+.tbl-col-type {
+  color: #666;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90px;
+}
+
+.tbl-col-handle {
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  pointer-events: none;
+}
+
+.toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+  margin: 0 2px;
+}
+
+.graph-drawer {
+  flex: none;
+  height: 280px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: #fff;
+  min-height: 0;
+}
+
+.drawer-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.drawer-tabs button.active,
+.sg-bar button.active {
+  font-weight: 700;
+  border-color: #0969da;
+}
+
+.drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.sg-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.sg-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.sg-table th,
+.sg-table td {
+  text-align: left;
+  padding: 2px 8px 2px 0;
+  border-bottom: 1px solid #eaeef2;
+  position: relative;
+}
+
+.sg-table tr.picked {
+  background: #ddf4ff;
+}
+
+.sg-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.sg-actions button {
+  margin-left: 3px;
+}
+
+.usage-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.usage-bar {
+  height: 3px;
+  background: #54aeff;
+  margin-top: 1px;
+}
+
+button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: #0969da;
+  cursor: pointer;
+  font: inherit;
+}
+
+.mine-progress {
+  width: 100%;
+  margin: 4px 0;
+}
+
+.mine-blocked {
+  border: 1px solid #cf222e;
+  background: #fff1f0;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+
+.mine-result ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(27, 31, 36, 0.4);
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 6vh;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 8px;
+  padding: 14px 18px;
+  width: min(760px, 92vw);
+  max-height: 84vh;
+  overflow: auto;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+}
+
+.mine-window {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mine-window input[type='number'] {
+  width: 5em;
+}
+
+.mine-sql {
+  white-space: pre-wrap;
+  font-size: 11px;
+  background: #f6f8fa;
+  padding: 6px;
+  margin: 4px 0;
+}

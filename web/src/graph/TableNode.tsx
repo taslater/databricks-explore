@@ -1,18 +1,34 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { nodeFill } from './format'
+import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
+import { useEffect } from 'react'
+import { useGraphActions } from './actions'
+import { columnHandleId, visibleColumns } from './columns'
+import { isPlaceholder, nodeFill } from './format'
+import { useGraphStore } from './graphStore'
 import type { FlowNode } from './types'
 
-/** Table, view, or streaming node. Same look as the legacy Cytoscape style. */
-export function TableNode({ data, selected }: NodeProps<FlowNode>) {
+/** Table, view, or streaming node. Same look as the legacy Cytoscape style. It can list its columns, each with its own handles. */
+export function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
+  const actions = useGraphActions()
+  const updateInternals = useUpdateNodeInternals()
   const classes = [
     'tbl-node',
     data.focus && 'is-focus',
     data.external && 'is-external',
     selected && 'is-selected',
     data.faded && 'is-faded',
+    data.showColumns && 'with-columns',
   ]
     .filter(Boolean)
     .join(' ')
+
+  const rows = data.showColumns && data.columns ? visibleColumns(data.columns, data.involved ?? [], !!data.allColumns) : []
+  const hiddenCount = data.showColumns && data.columns ? data.columns.length - rows.length : 0
+  const shown = rows.map((c) => c.name).join('\u0000')
+
+  // Column rows add and remove handles, so React Flow has to read the node's handles again.
+  useEffect(() => {
+    updateInternals(id)
+  }, [id, shown, updateInternals])
 
   // Four handles per side. The edge picks the pair that matches its direction (see handlesFor in derive.ts).
   return (
@@ -31,6 +47,47 @@ export function TableNode({ data, selected }: NodeProps<FlowNode>) {
       </div>
       {data.showSchema && <div className="tbl-sub">{data.schema}</div>}
       {data.via && <div className="tbl-sub">via {data.via}</div>}
+      {!isPlaceholder(id) && (
+        <button
+          className="tbl-cols-btn nodrag"
+          title={data.showColumns ? 'Hide columns' : 'Show columns, with column lineage and mined joins'}
+          aria-pressed={!!data.showColumns}
+          onClick={(e) => {
+            e.stopPropagation()
+            actions.toggleColumns(id)
+          }}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          {data.showColumns ? '▾ cols' : '▸ cols'}
+        </button>
+      )}
+      {rows.length > 0 && (
+        <div className="tbl-cols">
+          {rows.map((c) => (
+            <div className="tbl-col" key={c.name} title={`${c.name} ${c.type}`}>
+              <Handle type="target" position={Position.Left} id={columnHandleId('t', 'l', c.name)} className="tbl-col-handle" />
+              <Handle type="source" position={Position.Left} id={columnHandleId('s', 'l', c.name)} className="tbl-col-handle" />
+              <Handle type="target" position={Position.Right} id={columnHandleId('t', 'r', c.name)} className="tbl-col-handle" />
+              <Handle type="source" position={Position.Right} id={columnHandleId('s', 'r', c.name)} className="tbl-col-handle" />
+              <span className="tbl-col-name">{c.name}</span>
+              <span className="tbl-col-type">{c.type}</span>
+            </div>
+          ))}
+          {(hiddenCount > 0 || data.allColumns) && (
+            <button
+              className="tbl-more nodrag"
+              onClick={(e) => {
+                e.stopPropagation()
+                useGraphStore.getState().setAllColumns(id, !data.allColumns)
+                setTimeout(() => useGraphStore.getState().requestLayout(), 250)
+              }}
+              onDoubleClick={(e) => e.stopPropagation()}
+            >
+              {data.allColumns ? 'show fewer' : `+${hiddenCount} more`}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

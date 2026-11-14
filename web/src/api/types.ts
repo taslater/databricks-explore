@@ -132,6 +132,9 @@ export interface GraphEdge {
   evidence?: Evidence
   /** Ids to send to PATCH /api/relationships/<id>: the underlying stored edges, or the derived edge ids. */
   patch_ids?: string[]
+  /** Column-level edges only (`level=column`): the columns joined or fed. `source` and `target` stay table names. */
+  source_column?: string
+  target_column?: string
 }
 
 export interface RelationsResponse {
@@ -215,6 +218,91 @@ export interface ImportResult {
   created: number
   updated: number
   overlays: number
+}
+
+// ---- Query-history mining and suggestions (contracts/api.md section 5) ----
+
+export interface MiningQuery {
+  name: 'query_history' | 'table_lineage'
+  sql: string
+  params: Record<string, string>
+}
+
+export interface MiningPlan {
+  since: string
+  until: string
+  window_days: number
+  incremental: boolean
+  cursor: string | null
+  row_cap: number
+  warehouse_id: string | null
+  queries: MiningQuery[]
+}
+
+export interface MiningResult {
+  statements: number
+  parsed: number
+  with_joins: number
+  unparsed: number
+  redacted_skipped: number
+  no_lineage: number
+  pairs: number
+  skipped_fk: number
+  fk_unreadable_tables: number
+  invalid: number
+  created: number
+  updated: number
+  capped: boolean
+  since: string
+  until: string
+  finished_at: string
+}
+
+export type MiningState = 'idle' | 'running' | 'succeeded' | 'failed' | 'blocked'
+export type MiningPhase = 'history' | 'lineage' | 'extract' | 'foreign_keys' | 'save'
+
+export interface MiningStatus {
+  state: MiningState
+  phase: MiningPhase | null
+  progress: { done: number; total: number }
+  started_at: string | null
+  finished_at: string | null
+  plan: { since: string; until: string; window_days: number; incremental: boolean; row_cap: number } | null
+  result: MiningResult | null
+  error: string | null
+  reason: 'redacted' | null
+  last_run: MiningResult | null
+}
+
+export interface UsageTable {
+  table: string
+  runs: number
+  users: number
+}
+
+export interface UsagePair {
+  tables: [string, string]
+  runs: number
+  users: number
+}
+
+export interface UsageSummary {
+  window: { since: string; until: string } | null
+  statements: number
+  tables: UsageTable[]
+  pairs: UsagePair[]
+}
+
+export type StoredStatus = Exclude<RelationshipStatus, 'derived'>
+
+export interface SuggestionsResponse {
+  edges: Relationship[]
+  counts: Record<StoredStatus, number>
+}
+
+export interface BulkStatusBody {
+  ids: string[]
+  status: StoredStatus
 }
 
 export type ProducerKind = 'job' | 'notebook' | 'pipeline' | 'dashboard' | 'query' | 'file'

@@ -69,6 +69,23 @@ export function toGraphEdges(rels: Relationship[]): GraphEdge[] {
   return out
 }
 
+/**
+ * Column-level edges from a `level=column` response: the ones with a column at both ends, each kept as its own
+ * edge (lineage in two directions stays two edges). Table-level edges in the same response are left out.
+ */
+export function toColumnEdges(resp: RelationshipsResponse): GraphEdge[] {
+  const out: GraphEdge[] = []
+  for (const r of resp.edges) {
+    if (!r.source.column || !r.target.column) continue
+    const info = adapt(r)
+    info.source_column = r.source.column
+    info.target_column = r.target.column
+    info.patch_ids = [r.id]
+    out.push(info)
+  }
+  return out
+}
+
 /** The /api/relationships response in the shape the graph store merges. */
 export function toRelations(resp: RelationshipsResponse): RelationsResponse {
   return { nodes: resp.nodes, edges: toGraphEdges(resp.edges), errors: resp.errors }

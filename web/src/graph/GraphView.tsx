@@ -18,6 +18,8 @@ import { EDGE_TYPES } from './edges'
 import { EDGE_COLORS } from './format'
 import { useGraphStore } from './graphStore'
 import { GraphToolbar } from './GraphToolbar'
+import { MineDialog } from './MineDialog'
+import { MiningPanel } from './MiningPanel'
 import { TableNode } from './TableNode'
 import type { FlowEdge, FlowNode } from './types'
 import { useUiStore } from '../store/uiStore'
@@ -36,6 +38,8 @@ function nodeIdAt(event: MouseEvent | TouchEvent): string | undefined {
 /** Relationship graph. Toolbar on top, React Flow canvas below. */
 export function GraphView() {
   const pickerCollapsed = useUiStore((s) => s.pickerCollapsed)
+  const drawer = useGraphStore((s) => s.drawer)
+  const mineDialog = useGraphStore((s) => s.mineDialog)
   return (
     <div className="graph-view">
       <GraphToolbar showPickerToggle={pickerCollapsed} />
@@ -44,6 +48,8 @@ export function GraphView() {
           <GraphCanvas />
         </ReactFlowProvider>
       </div>
+      {drawer && <MiningPanel drawer={drawer} />}
+      {mineDialog && <MineDialog />}
     </div>
   )
 }
@@ -53,6 +59,7 @@ function GraphCanvas() {
   const actions = useGraphActions()
   const rawNodes = useGraphStore((s) => s.nodes)
   const rawEdges = useGraphStore((s) => s.edges)
+  const columnEdges = useGraphStore((s) => s.columnEdges)
   const focusSchema = useGraphStore((s) => s.focusSchema)
   const filters = useGraphStore((s) => s.filters)
   const staleDays = useGraphStore((s) => s.staleDays)
@@ -61,8 +68,8 @@ function GraphCanvas() {
   const fitPending = useGraphStore((s) => s.fitPending)
 
   const flow = useMemo(
-    () => deriveFlow({ nodes: rawNodes, edges: rawEdges, focusSchema, filters, staleDays, hoverId }),
-    [rawNodes, rawEdges, focusSchema, filters, staleDays, hoverId],
+    () => deriveFlow({ nodes: rawNodes, edges: rawEdges, columnEdges, focusSchema, filters, staleDays, hoverId }),
+    [rawNodes, rawEdges, columnEdges, focusSchema, filters, staleDays, hoverId],
   )
 
   // Layout and fit need real node sizes, so they wait until every visible node has been measured.

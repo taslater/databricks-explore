@@ -7,7 +7,9 @@ import { useUiStore } from '../store/uiStore'
 import type { CanvasWindow, GraphEdge } from '../api/types'
 import { schemaOf } from './format'
 import { useGraphStore } from './graphStore'
-import { patchIds, toRelations } from './relationships'
+import { columnsOf } from './columns'
+import { isPlaceholder } from './format'
+import { patchIds, toColumnEdges, toRelations } from './relationships'
 
 export function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -20,6 +22,14 @@ export function messageOf(e: unknown): string {
  * a view dependency only shows up when its view is read.
  */
 export async function fetchCurrentEdge(info: GraphEdge): Promise<GraphEdge | undefined> {
+  if (info.source_column) {
+    // A column edge is only in the column-level response.
+    for (const table of [info.source, info.target]) {
+      const found = toColumnEdges(await api.getRelationships(table, false, 'column')).find((e) => e.id === info.id)
+      if (found) return found
+    }
+    return undefined
+  }
   for (const table of [info.source, info.target]) {
     const found = toRelations(await api.getRelationships(table)).edges.find((e) => e.id === info.id)
     if (found) return found
@@ -116,6 +126,103 @@ export function useGraphActions() {
       }
     }
 
-    return { expand, openObject, refreshSelected, connect }
+    /** Waits for React Flow to measure the nodes whose size just changed, then lays the graph out again. */
+    function relayoutSoon() {
+      setTimeout(() => useGraphStore.getState().requestLayout(), 250)
+    }
+
+    /**
+     * Shows a node's columns: loads them (tables.get, cached) and the column-level edges for the table
+     * (column lineage from one cached warehouse query, FKs, mined and manual column edges).
+     * A failure to read column lineage is shown in the status line and the columns still show.
+     */
+    async function showColumns(id: string) {
+      if (isPlaceholder(id)) return
+      const store = useGraphStore.getState()
+      const node = store.nodes.find((n) => n.id === id)
+      if (!node) return
+      if (node.data.columns) store.setShowColumns(id, true)
+      store.setStatus(`loading columns of ${id}…`)
+      try {
+        const profile = useUiStore.getState().connectedProfile
+        if (!node.data.columns) {
+          const obj = await qc.fetchQuery({
+            queryKey: ['object', profile, id],
+            queryFn: () => api.getObject(id),
+            staleTime: 60_000,
+            retry: false,
+          })
+          useGraphStore.getState().setColumns(id, columnsOf(obj.data))
+        }
+        const resp = await qc.fetchQuery({
+          queryKey: ['relationships', profile, id, 'column'],
+          queryFn: () => api.getRelationships(id, false, 'column'),
+          staleTime: 0,
+          retry: false,
+        })
+        useGraphStore.getState().mergeColumnEdges(toColumnEdges(resp))
+        if (resp.errors.length) useGraphStore.getState().setStatus(resp.errors.join(' | '), true)
+        else useGraphStore.getState().setStatus(`showing columns of ${id}`)
+      } catch (e) {
+        useGraphStore.getState().setStatus(messageOf(e), true)
+      }
+      relayoutSoon()
+    }
+
+    function hideColumns(id: string) {
+      useGraphStore.getState().setShowColumns(id, false)
+      relayoutSoon()
+    }
+
+    function toggleColumns(id: string) {
+      const node = useGraphStore.getState().nodes.find((n) => n.id === id)
+      if (node?.data.showColumns) hideColumns(id)
+      else void showColumns(id)
+    }
+
+    /** Columns on every table node (one after another: each can mean a warehouse query), or off for all. */
+    async function setAllColumns(show: boolean) {
+      const ids = useGraphStore.getState().nodes.filter((n) => !isPlaceholder(n.id)).map((n) => n.id)
+      for (const id of ids) {
+        if (show) await showColumns(id)
+        else useGraphStore.getState().setShowColumns(id, false)
+      }
+      relayoutSoon()
+    }
+
+    /** Re-reads everything on screen: table edges for every node, column edges for the ones showing columns. */
+    async function refreshGraph() {
+      const nodes = useGraphStore.getState().nodes.slice(0, 40)
+      for (const n of nodes) await expand(n.id)
+      for (const n of nodes) if (n.data.showColumns) await showColumns(n.id)
+    }
+
+    /**
+     * Brings one stored column edge (a suggestion) into view: both tables, their columns, and selects the edge.
+     * Needs the edge's table-level neighbors loaded, which expanding either end does.
+     */
+    async function showColumnEdge(source: string, target: string, edgeId: string) {
+      const g = useGraphStore.getState()
+      if (g.nodes.length === 0) g.setFocusSchema(schemaOf(source))
+      await expand(source)
+      await expand(target)
+      await showColumns(source)
+      await showColumns(target)
+      const after = useGraphStore.getState()
+      if (after.columnEdges.some((e) => e.id === edgeId)) after.setSelection({ kind: 'edge', id: edgeId })
+    }
+
+    return {
+      expand,
+      openObject,
+      refreshSelected,
+      connect,
+      showColumns,
+      hideColumns,
+      toggleColumns,
+      setAllColumns,
+      refreshGraph,
+      showColumnEdge,
+    }
   }, [qc])
 }

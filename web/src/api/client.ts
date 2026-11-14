@@ -10,7 +10,10 @@ import type {
   DiagramBody,
   DiagramFile,
   EdgeDetailsResponse,
+  BulkStatusBody,
   ImportResult,
+  MiningPlan,
+  MiningStatus,
   ObjectSummary,
   ProfilesResponse,
   QueryBody,
@@ -26,7 +29,10 @@ import type {
   Schema,
   SearchResponse,
   SessionResponse,
+  StoredStatus,
+  SuggestionsResponse,
   TableInfo,
+  UsageSummary,
   Warehouse,
 } from './types'
 
@@ -172,3 +178,23 @@ export const exportRelationships = () => get<RelationshipsExport>('/api/relation
 
 export const importRelationships = (file: RelationshipsExport) =>
   post<ImportResult>('/api/relationships/import', file)
+
+// ---- Query-history mining (contracts/api.md section 5) ----------------------
+
+/** What a run would read: the window and the SQL. Runs nothing. */
+export const getMiningPlan = (windowDays: number, full = false) =>
+  get<MiningPlan>(`/api/mining/plan${qs({ window_days: windowDays, full })}`)
+
+/** Starts a background run. 400 without a warehouse, 409 while another run is going. */
+export const startMining = (windowDays: number, full = false) =>
+  post<MiningStatus>('/api/mining/runs', { window_days: windowDays, full })
+
+export const getMiningStatus = () => get<MiningStatus>('/api/mining/status')
+
+export const getUsage = (limit = 10) => get<UsageSummary>(`/api/mining/usage${qs({ limit })}`)
+
+/** Stored `join_mined` edges at column level, most evidence first. */
+export const getSuggestions = (status: StoredStatus = 'proposed') =>
+  get<SuggestionsResponse>(`/api/relationships/suggestions${qs({ status })}`)
+
+export const bulkReview = (body: BulkStatusBody) => post<{ updated: number }>('/api/relationships/bulk', body)
