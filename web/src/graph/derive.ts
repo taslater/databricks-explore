@@ -168,8 +168,8 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
     const srcSize = sizeById.get(e.source) ?? { width: 0, height: 0 }
     const tgtSize = sizeById.get(e.target) ?? { width: 0, height: 0 }
     const handles = columnHandles(
-      nodeCenter(src, srcSize).x,
-      nodeCenter(tgt, tgtSize).x,
+      { x: src.position.x, width: srcSize.width },
+      { x: tgt.position.x, width: tgtSize.width },
       e.source === e.target,
       from?.name ?? info.source_column ?? '',
       to?.name ?? info.target_column ?? '',
