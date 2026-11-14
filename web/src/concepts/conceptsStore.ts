@@ -9,11 +9,13 @@ interface ConceptsState {
   selected: Selected
   filters: ConceptFilters
   suggestOpen: boolean
+  importOpen: boolean
   /** A line under the toolbar: what an import or export did, or an error. */
   notice: { text: string; error: boolean } | null
   select: (selected: Selected) => void
   setFilters: (patch: Partial<ConceptFilters>) => void
   setSuggestOpen: (open: boolean) => void
+  setImportOpen: (open: boolean) => void
   setNotice: (text: string | null, error?: boolean) => void
 }
 
@@ -21,9 +23,11 @@ export const useConceptsStore = create<ConceptsState>()((set) => ({
   selected: null,
   filters: { q: '', domain: '', status: '' },
   suggestOpen: false,
+  importOpen: false,
   notice: null,
   select: (selected) => set({ selected }),
   setFilters: (patch) => set((s) => ({ filters: { ...s.filters, ...patch } })),
   setSuggestOpen: (suggestOpen) => set({ suggestOpen }),
+  setImportOpen: (importOpen) => set({ importOpen }),
   setNotice: (text, error = false) => set({ notice: text ? { text, error } : null }),
 }))

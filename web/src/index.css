@@ -2329,3 +2329,41 @@ button.as-link {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ---- Import from Databricks and certification badges ------------------------------------- */
+.import-steps {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.import-steps li {
+  margin-bottom: 6px;
+}
+
+.import-result li.error {
+  list-style: none;
+  margin-left: -4px;
+}
+
+.cert-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.cert-badge.cert-certified {
+  background: #c6f6d5;
+  color: #22543d;
+}
+
+.cert-badge.cert-deprecated {
+  background: #fed7d7;
+  color: #742a2a;
+  text-decoration: line-through;
+}

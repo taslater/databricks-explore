@@ -1,5 +1,6 @@
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { useEffect } from 'react'
+import { CertBadge } from '../concepts/CertBadge'
 import { useGraphActions } from './actions'
 import { columnHandleId, visibleColumns } from './columns'
 import { isPlaceholder, nodeFill } from './format'
@@ -44,6 +45,7 @@ export function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
       <div className="tbl-name">
         {data.selfRef && '↻ '}
         {data.name}
+        {data.certification && <CertBadge status={data.certification} />}
       </div>
       {data.showSchema && <div className="tbl-sub">{data.schema}</div>}
       {data.via && <div className="tbl-sub">via {data.via}</div>}
