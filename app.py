@@ -18,6 +18,7 @@ import dbx
 import demo
 import genie
 import layout
+import mcp_server
 import mining
 import ontology
 import relationships
@@ -654,6 +655,10 @@ def layout_render():
     elif hi is not None and not (isinstance(hi, list) and all(isinstance(i, str) for i in hi)):
         raise layout.LayoutError('highlight must be a list of ids or "issues"')
     return app.response_class(layout.render_png(data, width, hi), mimetype="image/png")
+
+
+# ---- MCP server (mcp_server/): /mcp for coding agents, /api/agent-access for the page. Local only, bearer token. ----
+mcp_server.register(app, explorer=lambda: STATE["ex"], store=rel_store, miner=miner)
 
 
 if __name__ == "__main__":
