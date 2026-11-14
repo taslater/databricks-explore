@@ -5,7 +5,7 @@ import { create } from 'zustand'
 import type { CanvasPoint, CanvasWindow } from '../api/types'
 import type { Geometry } from '../sketch/types'
 import { renameInWindows } from '../canvas/linking/refs'
-import { placeNew } from '../canvas/placement'
+import { placeNew, revealOnCanvas } from '../canvas/placement'
 import { useRunStore } from '../canvas/runState'
 
 export interface CanvasViewport {
@@ -129,6 +129,16 @@ function patch(windows: CanvasWindow[], id: string, change: Partial<CanvasWindow
   return windows.map((w) => (w.id === id ? { ...w, ...change } : w))
 }
 
+/** The state change that adds a window and, when it landed outside the view, pans so the person sees it. */
+function withWindowInView(
+  windows: CanvasWindow[],
+  win: CanvasWindow,
+  viewport: CanvasViewport,
+): { windows: CanvasWindow[]; viewport?: CanvasViewport } {
+  const next = revealOnCanvas({ x: win.position.x, y: win.position.y, w: win.size.w, h: win.size.h }, viewport)
+  return next ? { windows, viewport: next } : { windows }
+}
+
 export const useCanvasStore = create<CanvasState>()((set, get) => ({
   viewport: DEFAULT_VIEWPORT,
   windows: [],
@@ -148,7 +158,7 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
       collapsed: false,
       editor_split: NEW_WINDOW_EDITOR_SPLIT,
     }
-    set({ windows: [...windows, win] })
+    set(withWindowInView([...windows, win], win, get().viewport))
     return id
   },
 
@@ -170,7 +180,7 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
       text: '',
       collapsed: false,
     }
-    set({ windows: [...windows, win] })
+    set(withWindowInView([...windows, win], win, get().viewport))
     return id
   },
 
@@ -186,7 +196,7 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
       table: fullName,
       collapsed: false,
     }
-    set({ windows: [...windows, win] })
+    set(withWindowInView([...windows, win], win, get().viewport))
     return id
   },
 
