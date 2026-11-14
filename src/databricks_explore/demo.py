@@ -28,7 +28,7 @@ from databricks.sdk.service import sql as sqlsvc
 
 PROFILES = [{"name": "demo", "host": "https://demo.invalid", "auth_type": "demo"}]
 WAREHOUSES = [("demo-wh-1", "Demo Serverless", sqlsvc.State.RUNNING),
-              ("demo-wh-2", "Demo Pro (stopped)", sqlsvc.State.STOPPED)]
+              ("demo-wh-2", "Demo Pro", sqlsvc.State.STOPPED)]
 
 NORMAL_DELAY = 0.5        # seconds an ordinary statement stays RUNNING, so the UI shows a timer
 SLOW_DELAY = 45.0         # seconds a `demo_slow` statement stays RUNNING
@@ -90,6 +90,8 @@ TABLES = {
 # child table, parent table, child column, parent column
 FOREIGN_KEYS = [("demo.sales.orders", "demo.sales.customers", "customer_id", "customer_id"),
                 ("demo.sales.order_items", "demo.sales.orders", "order_id", "order_id")]
+# Tables whose primary key is not just the first column: an order line is keyed by its order and its line number.
+COMPOSITE_KEYS = {"demo.sales.order_items": ["order_id", "line_no"], "samples.tpch.lineitem": ["order_id", "line_no"]}
 VIEW_DEPS = {"demo.sales.v_daily_revenue": ["demo.sales.orders"]}
 # upstream table, downstream table, producing job id
 LINEAGE = [("demo.sales.orders", "demo.sales.v_daily_revenue", "1001"),
@@ -118,7 +120,7 @@ def _table_info(full_name):
     kind, cols, comment, _ = TABLES[full_name]
     c, s, n = full_name.split(".")
     constraints = [uc.TableConstraint(primary_key_constraint=uc.PrimaryKeyConstraint(
-        name=f"pk_{n}", child_columns=[cols[0][0]]))] if kind == "MANAGED" and n != "wide_metrics" else []
+        name=f"pk_{n}", child_columns=COMPOSITE_KEYS.get(full_name, [cols[0][0]])))] if kind == "MANAGED" and n != "wide_metrics" else []
     constraints += [uc.TableConstraint(foreign_key_constraint=uc.ForeignKeyConstraint(
         name=f"fk_{cn}_{pn}", child_columns=[cc], parent_table=pt, parent_columns=[pc]))
         for ct, pt, cc, pc in FOREIGN_KEYS if ct == full_name for cn, pn in [(n, pt.split(".")[2])]]

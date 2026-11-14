@@ -56,6 +56,31 @@ function PlaceholderBody({ node, selected }: { node: SketchNode; selected: boole
   const rootRef = useRef<HTMLDivElement>(null)
   const updateInternals = useUpdateNodeInternals()
   const [focusRow, setFocusRow] = useState<number | null>(null)
+  // A new table, or Enter or a double-click on it, puts the cursor in its name. The store flag is only the trigger.
+  const editing = useSketchStore((s) => s.editingId === id)
+  const setEditing = useSketchStore((s) => s.setEditing)
+  useEffect(() => {
+    if (!editing) return
+    // React Flow keeps a new node hidden until it has measured it, and a hidden input cannot take focus,
+    // so try again for a few frames.
+    let tries = 0
+    let frame = 0
+    const attempt = () => {
+      const input = rootRef.current?.querySelector<HTMLInputElement>('.ph-name')
+      if (input && !input.disabled) {
+        input.focus()
+        if (document.activeElement === input) {
+          input.select()
+          setEditing(null)
+          return
+        }
+      }
+      if (++tries < 30 && input && !input.disabled) frame = requestAnimationFrame(attempt)
+      else setEditing(null)
+    }
+    attempt()
+    return () => cancelAnimationFrame(frame)
+  }, [editing, setEditing])
 
   // The card grows with its columns. Tell the store its measured height, so align, order and export know it.
   useEffect(() => {
@@ -107,6 +132,10 @@ function PlaceholderBody({ node, selected }: { node: SketchNode; selected: boole
       ref={rootRef}
       className={`sk-node sk-placeholder-node${selected ? ' selected' : ''}${locked ? ' locked' : ''}`}
       style={{ borderColor: stroke }}
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        if (!locked && !(e.target as Element).closest('input, button')) setEditing(id)
+      }}
     >
       <div className="ph-header" style={{ background: stroke }}>
         <input

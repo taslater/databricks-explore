@@ -64,6 +64,8 @@ export interface SketchState {
   tool: Tool
   /** The node whose label is being edited inline, or null. */
   editingId: string | null
+  /** A character typed to start the edit: the editor opens with it instead of selecting the old text. */
+  editingSeed: string | null
   /** The connector whose label is being edited inline, or null. */
   editingEdgeId: string | null
   snap: boolean
@@ -81,7 +83,8 @@ export interface SketchState {
   setSnap: (snap: boolean) => void
   select: (ids: string[], edgeIds?: string[]) => void
   selectAll: () => void
-  setEditing: (id: string | null) => void
+  /** Starts or ends inline editing of a node's label. `seed` is the first character, when typing started it. */
+  setEditing: (id: string | null, seed?: string) => void
   setEditingEdge: (id: string | null) => void
 
   /** Records the current state as an undo step. Same-key calls in quick succession make one step. */
@@ -182,6 +185,7 @@ export function createSketchStore(): UseBoundStore<StoreApi<SketchState>> {
         selectedIds: selectedIds.filter((i) => have.has(i)),
         selectedEdgeIds: selectedEdgeIds.filter((i) => edgeIds.has(i)),
         editingId: null,
+        editingSeed: null,
         editingEdgeId: null,
       })
     }
@@ -226,6 +230,7 @@ export function createSketchStore(): UseBoundStore<StoreApi<SketchState>> {
       selectedEdgeIds: [],
       tool: 'select',
       editingId: null,
+      editingSeed: null,
       editingEdgeId: null,
       snap: readFlag('sketchSnap', true),
       host: EMPTY_HOST,
@@ -259,8 +264,8 @@ export function createSketchStore(): UseBoundStore<StoreApi<SketchState>> {
 
       selectAll: () => set({ selectedIds: allIds(), selectedEdgeIds: get().edges.map((e) => e.id) }),
 
-      setEditing: (editingId) => set({ editingId, editingEdgeId: null }),
-      setEditingEdge: (editingEdgeId) => set({ editingEdgeId, editingId: null }),
+      setEditing: (editingId, seed) => set({ editingId, editingSeed: editingId === null ? null : (seed ?? null), editingEdgeId: null }),
+      setEditingEdge: (editingEdgeId) => set({ editingEdgeId, editingId: null, editingSeed: null }),
 
       checkpoint,
 
@@ -291,7 +296,9 @@ export function createSketchStore(): UseBoundStore<StoreApi<SketchState>> {
           selectedIds: [id],
           selectedEdgeIds: [],
           tool: 'select',
-          editingId: type === 'text' ? id : null,
+          // Every new node opens its label for typing, like draw.io: a drawn shape is labeled by typing.
+          editingId: id,
+          editingSeed: null,
         })
         return id
       },

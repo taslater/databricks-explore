@@ -29,7 +29,7 @@ def client(monkeypatch, tmp_path):
 def test_fake_profile_and_warehouses(client):
     assert [p["name"] for p in client.get("/api/profiles").json["profiles"]] == ["demo"]
     assert client.get("/api/session").json == {"profile": "demo", "warehouse_id": "demo-wh-1", "version": __version__}
-    assert [w["name"] for w in client.get("/api/warehouses").json] == ["Demo Serverless", "Demo Pro (stopped)"]
+    assert [w["name"] for w in client.get("/api/warehouses").json] == ["Demo Serverless", "Demo Pro"]
 
 
 def test_catalogs_schemas_objects_and_columns(client):
@@ -41,6 +41,14 @@ def test_catalogs_schemas_objects_and_columns(client):
     assert [c["name"] for c in info["columns"]][:2] == ["order_id", "customer_id"]
     fks = [c["foreign_key_constraint"] for c in info["table_constraints"] if "foreign_key_constraint" in c]
     assert fks[0]["parent_table"] == "demo.sales.customers"
+
+
+def test_primary_keys(client):
+    def pk(name):
+        info = client.get(f"/api/object?name={name}").json["data"]
+        return [c["primary_key_constraint"]["child_columns"] for c in info["table_constraints"] if "primary_key_constraint" in c]
+    assert pk("demo.sales.orders") == [["order_id"]]
+    assert pk("demo.sales.order_items") == [["order_id", "line_no"]]
 
 
 def test_relations_include_fk_and_lineage(client):

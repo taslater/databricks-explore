@@ -1,8 +1,8 @@
 // Keyboard shortcuts for the sketch. One window listener, mounted by the host while its canvas is showing.
 import { useEffect } from 'react'
-import { GRID } from './model'
+import { GRID, isLabelable } from './model'
 import { useSketchStore } from './sketchStore'
-import type { Tool } from './types'
+import type { SketchNode, Tool } from './types'
 
 /** Letter to tool. Also the tooltip text in the palette. */
 export const TOOL_KEYS: Record<string, Tool> = {
@@ -24,11 +24,45 @@ export function keyForTool(tool: Tool): string {
   return Object.entries(TOOL_KEYS).find(([, t]) => t === tool)?.[0].toUpperCase() ?? ''
 }
 
-/** True when the key press belongs to something that takes text or has its own shortcuts. */
-export function isTypingTarget(t: EventTarget | null): boolean {
-  const el = t as HTMLElement | null
+export const TYPING_SELECTOR =
+  'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], .cm-editor, .ag-root, .qw-node, .react-flow__panel .canvas-toolbar'
+
+/** True when the element takes text or has its own shortcuts, so a letter typed there is not a sketch shortcut. */
+export function isTypingTarget(t: EventTarget | null | undefined): boolean {
+  const el = t as HTMLElement | null | undefined
   if (!el || typeof el.closest !== 'function') return false
-  return el.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], .cm-editor, .ag-root, .qw-node, .react-flow__panel .canvas-toolbar') !== null
+  return el.closest(TYPING_SELECTOR) !== null
+}
+
+/** True when a key press is typing: aimed at a text field, or happening while one has focus. */
+export function isTypingEvent(e: { target: EventTarget | null }, active: Element | null = typeof document === 'undefined' ? null : document.activeElement): boolean {
+  return isTypingTarget(e.target) || isTypingTarget(active)
+}
+
+export interface KeyLike {
+  key: string
+  metaKey: boolean
+  ctrlKey: boolean
+  altKey: boolean
+}
+
+/**
+ * The node a printable key press should start labeling, with the character, or null. Like draw.io: with exactly one
+ * unlocked, labelable sketch node selected (and no connector), typing starts editing its label with that character.
+ * Shift is allowed, since capitals are typing. Space stays with panning. Placeholder tables have no label, only columns.
+ */
+export function labelSeed(
+  e: KeyLike,
+  nodes: SketchNode[],
+  selectedIds: string[],
+  selectedEdgeIds: string[],
+): { id: string; seed: string } | null {
+  if (e.metaKey || e.ctrlKey || e.altKey) return null
+  if (e.key.length !== 1 || e.key.trim() === '') return null
+  if (selectedIds.length !== 1 || selectedEdgeIds.length > 0) return null
+  const n = nodes.find((x) => x.id === selectedIds[0])
+  if (!n || !isLabelable(n)) return null
+  return { id: n.id, seed: e.key }
 }
 
 /**
@@ -37,6 +71,8 @@ export function isTypingTarget(t: EventTarget | null): boolean {
  * V paste, D duplicate, A select all, ] and [ forward and backward (with Shift: to front and back),
  * Shift+L lock. Delete removes, Esc deselects and returns to Select, arrows nudge (Shift for a grid step),
  * Enter or F2 edits the label. `extra` adds host shortcuts, keyed by lowercase letter (the Canvas adds Q and N).
+ * No letter shortcut fires while a text field has focus. With exactly one labelable node selected, a printable key
+ * types into its label instead (press Esc first to use a letter shortcut).
  */
 export function useSketchKeys(extra: Record<string, () => void> = {}) {
   useEffect(() => {
@@ -44,7 +80,7 @@ export function useSketchKeys(extra: Record<string, () => void> = {}) {
       if (e.defaultPrevented) return
       const st = useSketchStore.getState()
       const mod = e.metaKey || e.ctrlKey
-      const typing = isTypingTarget(e.target)
+      const typing = isTypingEvent(e)
 
       if (e.key === 'Escape') {
         if (typing && st.editingId === null && st.editingEdgeId === null) return
@@ -112,11 +148,17 @@ export function useSketchKeys(extra: Record<string, () => void> = {}) {
           st.setEditingEdge(st.selectedEdgeIds[0])
         } else if (st.selectedIds.length === 1) {
           const n = st.nodes.find((x) => x.id === st.selectedIds[0])
-          if (n && n.type !== 'placeholder' && !n.locked) {
+          if (n && !n.locked) {
             e.preventDefault()
             st.setEditing(n.id)
           }
         }
+        return
+      }
+      const seed = labelSeed(e, st.nodes, st.selectedIds, st.selectedEdgeIds)
+      if (seed) {
+        e.preventDefault()
+        st.setEditing(seed.id, seed.seed)
         return
       }
       if (e.shiftKey) return

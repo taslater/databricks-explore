@@ -13,6 +13,7 @@ import type { SketchFlowNode } from './ShapeNode'
 export function FrameNode({ id, selected }: NodeProps<SketchFlowNode>) {
   const node = useSketchNode(id)
   const editing = useSketchStore((s) => s.editingId === id)
+  const seed = useSketchStore((s) => (s.editingId === id ? s.editingSeed : null))
   const setEditing = useSketchStore((s) => s.setEditing)
   const setLabel = useSketchStore((s) => s.setLabel)
   const resize = useResizeHandlers(id)
@@ -45,6 +46,7 @@ export function FrameNode({ id, selected }: NodeProps<SketchFlowNode>) {
         <InlineText
           value={node.label ?? ''}
           editing={editing}
+          seed={seed}
           onCommit={(v) => {
             setLabel(id, v)
             setEditing(null)
