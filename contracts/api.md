@@ -13,6 +13,7 @@ Source of truth for backend and frontend. Flask on `127.0.0.1:8765`, all bodies 
   - **415** for a route that reads a JSON body when the request is not `application/json`.
   - **503** for `GET /` when the frontend is not built. That body is plain text, not JSON.
   - **500** for any other exception, including missing query params or body keys (`KeyError` text, e.g. `"'catalog'"`) and routes called before `POST /api/connect`.
+- **Error text:** the SDK appends a `Config: host=..., profile=...` dump to some errors. The server removes it, and anything after it, from every error message it returns (error bodies and the `errors` strings of graph responses).
 - **Cache wrapper:** routes marked *cached* return `{"fetched_at": "<ISO-8601 UTC>", "data": ...}` from `data/cache/<profile>/...`. Pass `?refresh=1` to re-fetch from Databricks and overwrite the cache.
 - **Logging:** every remote call is appended to `data/logs/calls.jsonl` through `Explorer._call`.
 
@@ -210,7 +211,7 @@ Response: `{"saved": "<safe(name)>"}`
 
 ```json
 {"statement_id": "01ef5a2c-0000-4c3a-9d7e-1f2e3d4c5b6a",
- "columns": [{"name": "day", "type": "DATE"}, {"name": "hours", "type": "DECIMAL"}],
+ "columns": [{"name": "day", "type": "DATE", "type_text": "date"}, {"name": "hours", "type": "DECIMAL", "type_text": "decimal(10,2)"}],
  "rows": [["2026-11-02", "8.5"], ["2026-11-03", null]],
  "row_count": 2,
  "truncated": false,
@@ -219,7 +220,8 @@ Response: `{"saved": "<safe(name)>"}`
 ```
 
 - `statement_id` (string): the Databricks statement id. Valid for `GET` and `DELETE /api/query/<id>` as well.
-- `columns[].type`: the Databricks `type_name` from the manifest (for example `STRING`, `INT`, `BIGINT`, `DECIMAL`, `DOUBLE`, `DATE`, `TIMESTAMP`, `ARRAY`, `STRUCT`). `type_text` (e.g. `decimal(10,2)`) is not included.
+- `columns[].type`: the Databricks `type_name` from the manifest (for example `STRING`, `INT`, `BIGINT`, `DECIMAL`, `DOUBLE`, `DATE`, `TIMESTAMP`, `ARRAY`, `STRUCT`). When the SDK enum lacks a type (`TIMESTAMP_NTZ`, `VARIANT`), `type` is the base name from `type_text`, uppercased, so it is never `null` for a known column.
+- `columns[].type_text`: the warehouse's SQL type text as sent (for example `decimal(10,2)`, `array<string>`), or `null`. The UI uses it for the precision of `DECIMAL` and as the type label.
 - `rows[][]`: one array per row, aligned with `columns`. Values are the statement API's JSON_ARRAY values, which are **strings or `null`**, not typed JSON numbers. The frontend must cast them for charts, using `columns[].type` to pick the cast.
 - `row_count` = `rows.length`. `rows` is never longer than `max_rows`.
 - `truncated` (boolean | null): `true` when the query has more than `max_rows` rows. `null` when the cap could not be applied in SQL, which is when the statement is not a query (sqlglot cannot parse it, or it is not `SELECT`/`WITH`/`VALUES`). In that case the server cuts `rows` to `max_rows` client-side and reports `truncated: null`.

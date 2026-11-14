@@ -35,6 +35,17 @@ ENTITY_KEYS = {"jobInfos": "job", "notebookInfos": "notebook", "pipelineInfos": 
                "dashboardV3Infos": "dashboard", "queryInfos": "query", "fileInfo": "file"}
 
 
+_CONFIG_DUMP = re.compile(r"\s*\bConfig:\s*\w+=.*", re.S)
+
+
+def _type_of(col):
+    """Manifest type name. The SDK enum lacks newer types (TIMESTAMP_NTZ, VARIANT), so fall back to type_text's base name."""
+    if col.type_name:
+        return col.type_name.value
+    base = re.split(r"[(<\s]", (col.type_text or "").strip())[0].upper()
+    return base or None
+
+
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -42,6 +53,11 @@ def now():
 def is_internal(name):
     """MV/streaming-table backing tables, e.g. __materialization_mat_<uuid>_<mv>_1. Not user-readable."""
     return name.split(".")[-1].startswith("__")
+
+
+def clean_error(message):
+    """Error text for the UI: drops the SDK's trailing "Config: host=..., profile=..." dump and anything after it."""
+    return _CONFIG_DUMP.sub("", str(message)).rstrip()
 
 
 def safe(s):
@@ -66,6 +82,8 @@ def list_profiles():
     cp.read(cfg_path())
     out = []
     for name in cp.sections() + (["DEFAULT"] if cp.defaults() else []):
+        if name.startswith("__") and name.endswith("__"):
+            continue  # tool settings such as [__settings__], not a workspace profile
         sec = cp[name]
         out.append({"name": name, "host": sec.get("host", ""), "auth_type": sec.get("auth_type", "")})
     return out
@@ -179,7 +197,7 @@ class Explorer:
         """Column types from the manifest; rows from the first chunk and then every further chunk,
         stopping once max_rows + 1 rows are seen (or the result ends). Trims to max_rows."""
         sid = r.statement_id
-        cols = [{"name": c.name, "type": c.type_name.value if c.type_name else None}
+        cols = [{"name": c.name, "type": _type_of(c), "type_text": c.type_text or None}
                 for c in ((r.manifest and r.manifest.schema and r.manifest.schema.columns) or [])]
         rows = list((r.result and r.result.data_array) or [])
         nxt = r.result.next_chunk_index if r.result else None
@@ -223,7 +241,7 @@ class Explorer:
             if state == StatementState.SUCCEEDED:
                 out.update(self._collect(r, job["max_rows"], job["can_detect"]))
             elif state == StatementState.FAILED:
-                out["error"] = r.status.error.message if r.status.error else "FAILED"
+                out["error"] = clean_error(r.status.error.message) if r.status.error else "FAILED"
         return {**out, "state": state.value, "error": out.get("error")}
 
     def query_cancel(self, sid):
@@ -377,7 +395,7 @@ class Explorer:
                     edges[f"view_dep:{t}->{full_name}"] = {"id": f"view_dep:{t}->{full_name}",
                                                            "source": t, "target": full_name, "kind": "view_dep"}
         except Exception as e:
-            errors.append(f"tables.get: {e}")
+            errors.append(f"tables.get: {clean_error(e)}")
 
         try:
             lin = self.lineage(full_name, refresh)["data"]
@@ -408,7 +426,7 @@ class Explorer:
                             e["bidir"] = True
                         e["last_seen"] = max(filter(None, [e["last_seen"], ts]), default=None)
         except Exception as e:
-            errors.append(f"lineage: {e}")
+            errors.append(f"lineage: {clean_error(e)}")
 
         return {"nodes": list(nodes.values()), "edges": list(edges.values()), "errors": errors}
 

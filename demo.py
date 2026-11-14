@@ -190,7 +190,7 @@ def table_rows(full_name, n):
     cols = TABLES[full_name][1]
     r = random.Random(zlib.crc32(full_name.encode()))
     rows = [[_cell(cn, tt, i, r, k == 0) for k, (cn, tt, _) in enumerate(cols)] for i in range(n)]
-    return [{"name": cn, "type": _type_name(tt)} for cn, tt, _ in cols], rows
+    return [{"name": cn, "type": _type_name(tt), "type_text": tt} for cn, tt, _ in cols], rows
 
 
 def _daily_revenue(n):
@@ -237,7 +237,7 @@ def _project(sql, cols, rows):
                 picks.append((names.index(inner.name), e.alias_or_name))
             else:
                 return cols, rows
-        return ([{"name": n, "type": cols[i]["type"]} for i, n in picks],
+        return ([{**cols[i], "name": n} for i, n in picks],
                 [[r[i] for i, _ in picks] for r in rows])
     except Exception:
         return cols, rows
@@ -303,7 +303,7 @@ class _Statements:
 
     def _manifest(self, st):
         cols = [sqlsvc.ColumnInfo(name=c["name"], position=i, type_name=sqlsvc.ColumnInfoTypeName[c["type"]],
-                                  type_text=c["type"].lower()) for i, c in enumerate(st["cols"])]
+                                  type_text=c.get("type_text") or c["type"].lower()) for i, c in enumerate(st["cols"])]
         return sqlsvc.ResultManifest(schema=sqlsvc.ResultSchema(column_count=len(cols), columns=cols),
                                      total_row_count=len(st["rows"]))
 

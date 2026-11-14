@@ -74,3 +74,11 @@ def test_default_connect_still_runs_browser_login_on_failure(env):
     # The retry after login fails too in this fake, so the route raises. What matters is the login ran.
     c.post("/api/connect", json={"profile": "dev"})
     assert logins == ["dev"]
+
+
+def test_profiles_skip_dunder_sections(monkeypatch, tmp_path):
+    cfg = tmp_path / "cfg"
+    cfg.write_text("[__settings__]\nx = 1\n[dev]\nhost = https://h\n[__other]\nhost = https://o\n")
+    monkeypatch.setenv("DATABRICKS_CONFIG_FILE", str(cfg))
+    monkeypatch.setattr(dbx, "DEMO", False)
+    assert [p["name"] for p in dbx.list_profiles()] == ["dev", "__other"]

@@ -130,6 +130,23 @@ def test_wrap_limit_passes_through_unparseable_or_non_query(sql):
     assert sqltools.wrap_limit(sql, 5000) == (sql, False)
 
 
+# ---------- column types ----------
+
+def test_columns_carry_type_text_and_fall_back_when_the_sdk_enum_lacks_the_type(make_explorer, monkeypatch):
+    cols = [ColumnInfo(name="d", position=0, type_name=ColumnInfoTypeName.DECIMAL, type_text="DECIMAL(38,10)"),
+            ColumnInfo(name="ts", position=1, type_name=None, type_text="TIMESTAMP_NTZ"),
+            ColumnInfo(name="v", position=2, type_name=None, type_text="variant"),
+            ColumnInfo(name="u", position=3, type_name=None, type_text=None)]
+    ex, st = make_explorer(total_rows=1)
+    monkeypatch.setattr(st, "_manifest", lambda n: ResultManifest(
+        schema=ResultSchema(column_count=4, columns=cols), total_row_count=n))
+    out = ex.query("SELECT 1")["columns"]
+    assert out == [{"name": "d", "type": "DECIMAL", "type_text": "DECIMAL(38,10)"},
+                   {"name": "ts", "type": "TIMESTAMP_NTZ", "type_text": "TIMESTAMP_NTZ"},
+                   {"name": "v", "type": "VARIANT", "type_text": "variant"},
+                   {"name": "u", "type": None, "type_text": None}]
+
+
 # ---------- dbx.Explorer.query (sync) ----------
 
 def test_20k_rows_returns_5000_and_truncated_true(make_explorer):
@@ -140,8 +157,9 @@ def test_20k_rows_returns_5000_and_truncated_true(make_explorer):
     assert out["truncated"] is True
     assert st.executed[0]["statement"] == sqltools.wrap_limit("SELECT id, name, amount FROM big", 5000)[0]
     assert out["rows"][0] == ["0", "name-0", "0.50"]
-    assert out["columns"] == [{"name": "id", "type": "LONG"}, {"name": "name", "type": "STRING"},
-                              {"name": "amount", "type": "DECIMAL"}]
+    assert out["columns"] == [{"name": "id", "type": "LONG", "type_text": "long"},
+                              {"name": "name", "type": "STRING", "type_text": "string"},
+                              {"name": "amount", "type": "DECIMAL", "type_text": "decimal"}]
     assert isinstance(out["ms"], int)
     assert out["statement_id"] == "stmt-1"
 
@@ -246,7 +264,7 @@ def test_async_polls_running_then_succeeds(make_explorer):
     done = ex.query_status(sid)
     assert done["state"] == "SUCCEEDED"
     assert done["row_count"] == 3 and done["truncated"] is False
-    assert done["columns"][0] == {"name": "id", "type": "LONG"}
+    assert done["columns"][0] == {"name": "id", "type": "LONG", "type_text": "long"}
     assert isinstance(done["ms"], int) and done["error"] is None
 
 
@@ -291,6 +309,25 @@ def test_post_query_returns_capped_result(client):
     body = r.get_json()
     assert body["row_count"] == 100 and body["truncated"] is True
     assert set(body) == {"statement_id", "columns", "rows", "row_count", "truncated", "ms"}
+
+
+def test_sdk_error_config_dump_is_stripped_from_every_route(client, monkeypatch):
+    c, _ = client
+    msg = ("[CATALOG_NOT_FOUND] Catalog 'gone' does not exist. SQLSTATE: 42704. "
+           "Config: host=https://adb-1.example.net, account_id=abc, workspace_id=1, profile=dev, auth_type=databricks-cli")
+
+    def boom(*a, **k):
+        raise RuntimeError(msg)
+    monkeypatch.setattr(app_module.STATE["ex"], "query", boom)
+    r = c.post("/api/query", json={"sql": "SELECT 1"})
+    assert r.status_code == 500
+    assert r.get_json()["error"] == "[CATALOG_NOT_FOUND] Catalog 'gone' does not exist. SQLSTATE: 42704."
+
+
+def test_clean_error_leaves_other_messages_alone():
+    assert dbx.clean_error("Config of the table is invalid") == "Config of the table is invalid"
+    assert dbx.clean_error(ValueError("plain")) == "plain"
+    assert dbx.clean_error("a\nConfig: host=h\nmore") == "a"
 
 
 def test_post_query_expands_windows_before_running(client, monkeypatch):

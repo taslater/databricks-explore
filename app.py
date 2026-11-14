@@ -55,7 +55,7 @@ def err(e):
         if isinstance(e, MethodNotAllowed) and e.valid_methods:
             resp.headers["Allow"] = ", ".join(e.valid_methods)
         return resp
-    return jsonify({"error": str(e)}), 500
+    return jsonify({"error": dbx.clean_error(e)}), 500
 
 
 @app.get("/")
@@ -97,7 +97,7 @@ def connect():
         who = e.whoami()
     except Exception as first_error:
         if not interactive:
-            return jsonify({"error": f"Could not reconnect to {profile}: {first_error}"}), 401
+            return jsonify({"error": f"Could not reconnect to {profile}: {dbx.clean_error(first_error)}"}), 401
         dbx.cli_login(profile)          # browser pops up; blocks until done
         e = dbx.Explorer(profile)
         who = e.whoami()
@@ -196,7 +196,7 @@ def relationships_for_table():
             try:
                 columns = e.column_lineage(table, refresh())
             except Exception as err:
-                notes.append(f"column_lineage: {err}")
+                notes.append(f"column_lineage: {dbx.clean_error(err)}")
     with rel_store() as store:
         out = relationships.unified(store, table, rel, times, level, columns)
     return jsonify({**out, "errors": [*out["errors"], *notes]})
