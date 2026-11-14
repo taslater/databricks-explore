@@ -975,6 +975,102 @@ def unified(store, table, relations=None, times=None, level="table", column_line
             "edges": [e.model_dump(mode="json") for e in out], "errors": relations.get("errors", [])}
 
 
+def _oriented(table, source, target, pairs):
+    """(other table, pairs read from `table`'s side) for an edge from `source` to `target`, or None when it has no
+    end at `table`. `pairs` are (source column, target column)."""
+    if source == table:
+        return target, [(a, b) for a, b in pairs]
+    if target == table:
+        return source, [(b, a) for a, b in pairs]
+    return None
+
+
+def fk_join_keys(table, info):
+    """Join keys from the foreign keys a table declares: [(other table, key)]. One key per constraint.
+
+    `info` is the table's Unity Catalog metadata. Only constraints the table itself carries are visible, so a table
+    that others point at gets those keys from the tables that declare them.
+    """
+    out = []
+    for con in (info or {}).get("table_constraints") or []:
+        fk = con.get("foreign_key_constraint")
+        if not fk or not fk.get("parent_table") or dbx.is_internal(fk["parent_table"]):
+            continue
+        pairs = [(c, p) for c, p in zip_longest(fk.get("child_columns") or [], fk.get("parent_columns") or []) if c and p]
+        if pairs:
+            out.append((fk["parent_table"], {"pairs": [{"here": c, "there": p} for c, p in pairs], "source": "fk",
+                                             "status": "derived", "runs": None, "name": fk.get("name")}))
+    return out
+
+
+def _combined_status(statuses):
+    """One status for a key made of several stored edges: rejected if any is, accepted if all are, else proposed."""
+    if "rejected" in statuses:
+        return "rejected"
+    return "accepted" if statuses and all(s == "accepted" for s in statuses) else "proposed"
+
+
+def stored_join_keys(table, edges):
+    """Join keys from stored edges: [(other table, key)], for `join_mined` and `manual` edges with `table` at an end.
+
+    A mined column pair that was joined alone (or more often than the composite keys it is in account for) is a
+    single-pair key with its runs, which count every statement that used the pair, composites included, as the
+    suggestions list does. Each composite key recorded in `evidence.together` is one key with its own runs, and takes
+    one status from its member edges. A manual edge is a key of one pair, or of none for a table-level edge.
+    """
+    singles, composites = [], {}
+    for e in edges:
+        if e.kind not in ("join_mined", "manual"):
+            continue
+        sc, tc = e.source.column, e.target.column
+        if e.kind == "manual":
+            hit = _oriented(table, e.source.table, e.target.table, [(sc, tc)] if sc and tc else [])
+            if hit:
+                singles.append((hit[0], {"pairs": [{"here": a, "there": b} for a, b in hit[1]], "source": "manual",
+                                         "status": e.status, "runs": None, "name": None}))
+            continue
+        if not (sc and tc):
+            continue
+        together = e.evidence.together if e.evidence else []
+        runs = (e.evidence.runs if e.evidence else None) or 0
+        if not together or runs > sum(t.runs for t in together):
+            hit = _oriented(table, e.source.table, e.target.table, [(sc, tc)])
+            if hit:
+                singles.append((hit[0], {"pairs": [{"here": a, "there": b} for a, b in hit[1]], "source": "mined",
+                                         "status": e.status, "runs": runs, "name": None}))
+        for t in together:
+            cols = [tuple(c) for c in t.columns]
+            if (sc, tc) not in cols:
+                continue
+            hit = _oriented(table, e.source.table, e.target.table, cols)
+            if not hit:
+                continue
+            slot = composites.setdefault((hit[0], tuple(hit[1])), {"runs": 0, "statuses": []})
+            slot["runs"] = max(slot["runs"], t.runs)
+            slot["statuses"].append(e.status)
+    out = list(singles)
+    for (other, pairs), slot in composites.items():
+        out.append((other, {"pairs": [{"here": a, "there": b} for a, b in pairs], "source": "mined",
+                            "status": _combined_status(slot["statuses"]), "runs": slot["runs"], "name": None}))
+    return out
+
+
+def join_keys(store, table, info=None):
+    """How `table` is known to join to other tables: foreign keys it declares, mined joins and manual edges.
+
+    Returns {"table", "joins": [{"table": other, "keys": [{"pairs": [{"here", "there"}], "source": "fk" | "mined" |
+    "manual", "status", "runs", "name"}]}]}. Columns are read from `table`'s side (`here`). Rejected keys are included
+    and marked: the reader decides. Nothing is ranked, and no SQL text is involved.
+    """
+    found = fk_join_keys(table, info) + stored_join_keys(table, store.edges_for(table))
+    by_other = {}
+    for other, key in found:
+        keys = by_other.setdefault(other, [])
+        if key not in keys:
+            keys.append(key)
+    return {"table": table, "joins": [{"table": o, "keys": k} for o, k in sorted(by_other.items())]}
+
+
 def check_table(table):
     """Validate a table name or placeholder from a query string. Returns it normalized."""
     if not table:
