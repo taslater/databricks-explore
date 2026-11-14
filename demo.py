@@ -424,3 +424,103 @@ class FakeWorkspaceClient:
 
     def get_workspace_id(self):
         return 1111111111
+
+
+# ---------------------------------------------------------------- ontology import fakes (domains, pages, a metric view, certification)
+# Genie Ontology domains and pages over REST, one metric view whose YAML the tables API returns, and the certification tag.
+
+METRIC_VIEW = "demo.sales.sales_metrics"
+METRIC_VIEW_YAML = """version: 1.1
+source: demo.sales.orders
+dimensions:
+  - name: order_month
+    display_name: Order month
+    expr: date_trunc('month', order_date)
+    comment: Calendar month in which the order was placed
+    synonyms: [month, period]
+  - name: status
+    expr: status
+    comment: Fulfillment status of the order
+measures:
+  - name: total_revenue
+    display_name: Total revenue
+    expr: SUM(amount)
+    comment: Sum of order amounts in dollars
+    synonyms: [sales, turnover]
+  - name: order_count
+    display_name: Order count
+    expr: COUNT(1)
+    comment: Number of orders
+"""
+METRIC_VIEW_COLUMNS = [("order_month", "date", "Calendar month in which the order was placed"),
+                       ("status", "string", "Fulfillment status of the order"),
+                       ("total_revenue", "decimal(14,2)", "Sum of order amounts in dollars"),
+                       ("order_count", "bigint", "Number of orders")]
+TABLES[METRIC_VIEW] = ("VIEW", METRIC_VIEW_COLUMNS, "Sales metric view", 240)
+
+ONTOLOGY_DOMAINS = [
+    {"domain_id": "d-sales", "tag_key": "sales", "display_name": "Sales", "description": "Orders and customers"},
+    {"domain_id": "d-people", "tag_key": "people", "description": "Staff and departments"}]
+ONTOLOGY_PAGES = [
+    {"name": "knowledge/pages/customer", "domain": "domains/d-sales", "display_name": "Customer",
+     "description": "A person or company that has placed at least one order.",
+     "body": "## Notes\n\nA customer is identified by `customer_id`.\nGuests who never create an account are not customers.",
+     "synonyms": ["client", "buyer"], "state": "PUBLISHED"},
+    {"name": "knowledge/pages/active-customer", "domain": "domains/d-sales", "display_name": "Active customer",
+     "description": "A customer with an order in the last 90 days.", "body": "", "synonyms": ["recent buyer"],
+     "state": "DRAFT"},
+    {"name": "knowledge/pages/headcount", "domain": "domains/d-people", "display_name": "Headcount",
+     "description": "Employees on the payroll at the end of a month.", "body": "", "synonyms": [], "state": "PUBLISHED"}]
+ONTOLOGY_PAGE_SIZE = 2  # so the importer has to follow next_page_token
+# scope, catalog, schema, table, column, value of the system.certification_status tag
+CERTIFICATION = [("table", "demo", "sales", "orders", None, "certified"),
+                 ("table", "demo", "sales", "customers", None, "certified"),
+                 ("table", "demo", "sales", "v_daily_revenue", None, "deprecated"),
+                 ("table", "demo", "sales", "sales_metrics", None, "certified"),
+                 ("column", "demo", "sales", "customers", "email", "certified"),
+                 ("column", "demo", "sales", "orders", "discount_pct", "deprecated")]
+TAGS.extend((s, c, sc, t, col, "system.certification_status", v) for s, c, sc, t, col, v in CERTIFICATION)
+
+_table_info_before_ontology = _table_info
+_api_do_before_ontology = _ApiClient.do
+_result_for_before_ontology = result_for
+
+
+def _table_info(full_name):  # noqa: F811 - wraps the function above; the fake tables API looks it up by name
+    """The table's info, with the metric view's YAML as its view_definition."""
+    info = _table_info_before_ontology(full_name)
+    if full_name == METRIC_VIEW:
+        info.view_definition = METRIC_VIEW_YAML
+    return info
+
+
+def _ontology_page(items, query, key):
+    start = int((query or {}).get("page_token") or 0)
+    out = {key: items[start:start + ONTOLOGY_PAGE_SIZE]}
+    if start + ONTOLOGY_PAGE_SIZE < len(items):
+        out["next_page_token"] = str(start + ONTOLOGY_PAGE_SIZE)
+    return out
+
+
+def _api_do_with_ontology(self, method, path, body=None, query=None, **kw):
+    if path == "/api/2.0/domains":
+        return {"domains": ONTOLOGY_DOMAINS}
+    if path == "/api/2.0/knowledge/pages":
+        return _ontology_page(ONTOLOGY_PAGES, query, "pages")
+    return _api_do_before_ontology(self, method, path, body, **kw)
+
+
+_ApiClient.do = _api_do_with_ontology
+
+
+def result_for(statement, params=None):  # noqa: F811 - wraps the function above; the fake warehouse looks it up by name
+    """(columns, rows) as before, plus the metric view list and the certification tag rows."""
+    low = " ".join(statement.split()).lower()
+    if "table_type = 'metric_view'" in low:
+        cols = [{"name": k, "type": "STRING"} for k in ("table_catalog", "table_schema", "table_name")]
+        return cols, [METRIC_VIEW.split(".")]
+    if "where tag_name = 'system.certification_status'" in low:
+        cols = [{"name": k, "type": "STRING"} for k in
+                ("scope", "catalog_name", "schema_name", "table_name", "column_name", "tag_value")]
+        return cols, [list(r) for r in CERTIFICATION]
+    return _result_for_before_ontology(statement, params)

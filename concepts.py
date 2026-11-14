@@ -16,6 +16,7 @@ from relationships import Concept, ConceptProvenance, Endpoint, Provenance, Rela
 
 TAG_ROW_CAP = 20000
 MAX_CANDIDATES = 200
+SYSTEM_TAG_PREFIX = "system."  # governed tags Databricks owns, such as system.certification_status
 _CONCEPT = "concept:"
 
 # Every Unity Catalog tag, at all four levels, as one row each: scope, where it sits, and the key and value.
@@ -261,13 +262,17 @@ def tag_run(store, result):
     definition, status and anything a person edited stay, links to newly tagged tables and columns are added, and links
     this run made to things no longer tagged are removed. A link a person made to the same target is left alone.
     Catalog and schema tags have no table or column to link, so they only add a line to the definition.
+    Tags whose name starts with `system.` are skipped (listed under `skipped`): the app shows certification as a badge.
     Returns {"created": [...], "updated": [...], "skipped": [...], "rows", "truncated"}; each created or updated
     entry is {"id", "name", "links_added", "links_removed", "links"}.
     """
-    groups = {}
+    groups, system = {}, {}
     for r in _rows(result):
         key, value = (r.get("tag_name") or "").strip(), (r.get("tag_value") or "").strip()
         if not key:
+            continue
+        if key.startswith(SYSTEM_TAG_PREFIX):
+            system[(key, value)] = True
             continue
         g = groups.setdefault((key, value), {"targets": {}, "scopes": []})
         scope = r.get("scope")
@@ -279,7 +284,9 @@ def tag_run(store, result):
     now = dbx.now()
     existing = {c.provenance.source_ref: c for c in store.concepts() if c.provenance.origin == "uc_tag"}
     taken = {c.name.casefold() for c in store.concepts()}
-    created, updated, skipped = [], [], []
+    created, updated = [], []
+    skipped = [{"name": _tag_name(k, v), "reason": "a Databricks system tag, shown as a badge instead"}
+               for k, v in sorted(system)]
     for (key, value), g in sorted(groups.items()):
         ref = _tag_name(key, value)
         wanted = [(Endpoint(table=t, column=col)) for (t, col) in g["targets"]]

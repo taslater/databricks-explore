@@ -15,6 +15,7 @@ import canvases
 import concepts
 import dbx
 import mining
+import ontology
 import relationships
 import sqltools
 
@@ -301,6 +302,25 @@ def concept_suggest_run():
     result = ex().query(concepts.TAG_SQL, None, concepts.TAG_ROW_CAP)
     with rel_store() as store:
         return jsonify(concepts.tag_run(store, result))
+
+
+# ---------- ontology import (ontology.py): read-only, into concepts with origin "ontology" ----------
+
+@app.get("/api/concepts/import/plan")
+def ontology_plan():
+    return jsonify(ontology.plan(ex().warehouse_id))
+
+
+@app.post("/api/concepts/import/run")
+def ontology_run():
+    e = ex()
+    with rel_store() as store:
+        return jsonify(ontology.run(e, store))
+
+
+@app.get("/api/certification")
+def certification():
+    return jsonify(ontology.certification(ex()))
 
 
 @app.get("/api/concepts/<cid>")
