@@ -27,7 +27,9 @@ PLACE = {"type": "object", "required": ["relation", "anchor"], "additionalProper
          "description": "structural placement (preferred over at): next to or inside an existing node, with a gap",
          "properties": {"relation": {"type": "string", "enum": list(layout.PLACE_RELATIONS)},
                         "anchor": {"type": "string", "minLength": 1, "description": "id of an existing node (or one earlier in this call)"},
-                        "gap": {"type": "number", "minimum": 0}}}
+                        "gap": {"type": "number", "minimum": 0},
+                        "align": {"type": "string", "enum": ["start", "center", "end"],
+                                  "description": "across the relation: start (default for right_of/left_of: top-aligned with the anchor; below/above center), center or end"}}}
 COLUMN = {"type": "object", "required": ["name"], "additionalProperties": False,
           "properties": {"name": S, "type": S, "key": {"type": "string", "enum": ["pk", "fk"]}}}
 STYLE_PROPS = {"fill": {"type": "string", "description": "CSS color"}, "stroke": {"type": "string", "description": "CSS color"},
@@ -192,7 +194,7 @@ def add_nodes_to(canvas: dict, specs: list) -> list[str]:
             return
         place = batch[0][1]
         out, _ = layout.arrange(canvas, [n for n, _ in batch], "place", relation=place["relation"], anchor=place["anchor"],
-                                gap=place.get("gap", 40))
+                                gap=place.get("gap", 40), align=place.get("align"))
         canvas["windows"][:] = out["windows"]
         canvas["edges"][:] = out["edges"]
         batch.clear()
@@ -292,7 +294,8 @@ def _apply(canvas: dict, n: dict, u: dict) -> None:
         if "at" in u:
             raise ToolError("give place or at, not both")
         p = u["place"]
-        out, _ = layout.arrange(canvas, [n["id"]], "place", relation=p["relation"], anchor=p["anchor"], gap=p.get("gap", 40))
+        out, _ = layout.arrange(canvas, [n["id"]], "place", relation=p["relation"], anchor=p["anchor"], gap=p.get("gap", 40),
+                                align=p.get("align"))
         canvas["windows"][:] = out["windows"]
         canvas["edges"][:] = out["edges"]
 
