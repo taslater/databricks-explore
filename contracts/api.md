@@ -337,6 +337,10 @@ No connection needed. The page polls it every 2 seconds. Response: `{"name": "d"
 
 No connection needed, no body. Puts back the newest snapshot, the file as it was before an agent's last write (the server keeps the last 20 per canvas, under `data/canvas_history/<name>/`), and drops that snapshot. The restore is a write: the revision goes up and `by` is `undo`. Response: `{"name": "d", "revision": 7, "snapshots": 1}`. **400** `{"error": "nothing to undo for canvas d"}` when there is no snapshot, **404** for a missing canvas.
 
+#### `POST /api/canvases/<name>/connect-known`
+
+Needs a connection. Draws connectors between the table cards of a saved canvas for the relationships the app knows (Unity Catalog foreign keys, mined joins, manual ones), the same as the MCP tool `connect_known` (`contracts/mcp.md`). Body, all optional: `{"ids": ["<card id>", ...], "include_proposed": false}`. Response: `{"added": ["c1", ...], "skipped": {"rejected": 0, "proposed": 1, "existing": 0}, "message": "<the edit report>"}`. The write is saved as an agent write (`by: "agent"`, one snapshot), so the page picks it up through the revision poll and its Undo agent change button reverts it. **400** for a bad body, an id that is not a table card, fewer than two table cards, or no connection; **404** for an unknown canvas. When no new relationship is found nothing is written and `added` is empty.
+
 Decisions made after T0 review (these override anything above):
 
 - Charts are attached to query windows through the optional `chart` field, per plan task C2. The standalone `chart` window type is in the enum but the UI does not create it.

@@ -6,7 +6,9 @@ import re
 import uuid
 
 from .. import canvases
+from .. import dbx
 from .. import layout
+from .. import relationships
 
 from .tooling import B, FORMAT, S, ToolError, integer, obj, strings, text, tool
 
@@ -338,6 +340,31 @@ EDGE_PROPS = {"source": {"type": "string", "minLength": 1}, "target": {"type": "
               "source_handle": {"type": "string", "enum": ["t", "r", "b", "l"]}, "target_handle": {"type": "string", "enum": ["t", "r", "b", "l"]}}
 
 
+def add_connectors(canvas: dict, specs: list) -> list[str]:
+    """Append a connector for each {source, target, ...} spec and return their ids. Raises ToolError for an unknown node.
+    Sides default to right to left and are re-picked to face each other unless a spec names one."""
+    nodes = {w["id"] for w in canvas["windows"]}
+    made = []
+    for s in specs:
+        for end in ("source", "target"):
+            if s[end] not in nodes:
+                raise ToolError(f"{end} {s[end]!r} is not a node on this canvas; ids: {', '.join(sorted(nodes)[:30])}")
+        edge = {"id": _next_id("c", _ids(canvas)), "source": s["source"], "target": s["target"],
+                "source_handle": s.get("source_handle", "r"), "target_handle": s.get("target_handle", "l"),
+                "line": s.get("line", "step"), "arrow_start": s.get("arrow_start", False), "arrow_end": s.get("arrow_end", True),
+                "dashed": s.get("dashed", False)}
+        for key in ("label", "color"):
+            if key in s:
+                edge[key] = s[key]
+        canvas["edges"].append(edge)
+        made.append(edge["id"])
+    ends = sorted({e for s in specs for e in (s["source"], s["target"])})
+    if not any("source_handle" in s or "target_handle" in s for s in specs):
+        out, _ = layout.tidy(canvas, ids=ends, rules=["handles"])  # re-pick sides that face away
+        canvas["edges"][:] = out["edges"]
+    return made
+
+
 @tool("connect", "Draw a connector from one node to another (source, target), or several at once with edges. Sides are picked to face each other.",
       obj({"name": NAME, **EDGE_PROPS, "edges": {"type": "array", "minItems": 1, "maxItems": 100, "items": {
           "type": "object", "required": ["source", "target"], "additionalProperties": False, "properties": EDGE_PROPS}}}, ("name",)),
@@ -350,28 +377,82 @@ def connect(ctx, args):
     if not all(s.get("source") and s.get("target") for s in specs):
         raise ToolError("connect needs source and target (or edges)")
     def mutate(canvas):
-        nodes = {w["id"] for w in canvas["windows"]}
-        made = []
-        for s in specs:
-            for end in ("source", "target"):
-                if s[end] not in nodes:
-                    raise ToolError(f"{end} {s[end]!r} is not a node on this canvas; ids: {', '.join(sorted(nodes)[:30])}")
-            edge = {"id": _next_id("c", _ids(canvas)), "source": s["source"], "target": s["target"],
-                    "source_handle": s.get("source_handle", "r"), "target_handle": s.get("target_handle", "l"),
-                    "line": s.get("line", "step"), "arrow_start": s.get("arrow_start", False), "arrow_end": s.get("arrow_end", True),
-                    "dashed": s.get("dashed", False)}
-            for key in ("label", "color"):
-                if key in s:
-                    edge[key] = s[key]
-            canvas["edges"].append(edge)
-            made.append(edge["id"])
-        ends = sorted({e for s in specs for e in (s["source"], s["target"])})
-        if not any("source_handle" in s or "target_handle" in s for s in specs):
-            out, _ = layout.tidy(canvas, ids=ends, rules=["handles"])  # re-pick sides that face away
-            canvas["edges"][:] = out["edges"]
+        made = add_connectors(canvas, specs)
         pairs = ", ".join(s["source"] + "->" + s["target"] for s in specs)
         return f"connected {pairs} as {', '.join(made)}", []
     return text(_edit(args["name"], mutate, False))
+
+
+def _table_cards(canvas: dict, ids) -> dict[str, str]:
+    """Table name (lower case) to the id of its first card, for the table cards of the canvas or just `ids`."""
+    cards = [w for w in canvas["windows"] if w.get("type") == "table" and w.get("table")]
+    if ids is not None:
+        known = {w["id"]: w for w in canvas["windows"]}
+        bad = [i for i in ids if i not in known or known[i].get("type") != "table" or not known[i].get("table")]
+        if bad:
+            raise ToolError(f"not table cards on this canvas: {', '.join(bad)}")
+        cards = [known[i] for i in dict.fromkeys(ids)]
+    out: dict[str, str] = {}
+    for w in cards:
+        out.setdefault(w["table"].lower(), w["id"])
+    return out
+
+
+def _known_specs(canvas: dict, plan: list, cards: dict[str, str]) -> tuple[list, int]:
+    """Connector specs for the planned relationships whose two tables have a card, minus pairs already joined by a
+    connector in either direction. Returns (specs, how many were already connected)."""
+    joined = {frozenset((e["source"], e["target"])) for e in canvas.get("edges", [])}
+    specs, existing = [], 0
+    for p in plan:
+        a, b = cards.get(p["source"].lower()), cards.get(p["target"].lower())
+        if a is None or b is None:
+            continue
+        if frozenset((a, b)) in joined:
+            existing += 1
+            continue
+        spec = {"source": a, "target": b, "arrow_end": p["directed"], "dashed": p["proposed"]}
+        if p["label"]:
+            spec["label"] = p["label"]
+        specs.append(spec)
+    return specs, existing
+
+
+def connect_known_on(ctx, name: str, ids=None, include_proposed: bool = False) -> dict:
+    """Draw connectors between the table cards of canvas `name` for the relationships the app knows (Unity Catalog foreign
+    keys, mined joins, manual ones) and save it as an undoable agent edit. Returns {"added": [connector ids],
+    "skipped": {...}, "message": the edit report}. Raises ToolError when nothing is connected or no card pair is related."""
+    ex = ctx.need_explorer()
+    canvas = _load(name)
+    cards = _table_cards(canvas, ids)
+    if len(cards) < 2:
+        raise ToolError("connect_known needs at least two table cards on the canvas (add them with add_nodes, type table)")
+    with ctx.store() as store:
+        edges = relationships.known_edges_among(store, [w["table"] for w in canvas["windows"] if w.get("type") == "table"
+                                                        and w["table"].lower() in cards],
+                                                lambda t: ex.relations(t), lambda t: dbx.cache_times(ex, t))
+    plan, skipped = relationships.connector_plan(edges, include_proposed)
+    specs, existing = _known_specs(canvas, plan, cards)
+    notes = [f"{existing} already connected" if existing else "", f"{skipped['rejected']} rejected" if skipped["rejected"] else "",
+             f"{skipped['proposed']} proposed (include_proposed: true draws them)" if skipped["proposed"] else ""]
+    tail = ("; skipped " + ", ".join(n for n in notes if n)) if any(notes) else ""
+    if not specs:
+        return {"added": [], "skipped": {**skipped, "existing": existing},
+                "message": f"no connectors added: no new known relationship between these {len(cards)} table cards{tail}. {_score_line(canvas)}"}
+    made: list[str] = []
+
+    def mutate(c):
+        fresh, _ = _known_specs(c, plan, _table_cards(c, ids))
+        made[:] = add_connectors(c, fresh)
+        shown = "; ".join(f"{sp['source']}->{sp['target']}" + (f" ({sp['label']})" if sp.get("label") else "") for sp in fresh[:8])
+        return f"connected {len(fresh)} known relationship(s): {shown}{tail}", []
+    return {"added": made, "skipped": {**skipped, "existing": existing}, "message": _edit(name, mutate, False)}
+
+
+@tool("connect_known", "Draw connectors between the table cards on a canvas for the relationships the app already knows: Unity Catalog foreign keys, mined joins and manual ones, labeled with the join columns (order_id + line_no for a composite key). Rejected ones are skipped, proposed ones only with include_proposed, and a pair that already has a connector is left alone. ids limits it to those table cards. Needs a connected profile (it reads the cached table metadata and the relationship store). Dashed connectors are proposed.",
+      obj({"name": NAME, "ids": strings("table card ids; default every table card"), "include_proposed": {
+          **B, "description": "also draw mined joins nobody has accepted yet (default false)"}}, ("name",)), read_only=False)
+def connect_known(ctx, args):
+    return text(connect_known_on(ctx, args["name"], args.get("ids"), args.get("include_proposed", False))["message"])
 
 
 ARRANGE_OPTS = {"gap": {"type": "number", "minimum": 0}, "align": {"type": "string", "enum": ["start", "center", "end"]},
