@@ -52,7 +52,7 @@ describe('canvas file round trip with note and table windows', () => {
 
   it('writes only the fields each window type owns', () => {
     const { file } = roundTrip(windows)
-    const [query, note, table] = file.windows
+    const [query, note, table] = file.windows as CanvasWindow[]
     expect(query).not.toHaveProperty('text')
     expect(query).not.toHaveProperty('table')
     expect(note).toMatchObject({ type: 'note', text: windows[1].text, collapsed: true })
@@ -73,7 +73,7 @@ describe('canvas file round trip with note and table windows', () => {
   it('rejects an editor split outside 0 to 100', () => {
     const base = toCanvasFile({ viewport, windows: [{ ...windows[0], editor_split: 40 }] }, meta)
     const bad = structuredClone(base)
-    bad.windows[0].editor_split = 100
+    ;(bad.windows[0] as CanvasWindow).editor_split = 100
     expect(() => parseCanvasFile(bad)).toThrow(/editor_split/)
   })
 
@@ -85,11 +85,11 @@ describe('canvas file round trip with note and table windows', () => {
   it('rejects a note without text and a table without a name', () => {
     const base = toCanvasFile({ viewport, windows }, meta)
     const noText = structuredClone(base)
-    delete noText.windows[1].text
+    delete (noText.windows[1] as CanvasWindow).text
     expect(() => parseCanvasFile(noText)).toThrow(/text/)
 
     const noTable = structuredClone(base)
-    delete noTable.windows[2].table
+    delete (noTable.windows[2] as CanvasWindow).table
     expect(() => parseCanvasFile(noTable)).toThrow(/table/)
   })
 })

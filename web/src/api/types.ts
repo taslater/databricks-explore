@@ -1,5 +1,6 @@
 // Response and request shapes for the Flask API. Source of truth: contracts/api.md.
 // Keep in sync with that file; do not invent fields here.
+import type { SketchEdge, SketchNode } from '../sketch/types'
 
 /** Cached endpoints wrap their payload like this. */
 export interface Cached<T> {
@@ -403,16 +404,25 @@ export interface CanvasWindow {
   collapsed?: boolean
   /** Query windows only. Percent of the window body the SQL editor takes. Absent means the default split. */
   editor_split?: number
+  /** A locked window cannot be moved or resized until it is unlocked. */
+  locked?: boolean
+  /** Stacking order. Higher is in front. */
+  z?: number
 }
 
+/**
+ * A canvas file. Version 1 has only the four window types above. Version 2 adds the sketch node types
+ * (in `windows`, see src/sketch/types.ts) and the connectors in `edges`, and `profile` may be null.
+ */
 export interface CanvasDoc {
-  version: 1
+  version: 1 | 2
   name: string
-  profile: string
+  profile?: string | null
   warehouse_id?: string | null
   viewport?: { x: number; y: number; zoom: number }
-  windows: CanvasWindow[]
+  windows: Array<CanvasWindow | SketchNode>
   links?: Array<{ from: string; to: string }>
+  edges?: SketchEdge[]
 }
 
 export interface SavedResponse {

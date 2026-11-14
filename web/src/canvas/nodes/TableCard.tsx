@@ -1,3 +1,4 @@
+import { SideHandles } from '../../sketch/nodes/SideHandles'
 import { NodeResizer, type Node, type NodeProps } from '@xyflow/react'
 import { useObject } from '../../api/hooks'
 import type { CanvasWindow } from '../../api/types'
@@ -87,49 +88,52 @@ function TableBody({ win, selected }: { win: CanvasWindow; selected: boolean }) 
   }
 
   return (
-    <div className={`qw-node table-node${selected ? ' selected' : ''}`}>
-      <NodeResizer
-        isVisible={selected && !collapsed}
-        minWidth={240}
-        minHeight={140}
-        onResize={(_, p) => resizeWindow(id, { x: p.x, y: p.y }, { w: p.width, h: p.height })}
-      />
+    <>
+      <div className={`qw-node table-node${selected ? ' selected' : ''}`}>
+        <NodeResizer
+          isVisible={selected && !collapsed}
+          minWidth={240}
+          minHeight={140}
+          onResize={(_, p) => resizeWindow(id, { x: p.x, y: p.y }, { w: p.width, h: p.height })}
+        />
 
-      <div className="qw-header">
-        <button
-          className="qw-icon nodrag"
-          onClick={() => setCollapsed(id, !collapsed)}
-          aria-label={collapsed ? 'Expand window' : 'Collapse window'}
-          title={collapsed ? 'Expand' : 'Collapse'}
-        >
-          {collapsed ? '▸' : '▾'}
-        </button>
-        <WindowTitle id={id} title={win.title} />
-        <button
-          className="qw-icon nodrag"
-          onClick={() => removeWindow(id)}
-          aria-label="Delete window"
-          title="Delete window"
-        >
-          ✕
-        </button>
-      </div>
-
-      {!collapsed && (
-        <div className="table-body nodrag nowheel">
-          <div className="table-name" title={fullName}>
-            <span>{fullName}</span>
-            {tableType && <span className="tag">{tableType}</span>}
-          </div>
-          <div className="table-actions">
-            <button onClick={queryThis} disabled={fullName === ''} title={previewSql(fullName)}>
-              Query this
-            </button>
-          </div>
-          {body}
+        <div className="qw-header">
+          <button
+            className="qw-icon nodrag"
+            onClick={() => setCollapsed(id, !collapsed)}
+            aria-label={collapsed ? 'Expand window' : 'Collapse window'}
+            title={collapsed ? 'Expand' : 'Collapse'}
+          >
+            {collapsed ? '▸' : '▾'}
+          </button>
+          <WindowTitle id={id} title={win.title} />
+          <button
+            className="qw-icon nodrag"
+            onClick={() => removeWindow(id)}
+            aria-label="Delete window"
+            title="Delete window"
+          >
+            ✕
+          </button>
         </div>
-      )}
-    </div>
+
+        {!collapsed && (
+          <div className="table-body nodrag nowheel">
+            <div className="table-name" title={fullName}>
+              <span>{fullName}</span>
+              {tableType && <span className="tag">{tableType}</span>}
+            </div>
+            <div className="table-actions">
+              <button onClick={queryThis} disabled={fullName === ''} title={previewSql(fullName)}>
+                Query this
+              </button>
+            </div>
+            {body}
+          </div>
+        )}
+      </div>
+      <SideHandles />
+    </>
   )
 }
 

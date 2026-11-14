@@ -10,6 +10,7 @@ import { TopBar } from './TopBar'
 /** Layout: collapsible picker | main view | details. */
 export function AppShell() {
   const view = useUiStore((s) => s.view)
+  const canvasDetailsOpen = useUiStore((s) => s.canvasDetailsOpen)
   const pickerCollapsed = useUiStore((s) => s.pickerCollapsed)
   const setPickerCollapsed = useUiStore((s) => s.setPickerCollapsed)
   const pickerRef = usePanelRef()
@@ -23,13 +24,13 @@ export function AppShell() {
     else panel.expand()
   }, [pickerCollapsed, pickerRef])
 
-  // The canvas has nothing to show in Details, so it gives the space back. The graph brings it back.
+  // The canvas keeps Details collapsed until its Properties button opens it. The graph always shows it.
   useEffect(() => {
     const panel = detailsRef.current
     if (!panel) return
-    if (view === 'canvas') panel.collapse()
+    if (view === 'canvas' && !canvasDetailsOpen) panel.collapse()
     else panel.expand()
-  }, [view, detailsRef])
+  }, [view, canvasDetailsOpen, detailsRef])
 
   return (
     <div className="shell">

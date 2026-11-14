@@ -7,7 +7,7 @@ import {
 } from './canvasStore'
 
 beforeEach(() => {
-  useCanvasStore.setState({ windows: [], selectedId: null, maximizedId: null, canvasName: null })
+  useCanvasStore.setState({ windows: [], maximizedId: null, canvasName: null })
 })
 
 describe('new query windows', () => {

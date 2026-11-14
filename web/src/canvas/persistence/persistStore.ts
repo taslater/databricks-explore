@@ -17,6 +17,8 @@ interface PersistStatusState {
   messageIsError: boolean
   /** JSON of the last state known to be on the server. Autosave skips writes that match it. */
   savedJson: string | null
+  /** Profile named in the file that was last opened. A save made with no connection keeps it. */
+  fileProfile: string | null
   setStatus: (phase: PersistPhase, message?: string | null, isError?: boolean) => void
   markSaved: (json: string) => void
 }
@@ -26,6 +28,7 @@ export const usePersistStore = create<PersistStatusState>()((set) => ({
   message: null,
   messageIsError: false,
   savedJson: null,
+  fileProfile: null,
   setStatus: (phase, message = null, isError = false) =>
     set({ phase, message, messageIsError: isError }),
   markSaved: (json) => set({ phase: 'saved', savedJson: json, message: null, messageIsError: false }),
