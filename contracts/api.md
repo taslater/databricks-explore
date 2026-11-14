@@ -329,6 +329,75 @@ Decisions made after T0 review (these override anything above):
 
 ---
 
+## 3b. Layout
+
+Implemented in `layout.py` (pure: no Flask, no SDK, deterministic). It checks and fixes where things sit on a canvas, for people (the Doctor and Arrange buttons) and for agents. No connection needed. Nothing here saves a canvas.
+
+**Input.** Every route takes a JSON object with either `{"canvas": {...}}`, a canvas as the browser holds it (validated like `POST /api/canvases`; a missing `name` is filled in), or `{"name": "<saved canvas>"}`. Optional on every route: `"grid": 20`, the snap size, which turns on the grid rules (otherwise nothing is judged against a grid). Errors: **400** `{"error": ...}` for a body that is not an object, a canvas that fails validation, an unknown id, rule or mode, or a bad option; **404** for an unknown saved name.
+
+**What the layout code reads.** The canvas file: windows with `position` and `size` (flat `x`, `y`, `w`, `h` work too), `locked`, `type`, `label` or `title`, and top-level `edges` with `source_handle` and `target_handle`. A collapsed window counts as 36 px tall. **Frames hold nodes by geometry**: a node belongs to the smallest larger frame that holds at least half of its area. A frame's members never overlap it, and moving a frame moves its unlocked members. **Locked nodes never move**, in any call. Positions the code writes are whole pixels.
+
+### `POST /api/layout/doctor`
+
+Response `{"score": 0-100, "metrics": {...}, "issues": [...]}`. Issues are sorted errors first, then by kind and id.
+
+```json
+{"id": "overlap:a|b", "kind": "overlap", "severity": "error", "nodes": ["a", "b"],
+ "message": "a \"A\" and b \"B\" overlap by 20 x 50 px",
+ "fix": {"tool": "tidy", "rules": ["overlaps"], "ids": ["a", "b"]}}
+```
+
+`fix` is `null` when no automatic fix exists. Otherwise it is the body to send to `POST /api/layout/tidy` (add the canvas): `rules` and `ids` as there. Issues about connectors also carry `"edges": [<edge id>]`.
+
+| kind | severity | meaning | fix |
+| --- | --- | --- | --- |
+| `overlap` | error | two bodies intersect by more than 2 px on both axes (a frame and its members do not count) | `overlaps` |
+| `edge_through_node` | error | a connector segment crosses a node that is not one of its ends (frames excepted). `straight` and `curve` connectors are measured as straight lines, `step` ones with an approximation of the canvas's own routing | none |
+| `near_alignment` | warning | left, right, top, bottom or center lines of neighboring nodes (within 300 px) are 1 to 6 px apart. Reported only when `tidy` would fix it | `align` |
+| `uneven_spacing` | warning | gaps in a row or column of three or more nodes differ by more than 4 px (more than the grid size with a grid) but are still plausibly meant to be even | `spacing` |
+| `bad_handle_side` | warning | a connector's `source_handle` or `target_handle` faces away from the node at the other end | `handles` |
+| `outside_frame` | warning | a node mostly inside a frame sticks out of it | `frames` |
+| `label_overflow` | warning | the label probably does not fit its box (a character-width estimate). `needs` is `{w, h}` | none |
+| `edge_crossings` | warning | connectors cross each other; `count` is the number. One issue for all | none (arrange the connected nodes with `layered`) |
+| `far_away` | info | a node is far from every other (more than 400 px and four times the typical gap) | none |
+| `off_grid` | info | a node's x or y is not a multiple of `grid` (only with a grid). One issue for all | `grid` |
+
+`metrics`: `node_count`, `edge_count`, `overlap_area` (px squared), `edge_crossings`, `edge_length_mean` and `edge_length_variance` (px of routed connector), `alignment_score` (of the neighboring edge pairs within 6 px of each other, the share that line up exactly; 1 when none are near), `whitespace_ratio` (share of the bounding box no node covers). The score subtracts a capped penalty per issue kind.
+
+### `POST /api/layout/tidy`
+
+Body: the input above, plus optional `ids` (only these nodes may move; a frame in `ids` moves its members) and `rules` (a subset of `frames`, `overlaps`, `align`, `spacing`, `grid`, `handles`; default all). Response:
+
+```json
+{"changes": [{"kind": "node", "id": "b", "from": {"x": 100, "y": 10, "w": 120, "h": 60}, "to": {"x": 128, "y": 10, "w": 120, "h": 60}},
+             {"kind": "edge", "id": "e1", "from": {"source_handle": "l", "target_handle": "r"}, "to": {"source_handle": "r", "target_handle": "l"}}],
+ "canvas": {...}, "score": {"before": 62, "after": 94}}
+```
+
+The rules, in the order they run, repeated until nothing changes: grow frames to hold their members (`frames`); push overlapping nodes apart by the smallest move, further along the axis the pair overlaps least, leaving 8 px (`overlaps`); align near-miss lines to the value that moves the fewest nodes, or to a locked node's (`align`); even out the gaps in rows and columns, keeping the first and last node (`spacing`); snap to `grid` (`grid`); re-pick a connector side that faces away to the side facing the other end (`handles`). A change is made only if it does not create an overlap, and an alignment only if it leaves fewer near-misses than exact matches lost. **Idempotent:** tidying the returned canvas again changes nothing. A pair that cannot be separated without moving a locked node is left as it is. The response is not saved; save it with `POST /api/canvases` if wanted.
+
+### `POST /api/layout/arrange`
+
+Body: the input above, `mode`, optional `ids` (default: every node that is not a frame) and `options`. Response as `tidy` (`changes`, `canvas`, `score`). Locked nodes in `ids` stay. **The subset's top-left corner stays where it was**, and the result is shifted, the smallest distance that works, if it would overlap a node outside the subset. A frame in `ids` carries its members. Connectors touching the subset get `handles` re-picked.
+
+| mode | options | result |
+| --- | --- | --- |
+| `row` | `gap` (40), `align` (`start`, `center`, `end`; default `start`) | left to right in the order the nodes had |
+| `column` | `gap`, `align` | top to bottom |
+| `grid` | `gap`, `cols` (default the square root of the count), `align` | reading order, columns as wide as their widest node |
+| `layered` | `direction` (`LR` or `TB`; default `LR`), `gap` (40, inside a layer), `layer_gap` (twice `gap`) | for connector graphs: back edges are reversed to break cycles, longest-path layers, barycenter ordering, then connectors set to `r`→`l` (`LR`) or `b`→`t` (`TB`). Nodes with no connector go in the first layer |
+| `place` | `relation` (`right_of`, `left_of`, `below`, `above`, `inside`), `anchor` (an id), `gap` (40), `spacing` (24, between several placed nodes), `align` (default `center`) | the nodes in `ids` next to the anchor, centered on it. Several nodes stack in a column (`right_of`, `left_of`) or a row. If something is in the way they move further along the same direction. `inside` needs a frame as anchor: nodes fill it in rows below its existing members and the frame grows |
+
+### `POST /api/layout/describe`
+
+Response `{"text": "..."}`: a compact summary for a language model, about 60 lines at most. The canvas name, node counts, extent and score; frames and what they hold; a reading-order map (one row of `id "label" x,y WxH` per line, or a 3 x 3 region map when there are many rows); connectors as `A → B (label)`; metrics; and the top issues.
+
+### `POST /api/layout/render`
+
+Body: the input above, plus optional `width` (pixels, 200 to 4000, default 1200) and `highlight`, a list of node ids to outline in red or the string `"issues"` for every node an error or warning names. Response: `image/png`, a schematic picture (boxes by type with their ids and truncated labels, connectors with arrowheads). It is for judging layout, not a faithful render of the canvas.
+
+---
+
 ## 4. Relationships
 
 One model for every relationship between tables or columns, with provenance. Implemented in `relationships.py`. All routes here *need a connection*, because the store is one SQLite file per profile: `data/relationships/<profile>.sqlite` (under the same data directory as the cache). Validation failures are **400** `{"error": "<path>: <reason>"}` (for example `edges[1].kind: ...`), unknown ids are **404**.

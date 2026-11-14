@@ -17,6 +17,7 @@ import concepts
 import dbx
 import demo
 import genie
+import layout
 import mining
 import ontology
 import relationships
@@ -553,6 +554,93 @@ def canvas_get(name):
         return jsonify({"error": str(e)}), 404
     except canvases.CanvasInvalid as e:
         return jsonify({"error": str(e)}), 400
+
+
+# ---- Layout: doctor, tidy, arrange, describe, render. Each takes {"canvas": {...}} or {"name": "<saved>"}. ----
+
+@app.errorhandler(layout.LayoutError)
+def layout_bad_request(e):
+    return jsonify({"error": str(e)}), 400
+
+
+@app.errorhandler(canvases.CanvasInvalid)
+def canvas_bad_request(e):
+    return jsonify({"error": str(e)}), 400
+
+
+@app.errorhandler(canvases.CanvasNotFound)
+def canvas_not_found(e):
+    return jsonify({"error": str(e)}), 404
+
+
+def _layout_body():
+    """(body, canvas, grid) for a layout route. The canvas is validated and never saved."""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        raise layout.LayoutError("body must be a JSON object")
+    if isinstance(body.get("canvas"), dict):
+        data = body["canvas"]
+        canvases.parse_canvas({**data, "name": data.get("name") or "unsaved"})
+    elif isinstance(body.get("name"), str):
+        data = canvases.load_canvas(body["name"])
+    else:
+        raise layout.LayoutError('send {"canvas": {...}} or {"name": "<saved canvas>"}')
+    grid = body.get("grid")
+    if grid is not None and (isinstance(grid, bool) or not isinstance(grid, (int, float)) or grid <= 0):
+        raise layout.LayoutError("grid must be a positive number")
+    return body, data, grid
+
+
+def _layout_list(body, key):
+    v = body.get(key)
+    if v is not None and not (isinstance(v, list) and all(isinstance(i, str) for i in v)):
+        raise layout.LayoutError(f"{key} must be a list of strings")
+    return v
+
+
+@app.post("/api/layout/doctor")
+def layout_doctor():
+    _, data, grid = _layout_body()
+    return jsonify(layout.doctor(data, grid))
+
+
+@app.post("/api/layout/tidy")
+def layout_tidy():
+    body, data, grid = _layout_body()
+    out, changes = layout.tidy(data, _layout_list(body, "ids"), _layout_list(body, "rules"), grid)
+    return jsonify({"changes": changes, "canvas": out,
+                    "score": {"before": layout.doctor(data, grid)["score"], "after": layout.doctor(out, grid)["score"]}})
+
+
+@app.post("/api/layout/arrange")
+def layout_arrange():
+    body, data, grid = _layout_body()
+    opts = body.get("options") or {}
+    if not isinstance(opts, dict) or not isinstance(body.get("mode"), str) or {"canvas", "ids", "mode", "grid"} & set(opts):
+        raise layout.LayoutError("send mode (a string) and optionally options (an object of mode options)")
+    out, changes = layout.arrange(data, _layout_list(body, "ids"), body["mode"], grid=grid, **opts)
+    return jsonify({"changes": changes, "canvas": out,
+                    "score": {"before": layout.doctor(data, grid)["score"], "after": layout.doctor(out, grid)["score"]}})
+
+
+@app.post("/api/layout/describe")
+def layout_describe():
+    _, data, grid = _layout_body()
+    return jsonify({"text": layout.describe(data, grid=grid)})
+
+
+@app.post("/api/layout/render")
+def layout_render():
+    body, data, grid = _layout_body()
+    width = body.get("width", 1200)
+    if isinstance(width, bool) or not isinstance(width, int):
+        raise layout.LayoutError("width must be an integer")
+    hi = body.get("highlight")
+    if hi == "issues":  # every node an error or warning names
+        hi = sorted({n for i in layout.doctor(data, grid)["issues"] if i["severity"] != "info" for n in i["nodes"]}, key=str)
+    elif hi is not None and not (isinstance(hi, list) and all(isinstance(i, str) for i in hi)):
+        raise layout.LayoutError('highlight must be a list of ids or "issues"')
+    return app.response_class(layout.render_png(data, width, hi), mimetype="image/png")
 
 
 if __name__ == "__main__":
