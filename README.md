@@ -77,6 +77,30 @@ The **Concepts** tab is a small business glossary over the catalog. It is shaped
 - On the **Graph** tab, the **Concepts** toggle draws the concepts linked to the tables on the graph as diamond nodes, with an edge to the table, or to the column when a column is linked. Click one to open it in the Concepts tab.
 - **Export** and **Import** use the relationship store's JSON file (`contracts/api.md`, sections 4 and 6).
 
+## Layout tools
+`layout.py` checks and fixes where things sit on a canvas, for people and for agents that edit canvases. It is pure (no Flask, no SDK, no randomness) and works on the saved canvas format. Locked nodes never move, and frames hold nodes by geometry.
+
+- **Doctor** (Canvas toolbar) opens a panel with a 0-100 layout score and the issues: overlaps, near-miss alignment (1 to 6 px), uneven spacing in rows and columns, connectors through nodes, connector crossings, connector sides facing away, nodes sticking out of a frame, labels that do not fit, outliers, and off-grid nodes when grid snap is on. Click an issue to select and zoom to its nodes. **Fix** applies the automatic fix for that issue, **Tidy all** applies every one with the smallest moves (it never makes a second change to a tidied canvas), and **Tidy selection** moves only the selected nodes.
+- **Arrange selection** lays the selected nodes out as a grid, row, column, or a layered flow (left to right or top to bottom) from their connectors. The selection's top-left corner stays put, and it is shifted if it would land on other nodes.
+- Every Fix, Tidy and Arrange is one undo step (Cmd/Ctrl+Z). Nothing is saved until the canvas autosaves or you save it.
+- The same functions are served as `POST /api/layout/doctor`, `tidy`, `arrange`, `describe` (a compact text summary for a language model) and `render` (a schematic PNG), each taking an unsaved canvas or a saved name. See `contracts/api.md`, section 3b.
+- `python scripts/layout_bench.py` perturbs three generated canvases (a flow, a grid of query windows, frames with members) with jitter, overlaps, off-by-a-few alignment and connectors on the wrong sides, runs `tidy`, and prints the doctor metrics before and after. Its output (seed 7, no grid):
+
+```
+== flow: 9 nodes, 9 connectors
+  clean     score 100  overlap       0  crossings  0  align 1.00
+  perturbed score  66  overlap    1785  crossings  1  align 0.00
+  tidied    score  88  overlap       0  crossings  0  align 1.00
+== query grid: 12 nodes, 8 connectors
+  perturbed score  28  overlap  107620  crossings  2  align 0.08
+  tidied    score  86  overlap       0  crossings  1  align 1.00
+== frames: 15 nodes, 5 connectors
+  perturbed score  32  overlap   16182  crossings  0  align 0.29
+  tidied    score  86  overlap       0  crossings  1  align 1.00
+```
+
+What tidy leaves is mostly connectors that pass through nodes. Those need a different arrangement, not a nudge, so Doctor reports them without a Fix.
+
 ## Test
 ```sh
 uv run --with-requirements requirements.txt pytest -q

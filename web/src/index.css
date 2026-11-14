@@ -2558,3 +2558,142 @@ button.as-link {
   color: #742a2a;
   text-decoration: line-through;
 }
+
+/* ---- Layout doctor and Arrange menu ---------------------------------------- */
+
+.ld-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.ld-menu {
+  position: relative;
+}
+
+.ld-menu-body {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  margin-top: 4px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 190px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(31, 35, 40, 0.2);
+}
+
+.ld-panel {
+  width: 340px;
+  max-height: min(70vh, 560px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(31, 35, 40, 0.12);
+}
+
+.ld-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ld-score {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ld-score span {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.ld-score.ld-good {
+  color: #16a34a;
+}
+
+.ld-score.ld-fair {
+  color: #ca8a04;
+}
+
+.ld-score.ld-poor {
+  color: #dc2626;
+}
+
+.ld-summary {
+  flex: 1;
+  font-size: 12px;
+}
+
+.ld-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ld-note {
+  font-size: 12px;
+}
+
+.ld-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ld-list h4 {
+  margin: 6px 0 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.ld-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 3px 4px;
+  border-left: 3px solid var(--border);
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.ld-issue.ld-error {
+  border-left-color: #dc2626;
+}
+
+.ld-issue.ld-warning {
+  border-left-color: #ca8a04;
+}
+
+.ld-issue.ld-info {
+  border-left-color: #6b7280;
+}
+
+.ld-issue.picked {
+  background: #eff6ff;
+}
+
+.ld-issue-text {
+  flex: 1;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
