@@ -101,6 +101,16 @@ export function exportName(profile: string | null, now: Date = new Date()): stri
   return `concepts-${(profile ?? 'profile').replace(/[^\w.-]+/g, '_')}-${day}.json`
 }
 
+/**
+ * A typed `catalog.schema.table` or `catalog.schema.table.column` (backticks around a part are fine), or null when the
+ * text is anything else. Parts cannot hold dots or spaces; a quoted part that does is not understood.
+ */
+export function parseTypedName(text: string): { table: string; column: string | null } | null {
+  const parts = text.trim().split('.').map((p) => p.replace(/^`(.*)`$/, '$1'))
+  if ((parts.length !== 3 && parts.length !== 4) || parts.some((p) => !p || /[\s`]/.test(p))) return null
+  return { table: parts.slice(0, 3).join('.'), column: parts[3] ?? null }
+}
+
 /** Saves JSON as a file download. */
 export function downloadJson(name: string, data: unknown): void {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })

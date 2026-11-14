@@ -105,7 +105,7 @@ Response: `{"fetched_at": str, "data": [{"name": str, "full_name": "cat.sch.name
 *Needs connection.* Case-insensitive substring match on the table name. No cache. Returns at most 300 results.
 
 - If a warehouse is selected, queries `system.information_schema.tables` (excluding `__`-prefixed names) and returns `"source": "information_schema"`.
-- Otherwise searches the cached `objects.json` files only and returns `"source": "cached schemas only (pick a SQL warehouse to search everything)"`.
+- Otherwise searches everything in the local cache, across all catalogs: every `objects.json` (schemas browsed before) and every fetched `obj/*.json` (tables opened before). The term matches the table name or the full `catalog.schema.table` name; name matches come first. It returns `"source": "tables already browsed (pick a SQL warehouse to search everything, or type the full name)"`. A table that was never browsed is not found this way; `GET /api/object?name=<catalog.schema.table>` (one `tables.get`, then cached) reads it by its full name.
 
 Response:
 
@@ -431,11 +431,12 @@ Facts the design rests on: `statement_text` reads `<REDACTED>` unless the reader
 What a run would do, without running anything. The page shows this before the user confirms.
 
 - `window_days` (1 to 365, default 30). The first run, or `full=1`, reads the last `window_days` days. Any later run is **incremental**: it starts at the stored cursor, and `window_days` does not apply. The newest hour is always left out, because history rows may not be in yet.
+- A state saved by an older format (no `version`, or below the current one, which is 2: edges carry composite keys) is not continued. The plan then reads the whole window as if `full=1` and `remine_reason` holds one sentence saying why (otherwise `null`); the run replaces the stored evidence of the edges it finds, so their `evidence.together` is filled in. Statuses and notes are kept.
 - `row_cap` is the most statements one run reads (5000). A run that hits it stops there, moves the cursor to the last row read, and the next run continues.
 
 ```json
 {"since": "2026-10-14T11:00:00Z", "until": "2026-11-13T11:00:00Z", "window_days": 30,
- "incremental": false, "cursor": null, "row_cap": 5000, "warehouse_id": "abc123",
+ "incremental": false, "cursor": null, "row_cap": 5000, "remine_reason": null, "warehouse_id": "abc123",
  "queries": [{"name": "query_history", "sql": "SELECT statement_id, executed_by, start_time, left(statement_text, 100000) AS statement_text\nFROM system.query.history\nWHERE ... LIMIT 5000",
               "params": {"since": "2026-10-14T11:00:00Z", "until": "2026-11-13T11:00:00Z"}},
              {"name": "table_lineage", "sql": "WITH q AS (...) SELECT DISTINCT l.statement_id, l.source_table_full_name FROM system.access.table_lineage l JOIN q ...",
@@ -619,7 +620,7 @@ Starts a turn and returns at once: `{"conversation_id": "...", "response_id": ".
 
 ### `GET /api/ask/poll?conversation_id=<id>&response_id=<id>`
 
-One upstream poll per call, so the browser polls (every 2 to 5 seconds; a turn can take a minute).
+One upstream poll per call, so the browser polls (every 2 to 5 seconds; a turn can take a minute). An upstream poll that fails in transit (HTTP 5xx, no connection, timeout) is tried once more after half a second before the route answers 502. No other ask route retries.
 
 ```json
 {"conversation_id": "...", "response_id": "...",
@@ -688,6 +689,6 @@ Body ignored. Reads the sources and updates the concepts. Each source stands alo
 
 ### `GET /api/certification`
 
-The `system.certification_status` governed tag, read with one `SELECT` over `system.information_schema.table_tags` and `column_tags` on the selected warehouse (the error is the one of `POST /api/query` when none is selected). Response: `{"tables": {"main.sales.orders": "certified"}, "columns": {"main.sales.orders#amount": "deprecated"}, "ignored": 0, "truncated": false}`. A column key is `<table>#<column>`. The value is `certified` or `deprecated` (case-insensitive); any other value is ignored and counted in `ignored`. The UI shows it as a badge on table nodes in the Graph tab and next to link targets in the Concepts editor.
+The `system.certification_status` governed tag, read with one `SELECT` over `system.information_schema.table_tags` and `column_tags` on the selected warehouse. With no warehouse selected it answers **200** with empty maps and `"needs_warehouse": true` and runs nothing (the page does not keep that answer). Response: `{"tables": {"main.sales.orders": "certified"}, "columns": {"main.sales.orders#amount": "deprecated"}, "ignored": 0, "truncated": false}`. A column key is `<table>#<column>`. The value is `certified` or `deprecated` (case-insensitive); any other value is ignored and counted in `ignored`. The UI shows it as a badge on table nodes in the Graph tab and next to link targets in the Concepts editor.
 
 `POST /api/concepts/suggest/run` (section 6) skips every tag whose name starts with `system.` and lists each one under `skipped`, since those are Databricks-owned (certification shows as a badge).

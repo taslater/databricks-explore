@@ -1,13 +1,15 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useAddLink, useCertification, useConcepts, useRemoveLink, type ConceptDetail } from '../api/concepts'
+import { getObject } from '../api/client'
 import { useObject, useSearch } from '../api/hooks'
 import type { Relationship } from '../api/types'
-import { columnsOf } from '../graph/columns'
+import { columnsOf, findColumn } from '../graph/columns'
 import { useUiStore } from '../store/uiStore'
 import { useGraphStore } from '../graph/graphStore'
 import { CertBadge } from './CertBadge'
 import { certificationOf } from './certification'
-import { conceptIdOf, defaultRelation, relationsFor, sourceLabel, targetLabel } from './model'
+import { conceptIdOf, defaultRelation, parseTypedName, relationsFor, sourceLabel, targetLabel } from './model'
 import { useConceptsStore } from './conceptsStore'
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -95,9 +97,14 @@ export function LinksSection({ concept, names }: { concept: ConceptDetail; names
   )
 }
 
-/** Choose a table, a column or a concept, a relation that fits, and add. Table names come from the same search as the picker. */
+/**
+ * Choose a table, a column or a concept, a relation that fits, and add. Tables come from the search over everything
+ * cached (every catalog) or, for one that was never browsed, from a typed `catalog.schema.table[.column]` that is
+ * checked with one tables.get call before it can be linked.
+ */
 function AddLink({ concept, onError }: { concept: ConceptDetail; onError: (m: string | null) => void }) {
   const add = useAddLink()
+  const qc = useQueryClient()
   const connected = useUiStore((s) => s.connectedProfile)
   const concepts = useConcepts({ q: '', domain: '', status: '' })
   const [kind, setKind] = useState<TargetKind>('table')
@@ -106,10 +113,37 @@ function AddLink({ concept, onError }: { concept: ConceptDetail; onError: (m: st
   const [column, setColumn] = useState('')
   const [conceptId, setConceptId] = useState('')
   const [relation, setRelation] = useState<string>(defaultRelation('table'))
+  const [checking, setChecking] = useState(false)
   const graphNodes = useGraphStore((s) => s.nodes)
   const search = useSearch(kind === 'concept' || table ? '' : text)
   const object = useObject(kind === 'column' ? table : null)
   const columns = object.data ? columnsOf(object.data.data) : []
+  const typed = kind === 'concept' || table ? null : parseTypedName(text)
+  const typedFits = typed !== null && (kind === 'column' || typed.column === null)
+
+  /** Check a typed full name against the workspace (cached after the first time) and take it as the target. */
+  async function takeTypedName() {
+    if (!typed || !typedFits) return
+    onError(null)
+    setChecking(true)
+    try {
+      const got = await qc.fetchQuery({ queryKey: ['object', connected, typed.table], queryFn: () => getObject(typed.table), staleTime: 60_000 })
+      const name = typeof got.data.full_name === 'string' ? got.data.full_name : typed.table
+      let picked = ''
+      if (typed.column) {
+        const found = findColumn(columnsOf(got.data), typed.column)
+        if (!found) throw new Error(`${name} has no column "${typed.column}".`)
+        picked = found.name
+      }
+      setTable(name)
+      setColumn(picked)
+      setText('')
+    } catch (e) {
+      onError(messageOf(e))
+    } finally {
+      setChecking(false)
+    }
+  }
 
   const relations = relationsFor(kind)
   const changeKind = (k: TargetKind) => {
@@ -147,7 +181,8 @@ function AddLink({ concept, onError }: { concept: ConceptDetail; onError: (m: st
       className="add-link"
       onSubmit={(e) => {
         e.preventDefault()
-        void submit()
+        if (typedFits && !table) void takeTypedName()
+        else void submit()
       }}
       aria-label="Add a link"
     >
@@ -177,7 +212,7 @@ function AddLink({ concept, onError }: { concept: ConceptDetail; onError: (m: st
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder={connected ? 'search tables by name' : 'connect first'}
+            placeholder={connected ? 'search tables, or type catalog.schema.table' : 'connect first'}
             aria-label="Search tables"
             disabled={!connected}
           />
@@ -205,6 +240,13 @@ function AddLink({ concept, onError }: { concept: ConceptDetail; onError: (m: st
       </div>
       {kind !== 'concept' && !table && text.trim() && (
         <ul className="table-hits" aria-label="Matching tables">
+          {typed && (
+            <li>
+              <button type="button" onClick={() => void takeTypedName()} disabled={!typedFits || checking}>
+                {checking ? 'Checking…' : typedFits ? `Use ${text.trim()}` : `Switch to "column" to link ${text.trim()}`}
+              </button>
+            </li>
+          )}
           {search.isError && <li className="error">{search.error.message}</li>}
           {search.data?.data.slice(0, 12).map((r) => (
             <li key={r.full_name}>
@@ -213,7 +255,9 @@ function AddLink({ concept, onError }: { concept: ConceptDetail; onError: (m: st
               </button>
             </li>
           ))}
-          {search.data && search.data.data.length === 0 && <li className="hint">No match in {search.data.source}.</li>}
+          {search.data && search.data.data.length === 0 && !typed && (
+            <li className="hint">No match in {search.data.source}. A table never browsed can be linked by its full catalog.schema.table name.</li>
+          )}
         </ul>
       )}
       {graphNodes.length > 0 && kind !== 'concept' && !table && !text.trim() && (

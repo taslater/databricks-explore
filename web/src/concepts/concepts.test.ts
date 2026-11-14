@@ -11,6 +11,7 @@ import {
   exportName,
   isDirty,
   parseList,
+  parseTypedName,
   relationsFor,
   sourceLabel,
   targetLabel,
@@ -122,5 +123,19 @@ describe('request helpers', () => {
   it('names an export after the profile and the day, with nothing unsafe in it', () => {
     expect(exportName('my profile/x', new Date('2026-11-13T10:00:00Z'))).toBe('concepts-my_profile_x-2026-11-13.json')
     expect(exportName(null, new Date('2026-11-13T10:00:00Z'))).toBe('concepts-profile-2026-11-13.json')
+  })
+})
+
+describe('parseTypedName', () => {
+  it('reads a table or a column name of three or four parts', () => {
+    expect(parseTypedName('samples.tpch.orders')).toEqual({ table: 'samples.tpch.orders', column: null })
+    expect(parseTypedName('  samples.tpch.orders.o_orderkey ')).toEqual({ table: 'samples.tpch.orders', column: 'o_orderkey' })
+    expect(parseTypedName('`main`.`sales`.`orders`')).toEqual({ table: 'main.sales.orders', column: null })
+  })
+
+  it('is null for anything else', () => {
+    for (const text of ['', 'orders', 'tpch.orders', 'a.b.c.d.e', 'a..c', 'a.b.', 'a b.c.d', 'a.b.c d']) {
+      expect(parseTypedName(text)).toBeNull()
+    }
   })
 })

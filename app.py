@@ -138,7 +138,10 @@ def objects():
 
 @app.get("/api/search")
 def search():
-    return jsonify(ex().search(request.args["q"]))
+    e = ex()
+    if e.warehouse_id:
+        return jsonify(e.search(request.args["q"]))
+    return jsonify(dbx.cached_search(e, request.args["q"]))  # every cached table, in every catalog
 
 
 @app.get("/api/object")

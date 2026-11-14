@@ -477,6 +477,18 @@ def cached_metadata(explorer):
     return sorted(tables.values(), key=lambda t: t["table"])
 
 
+def cached_search(explorer, q, limit=300):
+    """Search table names across everything in the local cache: every catalog and schema ever browsed, and every table
+    whose object was ever fetched. `q` matches the table name or the full `catalog.schema.table` name, any case.
+    Returns {"source", "data": [{"full_name", "name", "type"}]}, name matches first, at most `limit`."""
+    needle = q.strip().lower()
+    hits = [{"full_name": t["table"], "name": t["table"].rsplit(".", 1)[-1], "type": t["type"]}
+            for t in cached_metadata(explorer) if needle and needle in t["table"].lower()]
+    hits.sort(key=lambda h: (needle not in h["name"].lower(), h["name"], h["full_name"]))
+    return {"source": "tables already browsed (pick a SQL warehouse to search everything, or type the full name)",
+            "data": hits[:limit]}
+
+
 # ---------- diagrams ----------
 
 def list_diagrams():
