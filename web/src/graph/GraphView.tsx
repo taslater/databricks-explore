@@ -32,6 +32,8 @@ import { useUiStore } from '../store/uiStore'
 // Defined at module scope so React Flow does not rebuild its node and edge types on every render.
 const NODE_TYPES = { table: TableNode, concept: ConceptNode }
 const CONNECTION_LINE_STYLE = { stroke: EDGE_COLORS.manual, strokeWidth: 2 }
+/** Keys that add a clicked node to the selection: Shift as in most diagram tools, plus the platform modifier. */
+const MULTI_SELECT_KEYS = ['Shift', 'Meta', 'Control']
 
 /** The table node under the pointer where a drag ended, if any. Dropping anywhere on a node connects to it. */
 function nodeIdAt(event: MouseEvent | TouchEvent): string | undefined {
@@ -163,6 +165,8 @@ function GraphCanvas() {
       connectionLineStyle={CONNECTION_LINE_STYLE}
       zoomOnDoubleClick={false}
       deleteKeyCode={null}
+      // Shift- or Cmd/Ctrl-click adds a node to the selection (Shift-drag on the pane still draws a box).
+      multiSelectionKeyCode={MULTI_SELECT_KEYS}
       minZoom={0.05}
     >
       <Controls showInteractive={false} />
