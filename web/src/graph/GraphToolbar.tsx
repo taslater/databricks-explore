@@ -32,7 +32,8 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
   const actions = useGraphActions()
   const drawer = useGraphStore((s) => s.drawer)
   const showConcepts = useGraphStore((s) => s.showConcepts)
-  const allColumns = useGraphStore((s) => s.nodes.length > 0 && s.nodes.every((n) => n.data.showColumns || n.id.startsWith('ph:')))
+  // The setting, not a count of nodes: a node added later follows it, so the label does not flip back.
+  const allColumns = useGraphStore((s) => s.columnsOn)
   const hasNodes = useGraphStore((s) => s.nodes.length > 0)
   const proposed = useSuggestions('proposed').data?.counts.proposed
   useMiningWatcher()

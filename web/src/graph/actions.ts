@@ -9,6 +9,10 @@ import { schemaOf } from './format'
 import { useGraphStore } from './graphStore'
 import { columnsOf } from './columns'
 import { isPlaceholder } from './format'
+import { openSqlInCanvas } from '../ask/canvasAction'
+import { JOIN_KEYS_STALE_MS } from '../api/hooks'
+import { joinSql, planJoins } from './joinQuery'
+import { newTableIds } from './columns'
 import { patchIds, toColumnEdges, toRelations } from './relationships'
 
 export function messageOf(e: unknown): string {
@@ -84,10 +88,14 @@ export function useGraphActions() {
             retry: false,
           }),
         )
+        const before = useGraphStore.getState().nodes.map((n) => n.id)
         useGraphStore.getState().mergeRelations(resp)
         // Errors stay visible. The legacy UI overwrote them with "loaded".
         if (resp.errors.length) useGraphStore.getState().setStatus(resp.errors.join(' | '), true)
         else useGraphStore.getState().setStatus(`loaded ${name}`)
+        // With Show columns on, a node that arrives later shows its columns too.
+        const arrived = newTableIds(useGraphStore.getState().columnsOn, before, useGraphStore.getState().nodes)
+        if (arrived.length > 0) void showColumnsOf(arrived)
       } catch (e) {
         useGraphStore.getState().setStatus(messageOf(e), true)
       }
@@ -180,8 +188,14 @@ export function useGraphActions() {
       else void showColumns(id)
     }
 
-    /** Columns on every table node (one after another: each can mean a warehouse query), or off for all. */
+    /** Columns on several nodes, one after another: each can mean a warehouse query. */
+    async function showColumnsOf(ids: string[]) {
+      for (const id of ids) await showColumns(id)
+    }
+
+    /** Columns on every table node, or off for all. The choice stays on for nodes added later. */
     async function setAllColumns(show: boolean) {
+      useGraphStore.getState().setColumnsOn(show)
       const ids = useGraphStore.getState().nodes.filter((n) => !isPlaceholder(n.id)).map((n) => n.id)
       for (const id of ids) {
         if (show) await showColumns(id)
@@ -212,7 +226,44 @@ export function useGraphActions() {
       if (after.columnEdges.some((e) => e.id === edgeId)) after.setSelection({ kind: 'edge', id: edgeId })
     }
 
+    /**
+     * Writes a SELECT that joins the given tables along known relationships (through other tables if need be) and
+     * adds it to the Canvas as a new query window. When no chain of relationships joins them it says so and writes nothing.
+     */
+    async function queryTables(ids: string[]) {
+      const store = useGraphStore.getState()
+      const tables = ids.filter((id) => !isPlaceholder(id) && !id.startsWith('concept:'))
+      if (tables.length === 0) {
+        store.setStatus('Select at least one table', true)
+        return
+      }
+      store.setStatus('looking for join paths…')
+      try {
+        const profile = useUiStore.getState().connectedProfile
+        const plan = await planJoins(tables, (t) =>
+          qc
+            .fetchQuery({
+              queryKey: ['joinKeys', profile, t],
+              queryFn: () => api.getJoinKeys(t),
+              staleTime: JOIN_KEYS_STALE_MS,
+              retry: false,
+            })
+            .then((r) => r.joins),
+        )
+        if (!plan.ok) {
+          useGraphStore.getState().setStatus(plan.message, true)
+          return
+        }
+        openSqlInCanvas(joinSql(plan))
+        const extra = plan.added.length ? `, adding ${plan.added.map((t) => t.split('.').pop()).join(', ')}` : ''
+        useGraphStore.getState().setStatus(`Wrote a query for ${tables.length} table${tables.length === 1 ? '' : 's'}${extra}`)
+      } catch (e) {
+        useGraphStore.getState().setStatus(messageOf(e), true)
+      }
+    }
+
     return {
+      queryTables,
       expand,
       openObject,
       refreshSelected,

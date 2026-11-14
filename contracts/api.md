@@ -583,6 +583,8 @@ Stored `join_mined` edges at column level, most evidence first (runs, then users
 
 Errors: 400 for an unknown status.
 
+> **Rolled-up runs.** At `level=table`, a rolled `join_mined` edge's `evidence.runs` is the sum over its column-pair members. A statement that joined on a composite key is counted once for each column of it, so the sum is larger than the number of statements (and than the runs of any one key set). Use `GET /api/relationships/joins` for runs per key set.
+
 ### `GET /api/relationships/joins?table=<name>`
 
 How one table is known to join to others, for completion and for listing a pair's key sets. Local only: the table's cached Unity Catalog metadata (no warehouse) plus the stored edges, and no SQL text. Columns are read from the asked table's side.

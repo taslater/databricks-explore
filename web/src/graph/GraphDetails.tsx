@@ -1,7 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import * as api from '../api/client'
-import { useEdge, useObject } from '../api/hooks'
-import type { EdgeFlow, GraphEdge, Producer, RelationshipStatus } from '../api/types'
+import { useEdge, useJoinKeys, useObject } from '../api/hooks'
+import { formatConstraints } from './constraints'
+import { keyDetail, rankKeys } from '../canvas/linking/joinKeys'
+import type { EdgeFlow, GraphEdge, JoinKey, Producer, RelationshipStatus } from '../api/types'
 import { fetchCurrentEdge, messageOf, sendToCanvas, useGraphActions } from './actions'
 import { DERIVED_KINDS, KIND_LABEL, KIND_STYLE, STORED_KINDS } from './edgeStyles'
 import { ageDays, fmtAge, fmtTime, lastPart } from './format'
@@ -25,6 +27,12 @@ export function GraphDetails() {
       : undefined,
   )
   const actions = useGraphActions()
+  const allNodes = useGraphStore((s) => s.nodes)
+  // The tables ticked on the graph (shift-click or drag a box), or the one node whose details are open.
+  const pickedTables = useMemo(() => {
+    const picked = allNodes.filter((n) => n.selected && !n.id.startsWith('ph:')).map((n) => n.id)
+    return picked.length > 0 ? picked : selectedNode && !selectedNode.id.startsWith('ph:') ? [selectedNode.id] : []
+  }, [allNodes, selectedNode])
 
   // Keep the field's own text so the user can clear it and type a new number. The store gets the parsed value.
   const [daysText, setDaysText] = useState(String(staleDays))
@@ -95,6 +103,13 @@ export function GraphDetails() {
         >
           Send to canvas
         </button>
+        <button
+          onClick={() => void actions.queryTables(pickedTables)}
+          disabled={pickedTables.length === 0}
+          title="Write a SELECT that joins the selected tables along known relationships, and open it on the canvas"
+        >
+          Query {pickedTables.length > 1 ? 'these tables' : 'this table'}
+        </button>
         <button onClick={() => useGraphStore.getState().requestLayout()} disabled={!hasNodes}>
           Reset layout
         </button>
@@ -140,7 +155,7 @@ function NodeDetails({ id, node }: { id: string; node: FlowNode }) {
   const payload = obj.data
   const t = payload.data
   const cols = t.columns ?? []
-  const constraints = (t.table_constraints ?? []).map((c) => JSON.stringify(c)).join('\n')
+  const constraints = formatConstraints(t.table_constraints)
   const viewDefinition = str(t.view_definition)
   return (
     <div>
@@ -151,10 +166,14 @@ function NodeDetails({ id, node }: { id: string; node: FlowNode }) {
       <div className="hint">cached {payload.fetched_at}</div>
       {node.data.selfRef && <p>↻ Reads its own data (e.g. MERGE). Last seen {fmtAge(node.data.selfRefLastSeen)}</p>}
       <p>{str(t.comment)}</p>
-      {constraints && (
+      {constraints.length > 0 && (
         <>
           <h4>Constraints</h4>
-          <pre>{constraints}</pre>
+          <ul className="constraints">
+            {constraints.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
         </>
       )}
       <h4>Columns ({cols.length})</h4>
@@ -253,6 +272,51 @@ function EdgeBody({ info, staleDays }: { info: GraphEdge; staleDays: number }) {
         <br />
         {info.directed === false ? '↔' : '→'} {info.target}
       </p>
+      {(info.kind === 'join_mined' || info.kind === 'manual') && <JoinKeySets info={info} />}
+    </div>
+  )
+}
+
+const lastOf = (table: string) => table.split('.').pop() ?? table
+
+/**
+ * The key sets a mined or manual table edge stands for, one per way the tables were joined: which columns, and
+ * for a mined one how many statements used exactly that set. A composite key is one line with its columns ANDed.
+ */
+function JoinKeySets({ info }: { info: GraphEdge }) {
+  const joins = useJoinKeys(info.source)
+  const wanted = info.kind === 'manual' ? 'manual' : 'mined'
+  const keys: JoinKey[] = useMemo(() => {
+    const found = joins.data?.joins.find((j) => j.table.toLowerCase() === info.target.toLowerCase())
+    const mine = (found?.keys ?? []).filter((k) => k.source === wanted && k.pairs.length > 0)
+    // Usable ones first, best first, then the rejected ones.
+    return [...rankKeys(mine), ...mine.filter((k) => k.status === 'rejected')]
+  }, [joins.data, info.target, wanted])
+  if (joins.isPending) return <p className="hint">loading columns…</p>
+  if (joins.isError) return <p className="error">{joins.error.message}</p>
+  if (keys.length === 0) return <p className="hint">No columns recorded for this edge.</p>
+  const a = lastOf(info.source)
+  const b = lastOf(info.target)
+  return (
+    <div className="key-sets">
+      <h4>{keys.length === 1 ? 'Joined on' : `Joined ${keys.length} ways`}</h4>
+      {keys.map((k, i) => (
+        <p key={i} className={k.status === 'rejected' ? 'rejected' : undefined}>
+          {k.pairs.map((p) => `${a}.${p.here} = ${b}.${p.there}`).join(' AND ')}
+          <br />
+          <span className="hint">
+            {keyDetail(k)}
+            {k.pairs.length > 1 ? ' · composite key' : ''}
+            {k.status === 'rejected' ? ' · rejected' : ''}
+          </span>
+        </p>
+      ))}
+      {wanted === 'mined' && (
+        <p className="hint">
+          Runs are counted per key set, in the Suggestions list too. A single column's runs include the statements that
+          used it inside a composite key, so they are not added up here.
+        </p>
+      )}
     </div>
   )
 }
@@ -262,7 +326,10 @@ function EdgeProvenance({ info }: { info: GraphEdge }) {
   const p = info.provenance
   const ev = info.evidence
   if (!p) return null
-  const counts = ev ? [ev.runs != null && `${ev.runs} runs`, ev.users != null && `${ev.users} users`].filter(Boolean) : []
+  // A table-level mined edge adds up the runs of its column pairs, which counts a composite-key statement once per
+  // column. The key sets above carry the real counts, so the sum is not shown.
+  const summed = info.kind === 'join_mined' && !info.source_column
+  const counts = ev && !summed ? [ev.runs != null && `${ev.runs} runs`, ev.users != null && `${ev.users} users`].filter(Boolean) : []
   return (
     <div className="edge-provenance">
       <h4>Provenance</h4>

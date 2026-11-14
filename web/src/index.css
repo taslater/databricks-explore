@@ -2801,3 +2801,22 @@ button.app-dialog-danger {
   border-color: var(--error);
   color: #fff;
 }
+
+/* Graph details: constraints and the key sets of a joined pair */
+.details ul.constraints {
+  margin: 4px 0;
+  padding-left: 18px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.details .key-sets p {
+  margin: 4px 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.details .key-sets p.rejected {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
