@@ -29,7 +29,11 @@ export function changesToPatch(changes: LayoutChange[]): LayoutPatch {
     if (c.kind === 'node') {
       patch.nodes[c.id] = { position: { x: c.to.x, y: c.to.y }, size: { w: c.to.w, h: c.to.h } }
     } else {
-      patch.edges[c.id] = { source_handle: c.to.source_handle, target_handle: c.to.target_handle } as LayoutPatch['edges'][string]
+      patch.edges[c.id] = {
+        source_handle: c.to.source_handle,
+        target_handle: c.to.target_handle,
+        ...(c.to.label_offset !== undefined ? { label_offset: c.to.label_offset } : {}),
+      } as LayoutPatch['edges'][string]
     }
   }
   return patch

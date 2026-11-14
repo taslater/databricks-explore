@@ -10,9 +10,10 @@ import {
 import { DEFAULT_EDGE_COLOR } from '../model'
 import { useSketchStore } from '../sketchStore'
 import { InlineText } from '../nodes/InlineText'
-import type { SketchEdge } from '../types'
+import type { Point, SketchEdge } from '../types'
 
-export type SketchFlowEdge = Edge<{ edge: SketchEdge }, 'sketch'>
+/** `labelAt` is where the label is centered, from labels.ts (the same rule layout.py follows). Absent: the path's midpoint. */
+export type SketchFlowEdge = Edge<{ edge: SketchEdge; labelAt?: Point }, 'sketch'>
 
 /**
  * A user-drawn connector: straight, orthogonal (step) or curved, solid or dashed, with arrowheads chosen on
@@ -28,13 +29,15 @@ export function SketchEdgeView(props: EdgeProps<SketchFlowEdge>) {
   const line = edge?.line ?? 'step'
 
   const args = { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition }
-  const [path, labelX, labelY] =
+  const [path, midX, midY] =
     line === 'straight'
       ? getStraightPath(args)
       : line === 'curve'
         ? getBezierPath(args)
         : getSmoothStepPath({ ...args, borderRadius: 0 })
 
+  const labelX = data?.labelAt?.x ?? midX
+  const labelY = data?.labelAt?.y ?? midY
   const color = edge?.color ?? DEFAULT_EDGE_COLOR
   const label = edge?.label ?? ''
 

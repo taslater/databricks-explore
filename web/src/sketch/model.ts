@@ -1,5 +1,6 @@
 // Pure logic for the sketch module: defaults, palette, ids, alignment, stacking order, containment,
 // copy and paste. No React, store or fetch imports, so tests call it directly.
+import { fitSize } from './labels'
 import type {
   Geometry,
   HostNode,
@@ -89,6 +90,25 @@ export function defaultSize(type: SketchType, shape?: ShapeKind): Size {
     case 'placeholder':
       return { w: PLACEHOLDER_WIDTH, h: PLACEHOLDER_MIN_HEIGHT }
   }
+}
+
+/**
+ * The size a node gets when its label is `label` and nobody resized it: the default size, grown to fit the label
+ * (wrapping past MAX_FIT_W), rounded up to the grid when `snap` is on.
+ */
+export function fittedSize(n: SketchNode, label: string, snap: boolean): Size {
+  const fit = fitSize({ ...n, label, size: defaultSize(n.type, n.shape) })
+  return snap ? { w: Math.ceil(fit.w / GRID) * GRID, h: Math.ceil(fit.h / GRID) * GRID } : fit
+}
+
+/** The node with a committed label. Its size follows the label unless the person resized it (it no longer matches what the old label gave). */
+export function withLabel(n: SketchNode, label: string, snap: boolean): SketchNode {
+  const untouched = n.type !== 'placeholder' && sameSize(n.size, fittedSize(n, n.label ?? '', snap))
+  return untouched ? { ...n, label, size: fittedSize(n, label, snap) } : { ...n, label }
+}
+
+function sameSize(a: Size, b: Size): boolean {
+  return a.w === b.w && a.h === b.h
 }
 
 /** The tool for a placing tool, as the node it creates. Null for select, hand and connect. */

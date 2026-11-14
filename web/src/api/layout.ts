@@ -13,10 +13,11 @@ export type IssueKind =
   | 'bad_handle_side'
   | 'outside_frame'
   | 'label_overflow'
+  | 'label_collision'
   | 'far_away'
   | 'off_grid'
 
-export type TidyRule = 'frames' | 'overlaps' | 'align' | 'spacing' | 'grid' | 'handles'
+export type TidyRule = 'fit_labels' | 'frames' | 'overlaps' | 'align' | 'spacing' | 'grid' | 'handles' | 'place_labels'
 
 /** The body to send to the tidy route (with the canvas) to fix one issue. */
 export interface IssueFix {
@@ -63,8 +64,8 @@ export interface NodeChange {
 export interface EdgeChange {
   kind: 'edge'
   id: string
-  from: { source_handle: string | null; target_handle: string | null }
-  to: { source_handle: string | null; target_handle: string | null }
+  from: { source_handle: string | null; target_handle: string | null; label_offset?: number }
+  to: { source_handle: string | null; target_handle: string | null; label_offset?: number }
 }
 
 export type LayoutChange = NodeChange | EdgeChange

@@ -92,4 +92,15 @@ describe('canvas file round trip with note and table windows', () => {
     delete (noTable.windows[2] as CanvasWindow).table
     expect(() => parseCanvasFile(noTable)).toThrow(/table/)
   })
+
+  it('keeps a connector label offset through save and load, and writes none when it is 0', () => {
+    const edge = { id: 'c1', source: 's1', target: 's2', line: 'step' as const, arrow_start: false, arrow_end: true, dashed: false, label: 'x' }
+    const sketchNodes = ['s1', 's2'].map((id) => ({ id, type: 'shape' as const, shape: 'rect' as const, position: { x: 0, y: 0 }, size: { w: 100, h: 50 } }))
+    const file = toCanvasFile({ viewport, windows: [], sketchNodes, edges: [{ ...edge, label_offset: -18 }, { ...edge, id: 'c2', label_offset: 0 }] }, meta)
+    expect(file.edges?.[0].label_offset).toBe(-18)
+    expect(file.edges?.[1]).not.toHaveProperty('label_offset')
+    const back = fromCanvasFile(parseCanvasFile(JSON.parse(JSON.stringify(file))))
+    expect(back.edges[0].label_offset).toBe(-18)
+    expect(back.edges[1].label_offset).toBeUndefined()
+  })
 })

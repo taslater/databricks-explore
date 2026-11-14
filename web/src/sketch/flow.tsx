@@ -9,7 +9,7 @@ import { PlaceholderNode } from './nodes/PlaceholderNode'
 import { ShapeNode } from './nodes/ShapeNode'
 import { DEFAULT_EDGE_COLOR, effectiveZ } from './model'
 import { useSketchStore } from './sketchStore'
-import type { SketchEdge, SketchNode, Tool } from './types'
+import type { Point, SketchEdge, SketchNode, Tool } from './types'
 
 /** Error boundary per node, so a crash in one sketch node shows an error card there and nothing else. */
 function withSketchBoundary<P extends NodeProps>(Inner: ComponentType<P>): ComponentType<P> {
@@ -74,7 +74,7 @@ export function toSketchFlowNode(n: SketchNode, selected: boolean, tool: Tool): 
 }
 
 /** One connector as a React Flow edge. */
-export function toSketchFlowEdge(e: SketchEdge, selected: boolean): SketchFlowEdge {
+export function toSketchFlowEdge(e: SketchEdge, selected: boolean, labelAt?: Point): SketchFlowEdge {
   const color = e.color ?? DEFAULT_EDGE_COLOR
   return {
     id: e.id,
@@ -87,7 +87,7 @@ export function toSketchFlowEdge(e: SketchEdge, selected: boolean): SketchFlowEd
     reconnectable: true,
     deletable: false,
     focusable: false,
-    data: { edge: e },
+    data: { edge: e, ...(labelAt ? { labelAt } : {}) },
     markerStart: e.arrow_start ? { type: MarkerType.ArrowClosed, color, width: 18, height: 18 } : undefined,
     markerEnd: e.arrow_end ? { type: MarkerType.ArrowClosed, color, width: 18, height: 18 } : undefined,
     zIndex: 5,

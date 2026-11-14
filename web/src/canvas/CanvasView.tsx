@@ -17,6 +17,7 @@ import { useCanvasStore, DEFAULT_NOTE_SIZE, DEFAULT_QUERY_SIZE, type CanvasSize 
 import { useUiStore } from '../store/uiStore'
 import { TABLE_DRAG_MIME } from '../shared/Picker'
 import { sketchEdgeTypes, sketchNodeTypes, toSketchFlowEdge, toSketchFlowNode } from '../sketch/flow'
+import { labelCenters } from '../sketch/labels'
 import { GRID, effectiveZ } from '../sketch/model'
 import { useSketchStore } from '../sketch/sketchStore'
 import { useSketchKeys } from '../sketch/useSketchKeys'
@@ -178,6 +179,12 @@ function CanvasInner() {
   // Tables each query window reads (server lookup, debounced). Feeds the table edges below.
   const tableReads = useQueryTables(windows)
 
+  // Where each connector's label sits: the middle of the longest stretch no other connector shares (labels.ts).
+  const centers = useMemo(
+    () => labelCenters([...windows.map((w) => ({ id: w.id, position: w.position, size: w.size })), ...sketchNodes], sketchEdges),
+    [windows, sketchNodes, sketchEdges],
+  )
+
   // Derived edges are read-only: from each referenced window to the window that references it, and from each
   // table card to the queries that read it. They are thin and gray, and the sketch's own connectors are not.
   const edges = useMemo<Edge[]>(() => {
@@ -206,9 +213,9 @@ function CanvasInner() {
       ...deriveLinks(windows).map((l) => derived(`${l.from}>${l.to}`, l.from, l.to, false)),
       // Table card to query window, for each table the query reads. Dashed to tell it from lineage.
       ...tableEdges(windows, tableReads).map((e) => derived(e.id, e.from, e.to, true)),
-      ...sketchEdges.map((e) => toSketchFlowEdge(e, picked.has(e.id))),
+      ...sketchEdges.map((e) => toSketchFlowEdge(e, picked.has(e.id), centers[e.id])),
     ]
-  }, [windows, tableReads, sketchEdges, selectedEdgeIds])
+  }, [windows, tableReads, sketchEdges, selectedEdgeIds, centers])
 
   const wrapperBox = useCallback(() => wrapRef.current?.getBoundingClientRect(), [])
   const interactions = useSketchInteractions(screenToFlowPosition, wrapperBox)

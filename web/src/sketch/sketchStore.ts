@@ -18,6 +18,7 @@ import {
   snapSize,
   toItems,
   toolToNode,
+  withLabel,
   type AlignMode,
   type Clip,
   type DistributeAxis,
@@ -44,7 +45,7 @@ export type EdgeStyle = Pick<SketchEdge, 'line' | 'arrow_start' | 'arrow_end' | 
 /** Geometry and connector-side changes from the layout tools, keyed by node and connector id. */
 export interface LayoutPatch {
   nodes: Record<string, { position?: Point; size?: Size }>
-  edges: Record<string, { source_handle?: Side | null; target_handle?: Side | null }>
+  edges: Record<string, { source_handle?: Side | null; target_handle?: Side | null; label_offset?: number }>
 }
 
 export interface ConnectionLike {
@@ -321,7 +322,8 @@ export function createSketchStore(): UseBoundStore<StoreApi<SketchState>> {
         const node = get().nodes.find((n) => n.id === id)
         if (!node || (node.label ?? '') === label) return
         checkpoint(`label:${id}`)
-        set({ nodes: mapNode(id, (n) => ({ ...n, label })) })
+        const snap = get().snap
+        set({ nodes: mapNode(id, (n) => withLabel(n, label, snap)) })
       },
 
       updatePlaceholder: (id, update, key) => {
@@ -372,6 +374,10 @@ export function createSketchStore(): UseBoundStore<StoreApi<SketchState>> {
               const v = p[key]
               if (v) next[key] = v
               else delete next[key]
+            }
+            if (p.label_offset !== undefined) {
+              if (p.label_offset) next.label_offset = p.label_offset
+              else delete next.label_offset
             }
             return next
           }),

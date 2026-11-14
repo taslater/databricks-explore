@@ -44,6 +44,13 @@ describe('changesToPatch', () => {
     expect(patch.nodes.a).toEqual({ position: { x: 10, y: 20 }, size: { w: 100, h: 50 } })
     expect(patch.edges.e1).toEqual({ source_handle: 'r', target_handle: 'l' })
   })
+
+  it('carries a label offset when the route says one changed', () => {
+    const patch = changesToPatch([
+      { kind: 'edge', id: 'e1', from: { source_handle: 'r', target_handle: 'l' }, to: { source_handle: 'r', target_handle: 'l', label_offset: 24 } },
+    ])
+    expect(patch.edges.e1).toEqual({ source_handle: 'r', target_handle: 'l', label_offset: 24 })
+  })
 })
 
 describe('applyLayout in the sketch store', () => {
@@ -108,6 +115,15 @@ describe('applyLayout in the sketch store', () => {
     useStore.getState().redo()
     expect(useStore.getState().nodes[0].position).toEqual({ x: 123, y: 77 })
     expect(geo.w1.position).toEqual({ x: 13, y: 17 })
+  })
+
+  it('sets and clears a connector label offset', () => {
+    useStore.getState().applyLayout({ nodes: {}, edges: { e1: { label_offset: 24 } } })
+    expect(useStore.getState().edges[0]).toMatchObject({ source_handle: 'l', label_offset: 24 })
+    useStore.getState().applyLayout({ nodes: {}, edges: { e1: { label_offset: 0 } } })
+    expect(useStore.getState().edges[0]).not.toHaveProperty('label_offset')
+    useStore.getState().undo()
+    expect(useStore.getState().edges[0].label_offset).toBe(24)
   })
 
   it('removes a side when the patch clears it, and does nothing (no undo step) when nothing applies', () => {

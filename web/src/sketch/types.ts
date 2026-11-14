@@ -82,6 +82,8 @@ export interface SketchEdge {
   arrow_end: boolean
   dashed: boolean
   label?: string
+  /** Pixels the label is moved along the segment it sits on (see labels.ts). Absent means 0. Set by tidy. */
+  label_offset?: number
   color?: string
   relationship?: RelationshipRef
 }

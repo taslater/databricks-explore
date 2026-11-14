@@ -92,6 +92,7 @@ const edgeSchema = z.object({
   arrow_end: z.boolean().default(true),
   dashed: z.boolean().default(false),
   label: z.string().optional(),
+  label_offset: z.number().optional(),
   color: z.string().optional(),
   relationship: z
     .object({
@@ -290,6 +291,7 @@ function toFileEdge(e: SketchEdge): SketchEdge {
   if (e.source_handle) out.source_handle = e.source_handle
   if (e.target_handle) out.target_handle = e.target_handle
   if (e.label) out.label = e.label
+  if (e.label_offset) out.label_offset = e.label_offset
   if (e.color) out.color = e.color
   if (e.relationship && Object.keys(e.relationship).length > 0) out.relationship = { ...e.relationship }
   return out
