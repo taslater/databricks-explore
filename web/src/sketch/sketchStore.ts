@@ -41,6 +41,12 @@ import { EMPTY_HOST } from './types'
 
 export type EdgeStyle = Pick<SketchEdge, 'line' | 'arrow_start' | 'arrow_end' | 'dashed' | 'color'>
 
+/** Geometry and connector-side changes from the layout tools, keyed by node and connector id. */
+export interface LayoutPatch {
+  nodes: Record<string, { position?: Point; size?: Size }>
+  edges: Record<string, { source_handle?: Side | null; target_handle?: Side | null }>
+}
+
 export interface ConnectionLike {
   source: string
   target: string
@@ -94,6 +100,11 @@ export interface SketchState {
   /** Moves sketch and host nodes. Does not record history: call checkpoint when the gesture starts. */
   moveItems: (positions: Record<string, Point>) => void
   resizeNode: (id: string, position: Point, size: Size) => void
+  /**
+   * Applies a layout result to sketch and host nodes and to connector sides as ONE undo step. Never snaps
+   * (the layout already chose the values) and skips locked nodes. Returns how many nodes and connectors changed.
+   */
+  applyLayout: (patch: LayoutPatch) => number
   /** Records a placeholder's measured height so alignment and export know it. No history. */
   syncHeight: (id: string, h: number) => void
 
@@ -327,6 +338,46 @@ export function createSketchStore(): UseBoundStore<StoreApi<SketchState>> {
         const p = snap ? snapPoint(position) : position
         const s = snap ? snapSize(size) : size
         set({ nodes: mapNode(id, (n) => ({ ...n, position: { x: p.x, y: p.y }, size: { w: s.w, h: s.h } })) })
+      },
+
+      applyLayout: (patch) => {
+        const { nodes, edges, host } = get()
+        const hostById = new Map(host.nodes().map((h) => [h.id, h]))
+        const nodeIds = new Set(nodes.map((n) => n.id))
+        const hostPatches: Record<string, Partial<Geometry>> = {}
+        const sketchPatch = new Map<string, { position?: Point; size?: Size }>()
+        for (const [id, p] of Object.entries(patch.nodes)) {
+          if (nodeIds.has(id)) {
+            if (!nodes.find((n) => n.id === id)?.locked) sketchPatch.set(id, p)
+          } else if (hostById.has(id) && !hostById.get(id)?.locked) {
+            hostPatches[id] = { ...(p.position ? { position: { ...p.position } } : {}), ...(p.size ? { size: { ...p.size } } : {}) }
+          }
+        }
+        const edgePatch = new Map(Object.entries(patch.edges).filter(([id]) => edges.some((e) => e.id === id)))
+        const count = sketchPatch.size + Object.keys(hostPatches).length + edgePatch.size
+        if (count === 0) return 0
+        checkpoint()
+        set({
+          nodes: nodes.map((n) => {
+            const p = sketchPatch.get(n.id)
+            if (!p) return n
+            return { ...n, ...(p.position ? { position: { ...p.position } } : {}), ...(p.size ? { size: { ...p.size } } : {}) }
+          }),
+          edges: edges.map((e) => {
+            const p = edgePatch.get(e.id)
+            if (!p) return e
+            const next = { ...e }
+            for (const key of ['source_handle', 'target_handle'] as const) {
+              if (!(key in p)) continue
+              const v = p[key]
+              if (v) next[key] = v
+              else delete next[key]
+            }
+            return next
+          }),
+        })
+        if (Object.keys(hostPatches).length > 0) host.patch(hostPatches)
+        return count
       },
 
       syncHeight: (id, h) => {
