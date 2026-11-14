@@ -111,6 +111,11 @@ function sameSize(a: Size, b: Size): boolean {
   return a.w === b.w && a.h === b.h
 }
 
+/** True when typing or double-clicking can edit this node's label: not a placeholder table, not locked. */
+export function isLabelable(n: { type: string; locked?: boolean }): boolean {
+  return n.type !== 'placeholder' && n.locked !== true
+}
+
 /** The tool for a placing tool, as the node it creates. Null for select, hand and connect. */
 export function toolToNode(tool: Tool): { type: SketchType; shape?: ShapeKind } | null {
   switch (tool) {

@@ -1,6 +1,7 @@
 import { useConnect, useProfiles, useSetWarehouse, useWarehouses } from '../api/hooks'
 import { ObjectPicker } from '../graph/ObjectPicker'
 import { useUiStore } from '../store/uiStore'
+import { warehouseLabel } from './warehouseLabel'
 
 export { TABLE_DRAG_MIME, tableDragProps } from './tableDrag'
 
@@ -79,7 +80,7 @@ export function Picker({ onCollapse }: PickerProps) {
               <option value="">no SQL warehouse</option>
               {warehouses.data?.map((w) => (
                 <option key={w.id} value={w.id}>
-                  {w.name} ({(w.state ?? '').toLowerCase()})
+                  {warehouseLabel(w.name, w.state)}
                 </option>
               ))}
             </select>
