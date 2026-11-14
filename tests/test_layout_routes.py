@@ -110,3 +110,19 @@ def test_bad_requests_are_json_errors(client, path, body, status):
 def test_non_json_body_is_a_400(client):
     r = client.post("/api/layout/doctor", data="x", content_type="text/plain")
     assert r.status_code == 400 and "error" in r.get_json()
+
+
+def test_tidy_route_fits_labels_and_places_connector_labels(client):
+    body = copy.deepcopy(CANVAS)
+    body["windows"][2]["position"] = {"x": 900, "y": 0}
+    body["windows"][1]["position"] = {"x": 0, "y": 300}
+    body["windows"][0]["label"] = "a label that is far too long for its box"
+    body["edges"] = [{"id": "e1", "source": "a", "target": "c", "source_handle": "r", "target_handle": "l", "label": "first"},
+                     {"id": "e2", "source": "a", "target": "c", "source_handle": "r", "target_handle": "l", "label": "second"}]
+    kinds = {i["kind"] for i in post(client, "doctor", {"canvas": body}).get_json()["issues"]}
+    assert {"label_overflow", "label_collision"} <= kinds
+    out = post(client, "tidy", {"canvas": body, "rules": ["fit_labels", "place_labels"]}).get_json()
+    assert any(c["kind"] == "edge" and "label_offset" in c["to"] for c in out["changes"])
+    assert out["canvas"]["windows"][0]["size"]["w"] > 120
+    canvases.parse_canvas(out["canvas"])  # label_offset is part of the canvas format
+    assert post(client, "tidy", {"canvas": body, "rules": ["fit"]}).status_code == 400

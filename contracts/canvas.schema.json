@@ -503,6 +503,11 @@
         "label": {
           "type": "string"
         },
+        "label_offset": {
+          "type": "number",
+          "default": 0,
+          "description": "Pixels the label is moved along the segment it sits on: the longest segment of the connector that no other connector runs along. Positive moves it toward the end of that segment. Set by tidy (place_labels) to keep labels apart; absent means 0."
+        },
         "color": {
           "type": "string",
           "description": "CSS color of the line."

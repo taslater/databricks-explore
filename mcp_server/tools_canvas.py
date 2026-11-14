@@ -38,7 +38,8 @@ NODE = {"type": "object", "required": ["type"], "additionalProperties": False,
                        "label": S, "title": {"type": "string", "description": "query, note and table windows: unique, used as {{title}} in SQL"},
                        "shape": {"type": "string", "enum": list(SHAPES)}, "sql": S, "text": S, "table": S,
                        "name": {"type": "string", "description": "placeholder: the table name"}, "columns": {"type": "array", "items": COLUMN},
-                       "w": {"type": "number", "exclusiveMinimum": 0}, "h": {"type": "number", "exclusiveMinimum": 0},
+                       "w": {"type": "number", "exclusiveMinimum": 0, "description": "omit it and a sketch node is sized to fit its label"},
+                       "h": {"type": "number", "exclusiveMinimum": 0},
                        "place": PLACE, "at": POINT, **STYLE_PROPS}}
 
 
@@ -170,6 +171,8 @@ def build_node(canvas: dict, spec: dict) -> dict:
             raise ToolError("a table node needs table (catalog.schema.table)")
         base = re.sub(r"[{}]", "", spec["table"].split(".")[-1]).strip() or "table"
         node.update(title=_title(canvas, spec.get("title") or base), table=spec["table"], collapsed=False)
+    if kind in SKETCH and "w" not in spec:  # no width asked for: size the node to its label (wrapping past MAX_FIT_W)
+        node["size"]["w"], node["size"]["h"] = layout.fit_size(node)
     return node
 
 
@@ -375,7 +378,7 @@ def arrange(ctx, args):
     return text(_edit(args["name"], mutate, False))
 
 
-@tool("tidy", "Fix a layout with the least movement: frames, overlaps, alignment, even spacing, grid, connector sides. ids limits what may move; rules picks a subset.",
+@tool("tidy", "Fix a layout with the least movement: grow nodes to fit their labels, frames, overlaps, alignment, even spacing, grid, connector sides, connector label placement. ids limits what may move; rules picks a subset.",
       obj({"name": NAME, "ids": strings(), "rules": {"type": "array", "items": {"type": "string", "enum": list(layout.RULES)}},
            "grid": {"type": "number", "exclusiveMinimum": 0}}, ("name",)), read_only=False)
 def tidy(ctx, args):

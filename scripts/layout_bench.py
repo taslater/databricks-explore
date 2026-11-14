@@ -1,4 +1,5 @@
 """Benchmark for layout.tidy: perturb generated canvases the way an LLM does, tidy them, print doctor metrics before and after.
+The "labels" scenario adds long node labels and converging labeled connectors.
 
 Run:  python scripts/layout_bench.py [--seed N] [--grid 20]
 """
@@ -62,7 +63,29 @@ def gen_frames():
     return {"version": 2, "name": "frames", "profile": None, "windows": nodes, "edges": edges}
 
 
-GENERATORS = {"flow": gen_flow, "query grid": gen_query_grid, "frames": gen_frames}
+def gen_labels():
+    """What an agent drew over MCP: default-size cylinders with long table names, three labeled connectors converging
+    on one node, two labeled connectors between one pair, and a labeled connector across a gap just wide enough for its label."""
+    def cyl(nid, label, x, y):
+        return _node(nid, x, y, 100, 120, shape="cylinder", label=label)
+    nodes = [cyl("orders", "samples.tpch.orders", 0, 0), cyl("customer", "samples.tpch.customer", 0, 180),
+             cyl("lineitem", "samples.tpch.lineitem", 0, 360),
+             _node("join", 520, 190, 140, 80, label="orders_enriched", shape="rounded"),
+             cyl("mart", "analytics.gold.revenue_by_customer_segment", 900, 40),
+             _node("note", 900, 300, 200, 60, kind="shape", label="Daily revenue by customer segment (gold)", shape="rounded"),
+             _node("report", 1000, 440, 140, 60, label="report"), _node("dash", 1280, 440, 140, 60, label="dash")]
+    links = [("orders", "join", "source"), ("customer", "join", "join"), ("lineitem", "join", "lookup"),
+             ("join", "mart", "aggregate"), ("join", "mart", "publish"), ("report", "dash", "daily refresh")]
+    edges = []
+    for i, (a, b, label) in enumerate(links):
+        e = _edge(i, a, b)
+        e["label"] = label
+        edges.append(e)
+    return {"version": 2, "name": "labels", "profile": None, "windows": nodes, "edges": edges}
+
+
+LABEL_RULES = ("fit_labels", "place_labels")
+GENERATORS = {"flow": gen_flow, "query grid": gen_query_grid, "frames": gen_frames, "labels": gen_labels}
 
 
 def perturb(canvas, seed):
@@ -85,11 +108,15 @@ def perturb(canvas, seed):
     return c
 
 
+def _count(rep, kind):
+    return sum(1 for i in rep["issues"] if i["kind"] == kind)
+
+
 def _row(label, rep):
     m = rep["metrics"]
-    return (f"{label:<9} score {rep['score']:>3}  overlap {m['overlap_area']:>7.0f}  crossings {m['edge_crossings']:>2}  "
+    return (f"{label:<15} score {rep['score']:>3}  overlap {m['overlap_area']:>7.0f}  crossings {m['edge_crossings']:>2}  "
             f"align {m['alignment_score']:.2f}  edge len {m['edge_length_mean']:>5.0f} (var {m['edge_length_variance']:>7.0f})  "
-            f"issues {len(rep['issues']):>2}")
+            f"issues {len(rep['issues']):>2}  label overflow {_count(rep, 'label_overflow'):>2} collision {_count(rep, 'label_collision'):>2}")
 
 
 def run(seed=7, grid=None):
@@ -101,11 +128,13 @@ def run(seed=7, grid=None):
         fixed, changes = layout.tidy(broken, grid=grid)
         again = layout.tidy(fixed, grid=grid)[1]
         before, after = layout.doctor(broken, grid), layout.doctor(fixed, grid)
+        legacy = layout.tidy(broken, rules=[r for r in layout.RULES if r not in LABEL_RULES], grid=grid)[0]  # tidy before the label rules
         moved = [c for c in changes if c["kind"] == "node"]
         shift = [abs(c["to"]["x"] - c["from"]["x"]) + abs(c["to"]["y"] - c["from"]["y"]) for c in moved]
         print(f"== {name}: {len(clean['windows'])} nodes, {len(clean['edges'])} connectors")
         print("  " + _row("clean", layout.doctor(clean, grid)))
         print("  " + _row("perturbed", before))
+        print("  " + _row("no label rules", layout.doctor(legacy, grid)))
         print("  " + _row("tidied", after))
         print(f"  tidy moved {len(moved)} nodes (mean {sum(shift) / len(shift) if shift else 0:.0f} px), "
               f"changed {len(changes) - len(moved)} connectors; second tidy changes: {len(again)}")

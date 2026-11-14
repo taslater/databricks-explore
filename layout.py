@@ -12,7 +12,7 @@ import io
 import math
 from typing import Any, Iterable, Optional
 
-RULES = ("frames", "overlaps", "align", "spacing", "grid", "handles")
+RULES = ("fit_labels", "frames", "overlaps", "align", "spacing", "grid", "handles", "place_labels")
 ARRANGE_MODES = ("grid", "row", "column", "layered", "place")
 PLACE_RELATIONS = ("right_of", "left_of", "below", "above", "inside")
 
@@ -25,16 +25,22 @@ COLLAPSED_H = 36.0     # height of a collapsed window (its title bar)
 STEP_OFFSET = 20.0     # how far a step connector leaves a node before turning
 DIR = {"t": (0, -1), "r": (1, 0), "b": (0, 1), "l": (-1, 0)}
 SKETCH = ("shape", "text", "sticky", "frame", "placeholder")
+MAX_FIT_W = 320        # a sketch label wider than this wraps (and the node grows taller) instead of widening further
+LABEL_CHAR_W = 6.7     # connector labels: 12 px text, estimated character width
+LABEL_LINE_H = 15.6    # one line of a connector label
+LABEL_PAD = (14.0, 6.0)  # horizontal and vertical padding plus border of a connector label box
+LABEL_STEP = 4         # px a connector label is nudged at a time along its segment
+SHARE_TOL = 1.0        # px: two connector segments closer than this and parallel run along each other
 
 PENALTY = {  # score points per issue: (each, cap)
     "overlap": (8, 40), "edge_through_node": (6, 24), "bad_handle_side": (3, 15), "outside_frame": (4, 16),
     "near_alignment": (1.5, 12), "uneven_spacing": (3, 12), "label_overflow": (2, 10), "edge_crossings": (1.5, 15),
-    "far_away": (2, 6), "off_grid": (0.5, 5),
+    "far_away": (2, 6), "off_grid": (0.5, 5), "label_collision": (2, 10),
 }
 SEVERITY = {
     "overlap": "error", "edge_through_node": "error", "bad_handle_side": "warning", "outside_frame": "warning",
     "near_alignment": "warning", "uneven_spacing": "warning", "label_overflow": "warning",
-    "edge_crossings": "warning", "far_away": "info", "off_grid": "info",
+    "edge_crossings": "warning", "far_away": "info", "off_grid": "info", "label_collision": "warning",
 }
 
 
@@ -575,6 +581,126 @@ def _label_fit(n: dict) -> Optional[tuple[int, int]]:
     return None
 
 
+def fit_size(n: dict, max_w: float = MAX_FIT_W) -> tuple[int, int]:
+    """The node's size grown just enough for its label to fit by the doctor's estimate; never smaller than it is now.
+
+    Shape, text and sticky labels widen to their one-line width up to `max_w`, then wrap and grow taller. A longer
+    single word still widens the node, since it cannot wrap. Frame titles, window titles and placeholder names are one
+    line, so they widen as far as they need."""
+    w, h = _w(n), _h(n)
+    probe = copy.deepcopy(n)
+    t = n.get("type")
+    if t in ("shape", "text", "sticky"):
+        text = _text_of(n)
+        if text:
+            fs = _num(n.get("font_size"), 14.0) or 14.0
+            f = {"ellipse": 0.7, "diamond": 0.5, "cylinder": 0.9}.get(n.get("shape", ""), 1.0) if t == "shape" else 1.0
+            one_line = (max(len(p) for p in text.split("\n")) * 0.56 * fs + 16) / f
+            w = max(w, min(one_line, max_w))
+    for _ in range(4):
+        _put(probe, w=w, h=h)
+        need = _label_fit(probe)
+        if need is None:
+            break
+        w, h = max(w, need[0]), max(h, need[1])
+    return (int(math.ceil(w)), int(math.ceil(h)))
+
+
+# ---------------------------------------------------------------- connector labels
+#
+# Placement rule (the web canvas follows the same one, in web/src/sketch/labels.ts): a connector's label is centered
+# at the midpoint of the longest segment of its route that no other connector runs along, moved along that segment by
+# the edge's `label_offset` px (0 when absent; toward the end of the segment when positive). When every segment is
+# shared the longest one is used. `tidy` sets `label_offset` to nudge a label off whatever it would collide with.
+
+def _label_size(text: str) -> tuple[float, float]:
+    lines = text.split("\n")
+    return (max(len(l) for l in lines) * LABEL_CHAR_W + LABEL_PAD[0], len(lines) * LABEL_LINE_H + LABEL_PAD[1])
+
+
+def _segments(pts: list) -> list[tuple]:
+    """The straight runs of a route: repeated points dropped, and consecutive segments that continue the same line merged."""
+    segs: list[tuple] = []
+    for p, q in zip(pts, pts[1:]):
+        if math.dist(p, q) <= 1e-6:
+            continue
+        if segs:
+            a, b = segs[-1]
+            cross = (b[0] - a[0]) * (q[1] - b[1]) - (b[1] - a[1]) * (q[0] - b[0])
+            dot = (b[0] - a[0]) * (q[0] - b[0]) + (b[1] - a[1]) * (q[1] - b[1])
+            if abs(cross) < 1e-6 * max(1.0, math.dist(a, b) * math.dist(b, q)) and dot > 0:
+                segs[-1] = (a, q)
+                continue
+        segs.append((p, q))
+    return segs
+
+
+def _runs_along(p: tuple, q: tuple, r: tuple, s: tuple) -> bool:
+    """Do segments pq and rs lie on one line and overlap by more than SHARE_TOL?"""
+    d = (q[0] - p[0], q[1] - p[1])
+    ln = math.hypot(*d)
+    if ln < 1e-9:
+        return False
+    u = (d[0] / ln, d[1] / ln)
+    if any(abs((pt[0] - p[0]) * u[1] - (pt[1] - p[1]) * u[0]) > SHARE_TOL for pt in (r, s)):
+        return False
+    a, b = (r[0] - p[0]) * u[0] + (r[1] - p[1]) * u[1], (s[0] - p[0]) * u[0] + (s[1] - p[1]) * u[1]
+    return min(ln, max(a, b)) - max(0.0, min(a, b)) > SHARE_TOL
+
+
+def _label_plan(canvas: dict) -> dict[str, dict]:
+    """For each labeled connector with both ends on the canvas: its anchor segment and label size."""
+    polys = _polylines(canvas)
+    out: dict[str, dict] = {}
+    for e, pts in polys:
+        text = e.get("label")
+        if not isinstance(text, str) or not text:
+            continue
+        segs = _segments(pts) or [(pts[0], (pts[0][0] + 1.0, pts[0][1]))]
+        others = [sg for e2, pts2 in polys if e2 is not e for sg in _segments(pts2)]
+        free = [sg for sg in segs if not any(_runs_along(sg[0], sg[1], o[0], o[1]) for o in others)]
+        a, b = max(free or segs, key=lambda sg: math.dist(sg[0], sg[1]))  # max keeps the first of equals
+        ln = math.dist(a, b)
+        out[e["id"]] = {"edge": e, "mid": ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), "len": ln,
+                        "dir": ((b[0] - a[0]) / ln, (b[1] - a[1]) / ln) if ln > 1e-9 else (1.0, 0.0),
+                        "size": _label_size(text)}
+    return out
+
+
+def _label_box_at(info: dict, offset: float) -> tuple[float, float, float, float]:
+    half = info["len"] / 2
+    o = max(-half, min(half, offset))
+    cx, cy = info["mid"][0] + info["dir"][0] * o, info["mid"][1] + info["dir"][1] * o
+    w, h = info["size"]
+    return (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
+
+
+def edge_label_boxes(canvas: dict) -> dict[str, tuple[float, float, float, float]]:
+    """The estimated box of every connector label, by connector id, where both renderers draw it."""
+    return {eid: _label_box_at(i, _num(i["edge"].get("label_offset"))) for eid, i in _label_plan(canvas).items()}
+
+
+def _collides(a: tuple, b: tuple) -> bool:
+    ox, oy = _inter(a, b)
+    return ox > 1.0 and oy > 1.0
+
+
+def _label_collisions(canvas: dict) -> list[tuple[str, str, str]]:
+    """(connector id, 'label' or 'node', other id) for each connector label that overlaps another label or a node."""
+    boxes = edge_label_boxes(canvas)
+    solid = [n for n in _nodes(canvas) if n.get("type") != "frame"]
+    out = []
+    ids = sorted(boxes, key=str)
+    for i, a in enumerate(ids):
+        for b in ids[i + 1:]:
+            if _collides(boxes[a], boxes[b]):
+                out.append((a, "label", b))
+        for n in solid:
+            if _collides(boxes[a], _box(n)):
+                out.append((a, "node", n["id"]))
+    return out
+
+
 # ---------------------------------------------------------------- doctor
 
 def _issue(kind: str, key: str, nodes: list[str], message: str, fix: Optional[dict] = None, **extra) -> dict:
@@ -660,8 +786,24 @@ def doctor(canvas: dict, grid: Optional[float] = None) -> dict:
         need = _label_fit(n)
         if need:
             issues.append(_issue("label_overflow", n["id"], [n["id"]],
-                                 f'the label of {_label(n)} probably does not fit; it needs about {need[0]} x {need[1]} px', None,
+                                 f'the label of {_label(n)} probably does not fit; it needs about {need[0]} x {need[1]} px; '
+                                 'tidy with fit_labels grows the node to fit',
+                                 None if locked[n["id"]] else _tidy_fix(["fit_labels"], [n["id"]]),
                                  needs={"w": need[0], "h": need[1]}))
+    edge_by = {e["id"]: e for e in _edges(canvas)}
+    for eid, kind, other in _label_collisions(canvas):
+        e = edge_by[eid]
+        ends = [e["source"], e["target"]]
+        if kind == "label":
+            o = edge_by[other]
+            ids = sorted(set(ends + [o["source"], o["target"]]), key=str)
+            issues.append(_issue("label_collision", f"{eid}|{other}", ids,
+                                 f'the labels of connectors {eid} and {other} overlap',
+                                 _tidy_fix(["place_labels"], ids), edges=[eid, other]))
+        else:
+            issues.append(_issue("label_collision", f"{eid}|{other}", ends + ([other] if other not in ends else []),
+                                 f'the label of connector {eid} ("{str(e["label"])[:24]}") overlaps {_label(by[other])}',
+                                 _tidy_fix(["place_labels"], ends), edges=[eid]))
     far = _far_away(nodes)
     for n, d in far:
         issues.append(_issue("far_away", n["id"], [n["id"]], f'{_label(n)} is {d:.0f} px from the nearest node', None))
@@ -894,8 +1036,57 @@ def _rule_handles(ctx: _Ctx, edge_ids: Optional[set] = None) -> bool:
     return changed
 
 
-_RULE_FNS = {"frames": _rule_frames, "overlaps": _rule_overlaps, "align": _rule_align,
-             "spacing": _rule_spacing, "grid": _rule_grid, "handles": _rule_handles}
+def _rule_fit_labels(ctx: _Ctx) -> bool:
+    """Grows nodes whose label overflows to the size `fit_size` gives. Never shrinks; locked nodes are left alone."""
+    changed = False
+    for n in ctx.nodes:
+        if n.get("locked") is True or (ctx.allowed is not None and n["id"] not in ctx.allowed):
+            continue
+        w, h = fit_size(n)
+        if w > _w(n) + 1e-9 or h > _h(n) + 1e-9:
+            _put(n, w=max(w, _w(n)), h=max(h, _h(n)))
+            changed = True
+    return changed
+
+
+def _rule_place_labels(ctx: _Ctx) -> bool:
+    """Sets `label_offset` on connectors whose label collides with another label or a node: the nearest offset along
+    the label's segment that clears everything. A label that collides with nothing keeps its offset."""
+    plan = _label_plan(ctx.canvas)
+    solid = [_box(n) for n in ctx.nodes if n.get("type") != "frame"]
+    offsets = {eid: _num(i["edge"].get("label_offset")) for eid, i in plan.items()}
+    free = {eid for eid, i in plan.items() if ctx.allowed is None or i["edge"]["source"] in ctx.allowed or i["edge"]["target"] in ctx.allowed}
+    settled = [eid for eid in plan if eid not in free]  # labels that may not move are obstacles from the start
+    changed = False
+    for eid in sorted(free, key=str):
+        info = plan[eid]
+        e = info["edge"]
+        others = list(settled)  # a label is checked against those settled before it, so the first of a pair stays put
+        settled.append(eid)
+
+        def clear(o: float) -> bool:
+            b = _label_box_at(info, o)
+            return not any(_collides(b, s) for s in solid) and not any(
+                _collides(b, _label_box_at(plan[k], offsets[k])) for k in others)
+        if clear(offsets[eid]):
+            continue
+        half = int(info["len"] // 2)
+        cands = sorted({v for k in range(0, half // LABEL_STEP + 1) for v in (k * LABEL_STEP, -k * LABEL_STEP)} | {half, -half},
+                       key=lambda v: (abs(v), -v))
+        best = next((c for c in cands if clear(c)), None)
+        if best is None or best == offsets[eid]:
+            continue
+        offsets[eid] = best
+        if best:
+            e["label_offset"] = _clean(best)
+        else:
+            e.pop("label_offset", None)
+        changed = True
+    return changed
+
+
+_RULE_FNS = {"fit_labels": _rule_fit_labels, "frames": _rule_frames, "overlaps": _rule_overlaps, "align": _rule_align,
+             "spacing": _rule_spacing, "grid": _rule_grid, "handles": _rule_handles, "place_labels": _rule_place_labels}
 
 
 def _check_rules(rules: Optional[Iterable[str]]) -> tuple[str, ...]:
@@ -927,6 +1118,8 @@ def _diff(before: dict, after: dict) -> list[dict]:
             continue
         a = {"source_handle": o.get("source_handle"), "target_handle": o.get("target_handle")}
         b = {"source_handle": e.get("source_handle"), "target_handle": e.get("target_handle")}
+        if _num(o.get("label_offset")) != _num(e.get("label_offset")):
+            a["label_offset"], b["label_offset"] = _num(o.get("label_offset")), _num(e.get("label_offset"))
         if a != b:
             out.append({"kind": "edge", "id": e["id"], "from": a, "to": b})
     return out
@@ -1453,6 +1646,7 @@ def render_png(canvas: dict, width: int = 1200, highlight: Optional[Iterable[str
         d.text((a[0] + 3, a[1] + 1 if n.get("type") != "frame" else c[1] - 11), str(n["id"]), fill="#6b7280", font=f_id)
         if n["id"] in hi:
             d.rectangle([(a[0] - 3, a[1] - 3), (c[0] + 3, c[1] + 3)], outline="#dc2626", width=3)
+    by_edge = {e["id"]: e for e in _edges(canvas)}
     for e, pts in _polylines(canvas):
         col = _color(e.get("color"), "#4b5563")
         sp = [tx(p) for p in pts]
@@ -1462,9 +1656,12 @@ def render_png(canvas: dict, width: int = 1200, highlight: Optional[Iterable[str
                 ang = math.atan2(end[1] - other[1], end[0] - other[0])
                 d.polygon([end, (end[0] - 9 * math.cos(ang - 0.4), end[1] - 9 * math.sin(ang - 0.4)),
                            (end[0] - 9 * math.cos(ang + 0.4), end[1] - 9 * math.sin(ang + 0.4))], fill=col)
-        if e.get("label"):
-            mid = sp[len(sp) // 2]
-            d.text((mid[0] + 3, mid[1] - 12), str(e["label"])[:20], fill="#374151", font=f_id)
+    f_edge = font(max(8, int(12 * scale)))
+    for eid, (bx1, by1, bx2, by2) in edge_label_boxes(canvas).items():
+        a, c = tx((bx1, by1)), tx((bx2, by2))
+        d.rectangle([a, c], fill="white", outline="#9ca3af")
+        d.multiline_text(((a[0] + c[0]) / 2, (a[1] + c[1]) / 2), str(by_edge[eid].get("label")), fill="#374151", font=f_edge,
+                         anchor="mm", align="center")
     buf = io.BytesIO()
     img.save(buf, "PNG")
     return buf.getvalue()

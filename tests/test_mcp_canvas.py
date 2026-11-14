@@ -279,3 +279,33 @@ def test_an_agent_write_changes_the_revision_the_page_polls(agent, connected):
     agent.ok("add_nodes", name="d", nodes=[shape(id="a")])
     r = connected.get("/api/canvases/d/revision").get_json()
     assert r["revision"] == 3 and r["by"] == "agent" and r["snapshots"] == 1
+
+
+def test_add_nodes_sizes_a_sketch_node_to_its_label_unless_w_is_given(agent):
+    agent.ok("create_canvas", name="d")
+    agent.ok("add_nodes", name="d", nodes=[
+        {"type": "shape", "shape": "cylinder", "id": "a", "label": "samples.tpch.orders", "at": {"x": 0, "y": 0}},
+        {"type": "shape", "shape": "cylinder", "id": "b", "label": "samples.tpch.orders", "w": 100, "at": {"x": 0, "y": 400}},
+        {"type": "shape", "shape": "cylinder", "id": "c", "label": "x", "at": {"x": 0, "y": 800}},
+        {"type": "shape", "id": "d", "label": " ".join(["wrapping"] * 14), "at": {"x": 0, "y": 1200}}])
+    sizes = {w["id"]: (w["size"]["w"], w["size"]["h"]) for w in saved()["windows"]}
+    assert 100 < sizes["a"][0] < layout.MAX_FIT_W and sizes["a"][1] == 120
+    assert sizes["b"] == (100, 120)  # w given: the agent's size stands, overflow and all
+    assert sizes["c"] == (100, 120)  # fits already: the default stays
+    assert sizes["d"][0] == layout.MAX_FIT_W and sizes["d"][1] > 80
+    assert not any(i["kind"] == "label_overflow" and i["nodes"] != ["b"] for i in layout.doctor(saved())["issues"])
+
+
+def test_tidy_tool_offers_fit_labels_and_place_labels(agent):
+    agent.ok("create_canvas", name="d")
+    agent.ok("add_nodes", name="d", nodes=[
+        {"type": "shape", "id": "a", "label": "A", "at": {"x": 0, "y": 0}}, {"type": "shape", "id": "b", "label": "B", "at": {"x": 300, "y": 0}}])
+    agent.ok("connect", name="d", edges=[{"source": "a", "target": "b", "label": "first"}, {"source": "a", "target": "b", "label": "second"}])
+    assert "label_collision" in agent.ok("doctor", name="d") and "[fix: tidy rules=place_labels" in agent.ok("doctor", name="d")
+    assert "tidied: 1 change(s)" in agent.ok("tidy", name="d", rules=["place_labels"])
+    assert "label_collision" not in agent.ok("doctor", name="d")
+    assert saved()["edges"][1]["label_offset"] != 0
+    agent.ok("update_nodes", name="d", updates=[{"id": "a", "label": "a label that is much too long for this box", "w": 60}])
+    assert "[fix: tidy rules=fit_labels ids=a]" in agent.ok("doctor", name="d")
+    agent.ok("tidy", name="d", rules=["fit_labels"])
+    assert "label_overflow" not in agent.ok("doctor", name="d")

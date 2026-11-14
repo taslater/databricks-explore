@@ -270,7 +270,7 @@ def example_v2():
     ]
     body["edges"] = [
         {"id": "e1", "source": "s1", "target": "w3", "source_handle": "b", "target_handle": "t", "line": "curve",
-         "arrow_start": True, "arrow_end": True, "dashed": True, "label": "reads", "color": "#dc2626"},
+         "arrow_start": True, "arrow_end": True, "dashed": True, "label": "reads", "label_offset": -24, "color": "#dc2626"},
         {"id": "e2", "source": "w3", "target": "s6", "line": "straight", "arrow_start": False, "arrow_end": True,
          "dashed": False, "relationship": {"id": "e_" + "a" * 32, "source_column": "customer_id", "target_column": "id"}},
     ]
@@ -282,6 +282,11 @@ def test_v1_file_loads_unchanged(cdir):
     (cdir / "hours.json").write_text(json.dumps(EXAMPLE), encoding="utf-8")
     assert canvases.load_canvas("hours") == EXAMPLE
     assert canvases.parse_canvas(EXAMPLE).edges == []
+
+
+def test_label_offset_is_optional_and_defaults_to_zero():
+    edges = canvases.parse_canvas(example_v2()).edges
+    assert edges[0].label_offset == -24 and edges[1].label_offset == 0
 
 
 def test_v2_round_trips_unchanged(cdir):
@@ -337,6 +342,7 @@ INVALID_V2 = [
     ("empty relationship column", _set(["edges", 1, "relationship", "source_column"], ""),
      "edges[1].relationship.source_column: "),
     ("zero font size", _set(["windows", 3, "font_size"], 0), "windows[3].font_size: "),
+    ("text label offset", _set(["edges", 0, "label_offset"], "left"), "edges[0].label_offset: "),
 ]
 
 

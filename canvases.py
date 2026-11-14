@@ -149,6 +149,7 @@ class CanvasEdge(BaseModel):
     arrow_end: StrictBool = True
     dashed: StrictBool = False
     label: Optional[str] = None
+    label_offset: StrictFloat = 0.0
     color: Optional[str] = None
     relationship: Optional[RelationshipRef] = None
 

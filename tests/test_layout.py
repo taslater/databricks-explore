@@ -134,7 +134,7 @@ def test_label_overflow():
     long = node("a", 0, 0, 80, 30, label="A very long label that cannot possibly fit")
     r = layout.doctor(canvas([long, node("b", 200, 0)]))
     [i] = [i for i in r["issues"] if i["kind"] == "label_overflow"]
-    assert i["needs"]["w"] > 0 and i["fix"] is None
+    assert i["needs"]["w"] > 0 and i["fix"]["rules"] == ["fit_labels"]
     assert "label_overflow" not in kinds(layout.doctor(canvas([node("a", 0, 0, 120, 60, label="Orders")])))
 
 
@@ -521,3 +521,180 @@ def test_render_png_handles_empty_and_odd_nodes():
                   node("d", 300, 0, shape="diamond"), node("q", 300, 100, 300, 200, "query", title="query_1", collapsed=True)],
                  [edge("e", "t", "q", "r", "l", label="hi", color="#ff0000", arrow_start=True)])
     assert png_size(layout.render_png(odd, width=400))[0] == 400
+
+
+# ---------------------------------------------------------------- label fit
+
+def cyl(nid, x, y, label="samples.tpch.orders", w=100, h=120, **extra):
+    return node(nid, x, y, w, h, shape="cylinder", label=label, **extra)
+
+
+def size_of(c, nid):
+    n = next(n for n in c["windows"] if n["id"] == nid)
+    return n["size"]["w"], n["size"]["h"]
+
+
+def test_fit_size_widens_to_the_label_and_never_shrinks():
+    n = cyl("a", 0, 0)
+    w, h = layout.fit_size(n)
+    assert 100 < w <= layout.MAX_FIT_W and h == 120
+    assert layout._label_fit({**n, "size": {"w": w, "h": h}}) is None
+    wide = cyl("b", 0, 0, w=400, h=200)
+    assert layout.fit_size(wide) == (400, 200)
+    assert layout.fit_size(node("c", 0, 0, 120, 60, label="")) == (120, 60)
+
+
+def test_fit_size_wraps_past_the_maximum_width_and_grows_taller():
+    n = node("a", 0, 0, 140, 80, label=" ".join(["quarterly"] * 12))
+    w, h = layout.fit_size(n)
+    assert w == layout.MAX_FIT_W and h > 80
+    assert layout._label_fit({**n, "size": {"w": w, "h": h}}) is None
+    word = node("b", 0, 0, 140, 80, label="x" * 80)  # one word cannot wrap, so the width has to give
+    w2, h2 = layout.fit_size(word)
+    assert w2 > layout.MAX_FIT_W
+    assert layout._label_fit({**word, "size": {"w": w2, "h": h2}}) is None
+
+
+def test_fit_size_reads_flat_keys_and_frames_and_placeholders():
+    flat = {"id": "f", "type": "frame", "x": 0, "y": 0, "w": 100, "h": 100, "label": "A frame title that is long"}
+    assert layout.fit_size(flat)[0] > 100
+    ph = node("p", 0, 0, 100, 100, "placeholder", placeholder={"id": "x", "name": "a_long_placeholder_table_name"})
+    assert layout.fit_size(ph)[0] > 100
+
+
+def test_tidy_fit_labels_grows_then_separates_what_it_overlaps():
+    c = canvas([cyl("a", 0, 0), cyl("b", 110, 0, label="b")])  # b sits in the gap a will grow into
+    assert any(i["kind"] == "label_overflow" for i in layout.doctor(c)["issues"])
+    out, changes = layout.tidy(c, rules=["fit_labels", "overlaps"])
+    assert size_of(out, "a")[0] > 100 and size_of(out, "b") == (100, 120)
+    assert box_of(out, "b")[0] >= box_of(out, "a")[2] + layout.MIN_GAP - 1
+    assert {ch["id"] for ch in changes} == {"a", "b"}
+    assert layout.doctor(out)["issues"] == []
+    assert layout.tidy(out)[1] == []  # idempotent with every rule
+
+
+def test_tidy_fit_labels_respects_locked_ids_and_default_rules():
+    c = canvas([cyl("a", 0, 0, locked=True), cyl("b", 0, 300), cyl("c", 0, 600)])
+    out, _ = layout.tidy(c, ids=["b"])
+    assert size_of(out, "a") == (100, 120) and size_of(out, "c") == (100, 120) and size_of(out, "b")[0] > 100
+    out2, _ = layout.tidy(c)  # on by default
+    assert size_of(out2, "c")[0] > 100 and size_of(out2, "a") == (100, 120)
+    off, _ = layout.tidy(c, rules=["overlaps"])
+    assert size_of(off, "b") == (100, 120)
+
+
+def test_label_overflow_fix_points_at_fit_labels():
+    c = canvas([cyl("a", 0, 0), cyl("b", 400, 0, locked=True)])
+    fixes = {i["nodes"][0]: i["fix"] for i in layout.doctor(c)["issues"] if i["kind"] == "label_overflow"}
+    assert fixes["a"] == {"tool": "tidy", "rules": ["fit_labels"], "ids": ["a"]} and fixes["b"] is None
+    out, _ = layout.tidy(c, rules=fixes["a"]["rules"], ids=fixes["a"]["ids"])
+    assert [i["id"] for i in layout.doctor(out)["issues"]] == ["label_overflow:b"]
+
+
+# ---------------------------------------------------------------- connector labels
+
+def converging():
+    """Two labeled connectors into one node, as an agent drew them."""
+    return canvas([node("a", 0, 0, label="a"), node("b", 0, 300, label="b"), node("t", 500, 150, label="t")],
+                  [edge("e1", "a", "t", "r", "l", label="source"), edge("e2", "b", "t", "r", "l", label="join")])
+
+
+def overlaps(boxes):
+    items = list(boxes.values())
+    return [(i, j) for i in range(len(items)) for j in range(i + 1, len(items)) if layout._collides(items[i], items[j])]
+
+
+def test_label_sits_on_the_longest_segment_no_other_connector_shares():
+    c = converging()
+    boxes = layout.edge_label_boxes(c)
+    # each route leaves its source, turns at x = 310 and enters t along y = 180, a stretch both share
+    for eid, y in (("e1", 30), ("e2", 330)):
+        x1, y1, x2, y2 = boxes[eid]
+        assert abs((x1 + x2) / 2 - 215) < 1 and abs((y1 + y2) / 2 - y) < 1  # middle of the free first segment
+    assert not overlaps(boxes)
+    assert "label_collision" not in kinds(layout.doctor(c))
+
+
+def test_label_offset_moves_the_label_along_its_segment_and_is_clamped():
+    c = converging()
+    base = layout.edge_label_boxes(c)["e1"]
+    c["edges"][0]["label_offset"] = 30
+    x1, _, x2, _ = layout.edge_label_boxes(c)["e1"]
+    assert abs((x1 + x2) / 2 - (base[0] + base[2]) / 2 - 30) < 1e-6
+    c["edges"][0]["label_offset"] = 9999
+    x1, _, x2, _ = layout.edge_label_boxes(c)["e1"]
+    assert abs((x1 + x2) / 2 - 310) < 1e-6  # the end of the segment, not past it
+
+
+def test_doctor_flags_labels_that_overlap_each_other_and_nodes():
+    twin = canvas([node("a", 0, 0), node("b", 300, 0)],
+                  [edge("e1", "a", "b", "r", "l", label="first"), edge("e2", "a", "b", "r", "l", label="second")])
+    [i] = [i for i in layout.doctor(twin)["issues"] if i["kind"] == "label_collision"]
+    assert i["edges"] == ["e1", "e2"] and i["severity"] == "warning" and i["nodes"] == ["a", "b"]
+    assert i["fix"] == {"tool": "tidy", "rules": ["place_labels"], "ids": ["a", "b"]}
+    close = canvas([node("a", 0, 0), node("b", 150, 0), node("m", 40, 70, 60, 40)], [edge("e", "a", "b", "r", "l", label="a long label")])
+    close["windows"][2]["position"] = {"x": 100, "y": 20}
+    [j] = [i for i in layout.doctor(close)["issues"] if i["kind"] == "label_collision" and "overlaps m " in i["message"]]
+    assert j["edges"] == ["e"] and "m" in j["nodes"]
+
+
+def test_tidy_place_labels_nudges_and_is_idempotent():
+    twin = canvas([node("a", 0, 0), node("b", 300, 0)],
+                  [edge("e1", "a", "b", "r", "l", label="first"), edge("e2", "a", "b", "r", "l", label="second")])
+    out, changes = layout.tidy(twin)
+    assert [c["id"] for c in changes] == ["e2"] and changes[0]["to"]["label_offset"] == out["edges"][1]["label_offset"] != 0
+    assert "label_offset" not in out["edges"][0]
+    assert not overlaps(layout.edge_label_boxes(out))
+    assert "label_collision" not in kinds(layout.doctor(out))
+    assert layout.tidy(out)[1] == []
+    assert layout.tidy(twin, rules=["overlaps"])[1] == []  # the rule is selectable
+    assert layout.tidy(twin, ids=["a"], rules=["place_labels"])[0]["edges"][1].get("label_offset")
+    assert layout.tidy(canvas(twin["windows"] + [node("z", 900, 900)], twin["edges"]), ids=["z"], rules=["place_labels"])[1] == []
+
+
+def test_place_labels_keeps_a_free_offset_and_resolves_a_stale_one():
+    c = converging()
+    c["edges"][0]["label_offset"] = -20
+    assert layout.tidy(c, rules=["place_labels"])[1] == []
+    stuck = canvas([node("a", 0, 0), node("b", 300, 0)],
+                   [edge("e1", "a", "b", "r", "l", label="first"), edge("e2", "a", "b", "r", "l", label="second", label_offset=0)])
+    assert layout.tidy(stuck, rules=["place_labels"])[0]["edges"][1]["label_offset"] != 0
+    back = copy.deepcopy(stuck)
+    back["edges"][1]["label_offset"] = 10
+    back["windows"] = [back["windows"][0]]  # a dangling connector is ignored
+    assert layout.tidy(back, rules=["place_labels"])[1] == []
+
+
+def test_place_labels_leaves_what_it_cannot_clear():
+    # a label wider than its whole segment, between two nodes: no offset on the segment clears the nodes
+    c = canvas([node("a", 0, 0, 60, 60), node("b", 70, 0, 60, 60)], [edge("e", "a", "b", "r", "l", label="a label that is far too long")])
+    out, _ = layout.tidy(c)
+    assert any(i["kind"] == "label_collision" for i in layout.doctor(out)["issues"])
+    assert layout.tidy(out)[1] == []
+
+
+def test_labels_ignore_unlabeled_and_dangling_connectors():
+    c = canvas([node("a", 0, 0), node("b", 300, 0)], [edge("e1", "a", "b"), edge("e2", "a", "zzz", label="x"), edge("e3", "a", "a", label="self")])
+    assert layout.edge_label_boxes(c) == {}
+
+
+def test_render_png_draws_connector_labels_where_the_rule_puts_them():
+    c = converging()
+    bare = canvas(c["windows"], [{k: v for k, v in e.items() if k != "label"} for e in c["edges"]])
+    assert layout.render_png(c, width=900) != layout.render_png(bare, width=900)
+    moved = copy.deepcopy(c)
+    moved["edges"][0]["label_offset"] = 40
+    assert layout.render_png(moved, width=900) != layout.render_png(c, width=900)
+
+
+def test_labels_scenario_ends_with_no_label_issues():
+    clean = layout_bench.gen_labels()
+    assert {"label_overflow", "label_collision"} <= set(kinds(layout.doctor(clean)))
+    for seed in range(40):
+        broken = layout_bench.perturb(clean, seed)
+        fixed, _ = layout.tidy(broken)
+        rep = layout.doctor(fixed)
+        assert "label_overflow" not in kinds(rep), f"seed {seed}"
+        # the converging connectors e0 to e2 always end clear. e3 to e5 share routes or cross short gaps, and when the
+        # perturbation leaves too little room along their segment the doctor keeps reporting them
+        assert not [i for i in rep["issues"] if i["kind"] == "label_collision" and set(i["edges"]) <= {"e0", "e1", "e2"}], f"seed {seed}"
