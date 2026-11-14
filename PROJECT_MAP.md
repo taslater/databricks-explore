@@ -1281,7 +1281,7 @@ Root: `databricks-explore` | files: 259
 - `web/src/api/client.ts` (7,706 B)
 - `web/src/api/concepts.ts` (12,022 B)
 - `web/src/api/hooks.ts` (8,850 B)
-- `web/src/api/layout.ts` (3,137 B)
+- `web/src/api/layout.ts` (3,174 B)
 - `web/src/api/queryClient.ts` (338 B)
 - `web/src/api/restoreSession.test.ts` (5,488 B)
 - `web/src/api/restoreSession.ts` (2,946 B)
