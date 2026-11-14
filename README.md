@@ -62,6 +62,14 @@ Edges come from one place, `GET /api/relationships?table=<name>`. Foreign keys, 
 
 **Mining joins** (Graph tab, **Mine joins**) is an explicit batch run through the selected SQL warehouse. It shows the SQL and time window first, then reads `system.query.history` and `system.access.table_lineage`, extracts the columns each statement joins on, and stores them as proposed `join_mined` edges with run and user counts. Statement text and user names are never stored. Reading query text needs an account admin or `databricks_pii_access`; without that the run stops and says so. Later runs are incremental. Review the results in **Suggested relationships**, and see a **Usage** summary of the busiest tables. A node's **cols** button shows its columns, with column lineage and mined joins drawn between them. Column lineage comes from `system.access.column_lineage`, one cached query per table. `GET /api/relationships/export` and `POST /api/relationships/import` move stored edges as JSON. See `contracts/api.md`, section 4.
 
+## Concepts
+The **Concepts** tab is a small business glossary over the catalog. It is shaped like an ontology, so a later import of Databricks' Genie Ontology (domains, certified terms, synonyms, metric views) can map onto it. A concept has a name (unique, ignoring case), a definition, synonyms, a domain, a status of draft, reviewed or certified, tags and provenance (`manual`, `uc_tag` or `ontology`). It links to a table (a metric view is a table), a column or another concept, with a relation: `defines`, `measures`, `identifies` or `describes` for tables and columns, `is_a`, `part_of` or `related_to` between concepts. Links are `concept_link` edges in the relationship store, so they travel with its export and import, and deleting a concept deletes its links.
+
+- **Find candidates** searches the names and comments of the tables and columns already in the local cache for the concept's name and synonyms, and lists hits to link in one click. It never touches the warehouse, and only knows what you have browsed.
+- **Suggest from tags...** shows the read-only SQL over the `system.information_schema` tag tables, then runs it on the selected warehouse and makes one draft concept per tag key and value, linked with `describes` to the tagged tables and columns. Running it again updates those concepts and keeps your edits. Demo mode has a few tags to try it.
+- On the **Graph** tab, the **Concepts** toggle draws the concepts linked to the tables on the graph as diamond nodes, with an edge to the table, or to the column when a column is linked. Click one to open it in the Concepts tab.
+- **Export** and **Import** use the relationship store's JSON file (`contracts/api.md`, sections 4 and 6).
+
 ## Test
 ```sh
 uv run --with-requirements requirements.txt pytest -q

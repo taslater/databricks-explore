@@ -183,7 +183,7 @@ def test_migration_sets_user_version_and_is_idempotent(data_dir):
     assert path == data_dir / "relationships" / "dev.sqlite"
     with rel.Store(path) as s:  # reopening must not rerun the migration or lose rows
         assert len(s.all_edges()) == 1
-    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone()[0] == len(rel.MIGRATIONS) == 1
+    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone()[0] == len(rel.MIGRATIONS) == 2
 
 
 def test_a_database_from_the_future_is_refused(data_dir):
@@ -327,20 +327,19 @@ def test_unified_with_no_relations_still_lists_the_focus_node(store):
 
 def test_export_import_round_trip(store):
     store.upsert(edge(evidence=rel.Evidence(runs=3, users=2, first_seen="a", last_seen="b", sample_refs=["s1", "s2"])))
-    store.upsert(edge(kind="concept_link", target=rel.Endpoint(table=PH), note="the Customer concept"))
     store.upsert(edge(kind="ontology", directed=False, status="accepted"))
     store.set_derived_note(f"fk:{A}->{B}", "keep")
     dump = store.export()
-    assert dump["version"] == 1 and len(dump["edges"]) == 3 and len(dump["overlays"]) == 1
+    assert dump["version"] == 1 and len(dump["edges"]) == 2 and len(dump["overlays"]) == 1 and dump["concepts"] == []
     with rel.Store(":memory:") as other:
         counts = other.import_file(rel.parse_export(dump))
-        assert counts == {"imported": 3, "created": 3, "updated": 0, "overlays": 1}
+        assert counts == {"imported": 2, "created": 2, "updated": 0, "overlays": 1, "concepts": 0, "concepts_created": 0}
         again = other.export()
         assert again["edges"] == dump["edges"] and again["overlays"] == dump["overlays"]
         # importing again upserts, it does not duplicate
         counts = other.import_file(rel.parse_export(dump))
-        assert counts["created"] == 0 and counts["updated"] == 3
-        assert len(other.all_edges()) == 3
+        assert counts["created"] == 0 and counts["updated"] == 2
+        assert len(other.all_edges()) == 2
 
 
 def test_import_is_all_or_nothing(store):
@@ -480,7 +479,8 @@ def test_export_then_import_into_another_profile(client, data_dir):
     app_module.STATE["ex"] = FakeExplorer(data_dir, profile="other")
     assert client.get("/api/relationships/export").get_json()["edges"] == []
     r = client.post("/api/relationships/import", json=dump)
-    assert r.status_code == 200 and r.get_json() == {"imported": 1, "created": 1, "updated": 0, "overlays": 1}
+    assert r.status_code == 200 and r.get_json() == {"imported": 1, "created": 1, "updated": 0, "overlays": 1,
+                                                  "concepts": 0, "concepts_created": 0}
     assert client.get("/api/relationships/export").get_json()["edges"] == dump["edges"]
     again = client.post("/api/relationships/import", json=dump).get_json()
     assert (again["created"], again["updated"]) == (0, 1)

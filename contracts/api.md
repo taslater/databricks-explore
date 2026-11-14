@@ -342,13 +342,14 @@ One model for every relationship between tables or columns, with provenance. Imp
  "directed": true,
  "provenance": {"origin": "query_history", "source_ref": "stmt-123", "fetched_at": "2026-11-12T09:00:00+00:00"},
  "evidence": {"runs": 12, "users": 3, "first_seen": "2026-10-01", "last_seen": "2026-11-10", "sample_refs": ["stmt-123"]},
- "status": "proposed", "note": "",
+ "status": "proposed", "note": "", "relation": null,
  "created_at": "2026-11-12T09:00:00+00:00", "updated_at": "2026-11-12T09:00:00+00:00"}
 ```
 
-- **Endpoint** `{table, column?}`. `table` is a 3-part name `catalog.schema.table`, or `ph:<uuid>` for a placeholder that does not exist yet. `column` is omitted (or `null`) for a table-level end.
+- **Endpoint** `{table, column?}`. `table` is a 3-part name `catalog.schema.table`, `ph:<uuid>` for a placeholder that does not exist yet, or `concept:<uuid>` for a concept (section 6; never with a column). `column` is omitted (or `null`) for a table-level end.
 - **`kind`:** `fk`, `lineage`, `view_dep` (derived) or `join_mined`, `manual`, `sketch`, `concept_link`, `ontology` (stored).
 - **`status`:** `derived` (only on derived edges), `proposed`, `accepted`, `rejected`.
+- **`relation`:** `null`, except on a `concept_link` edge, where it says what the link means (section 6). Concept links are never returned by `GET /api/relationships`, and `POST /api/relationships` refuses concept endpoints.
 - **`evidence`** is `null` unless the edge was mined from activity. For derived lineage it holds only `last_seen`. `provenance.origin` on derived edges is `unity_catalog:table_constraints`, `unity_catalog:view_dependencies` or `unity_catalog:table_lineage`, and `fetched_at` is when the cached metadata behind it was read.
 - **Derived kinds are never stored.** They are normalized from `GET /api/relations` data at read time. An FK becomes one edge per column pair. Lineage seen in both directions becomes two directed edges. A user note on a derived edge is kept in an overlay keyed by its natural key.
 - **Natural key:** `(kind, source table, source column, target table, target column)`. Writes upsert on it. An undirected edge (`directed: false`) is the same edge in either direction.
@@ -402,18 +403,19 @@ Response: the edge. **201** when created. **200** when the natural key already e
 
 ### `GET /api/relationships/export`
 
-*Needs connection.* Every stored edge, and every note on a derived edge, in the import format:
+*Needs connection.* Every stored edge, every note on a derived edge and every concept (section 6), in the import format:
 
 ```json
 {"version": 1, "exported_at": "...", "edges": [<edge>, ...],
- "overlays": [{"kind": "fk", "source": {"table": "..."}, "target": {"table": "..."}, "note": "...", "updated_at": "..."}]}
+ "overlays": [{"kind": "fk", "source": {"table": "..."}, "target": {"table": "..."}, "note": "...", "updated_at": "..."}],
+ "concepts": [<concept>, ...]}
 ```
 
 ### `POST /api/relationships/import`
 
-*Needs connection.* Body: the export format. In `edges`, only `kind`, `source`, `target` and `provenance` are required. `id`, timestamps, `directed` (true), `status` (`proposed`) and `note` have defaults. Edges of a derived kind, or with status `derived`, are 400. The import is all-or-nothing and upserts by natural key: an existing edge keeps its id and `created_at` and takes everything else from the file. Notes in `overlays` replace existing notes.
+*Needs connection.* Body: the export format. In `edges`, only `kind`, `source`, `target` and `provenance` are required. `id`, timestamps, `directed` (true), `status` (`proposed`) and `note` have defaults. Edges of a derived kind, or with status `derived`, are 400. The import is all-or-nothing and upserts by natural key: an existing edge keeps its id and `created_at` and takes everything else from the file. Notes in `overlays` replace existing notes. `concepts` (optional) upsert by id. A concept whose name another concept already has, or a concept link to a concept that is neither in the file nor in the store, fails the whole import (400, or 404 for the missing concept) and changes nothing.
 
-Response: `{"imported": 12, "created": 10, "updated": 2, "overlays": 1}`.
+Response: `{"imported": 12, "created": 10, "updated": 2, "overlays": 1, "concepts": 3, "concepts_created": 3}`.
 
 ---
 
@@ -498,3 +500,99 @@ Sets one status on several stored edges, all or none. Body `{"ids": ["e_..."], "
 Section 4's route, now with column lineage. At `level=column`, derived `lineage` edges with column endpoints are added from `system.access.column_lineage` (one warehouse query for the table, **cached** like the other metadata, `?refresh=1` re-reads it). The edge `id` is `lineage:<table>#<column>-><table>#<column>`, `status` `derived`, `provenance.origin` `unity_catalog:column_lineage`, `evidence.last_seen` the latest event. Stored `join_mined`, `manual` and other edges come back as stored, each with its column endpoints, and FK edges come back one per column pair. At `level=table` nothing changes.
 
 A cached copy is used when no warehouse is selected. With no warehouse and no cache, or without access to the system table, the response is still 200 with everything else and `errors` gains `"column_lineage: <reason>"`.
+
+---
+
+## 6. Concepts
+
+A small business glossary over the catalog. Implemented in `concepts.py`, stored in the relationship store of the connected profile (section 4), so every route *needs a connection*. Errors as in section 4: **400** `{"error": "<path>: <reason>"}`, **404** for an unknown concept or link. Concepts and their links are part of the section 4 export and import, which stay all-or-nothing.
+
+### The concept shape
+
+```json
+{"id": "7f0c2d3e-1111-4222-8333-444455556666", "name": "Customer",
+ "definition": "A person or company that buys from us.", "synonyms": ["client", "account holder"],
+ "domain": "Sales", "status": "certified", "tags": ["core"],
+ "provenance": {"origin": "manual", "source_ref": null, "fetched_at": "2026-11-13T09:00:00+00:00"},
+ "created_at": "...", "updated_at": "..."}
+```
+
+- **`name`** is unique per profile and compared without regard to case (`Customer` and `customer` clash, 400). 1 to 200 characters, trimmed.
+- **`synonyms`** and **`tags`**: lists of strings, trimmed, with empty entries and case-insensitive repeats dropped. **`domain`**: a string or `null`.
+- **`status`:** `draft` (default), `reviewed`, `certified`.
+- **`provenance.origin`:** `manual` (made here), `uc_tag` (from a Unity Catalog tag; `source_ref` is `key` or `key=value`) or `ontology` (reserved for a later import). `fetched_at` is when the source was read.
+
+### Links
+
+A link is a stored edge of kind `concept_link` (section 4). The source is `{"table": "concept:<uuid>"}`. The target is a table, a table and column, or another concept (`{"table": "concept:<uuid>"}`). `directed` is true, `status` is `accepted`, and `provenance.origin` is `user` (or `uc_tag`). The edge's `relation` says what the link means and must fit the target:
+
+| target | relations |
+| --- | --- |
+| table (a metric view is a table) or column | `defines`, `measures`, `identifies`, `describes` |
+| concept | `is_a`, `part_of`, `related_to` |
+
+A concept cannot link to a `ph:` placeholder or to itself. Linking again to the same target changes the relation (the natural key does not include it). Deleting a concept deletes every link that starts or ends at it.
+
+### `GET /api/concepts?q=<text>&domain=<name>&status=<status>`
+
+All parameters optional. `q` matches name, synonyms and definition, ignoring case. `domain` matches exactly, ignoring case. Response: `{"concepts": [<concept> + "link_count"], "domains": ["Finance", "Sales"]}`, by name. `domains` lists every domain in use, unfiltered. 400 for an unknown `status`.
+
+### `POST /api/concepts`
+
+Body: `{"name", "definition"?, "synonyms"?, "domain"?, "status"?, "tags"?}`; only `name` is required. Provenance is set to `manual`. Response **201**: the detail below.
+
+### `GET /api/concepts/<id>`
+
+The concept plus `"links"` (links that start at it, oldest first) and `"incoming"` (links from other concepts that point at it), each an edge as in section 4.
+
+### `PATCH /api/concepts/<id>`
+
+Body: any of `name`, `definition`, `synonyms`, `domain` (`null` clears it), `status`, `tags`; at least one. Response: the detail.
+
+### `DELETE /api/concepts/<id>`
+
+Response `{"deleted": "<id>", "links_removed": 3}`.
+
+### `POST /api/concepts/<id>/links`
+
+Body: `{"target": {"table": "main.sales.customers", "column": "id"}, "relation": "identifies", "note": ""}`. `column` is optional. To link a concept, use `"table": "concept:<uuid>"`. Response: the edge, **201** when new and **200** when the target was already linked (the relation and note are replaced). Errors: 400 (relation does not fit the target, bad endpoint, self link), 404 (either concept does not exist).
+
+### `DELETE /api/concepts/<id>/links/<edge_id>`
+
+Removes one link that starts or ends at the concept. Response `{"deleted": "<edge_id>"}`. 404 when the edge is not a link of this concept.
+
+### `GET /api/concepts/for-tables?table=<name>&table=<name>...`
+
+The concepts linked to any of the tables, or to one of their columns. Response: `{"concepts": [<concept>], "links": [<edge>]}`. Each link's `target` has the table (and column) and its `source` is the concept. Used to draw concepts on the graph. No Databricks call.
+
+### `GET /api/concepts/<id>/candidates`
+
+Tables and columns that probably are this concept: whole-word matches of the concept's name or a synonym, plural allowed (`customer` finds `dim_customers`, not `customerid`), in table and column **names and comments**. It searches only what is already in the local cache (`data/cache/<profile>/...`, the tables and columns the user has browsed), and **never calls Databricks or the warehouse**. Response:
+
+```json
+{"terms": ["Customer", "client"],
+ "hits": [{"kind": "column", "table": "main.sales.orders", "column": "customer_id", "field": "name",
+           "matched": "Customer", "text": "customer_id", "score": 3, "linked": false}],
+ "searched": {"tables": 120, "tables_with_columns": 14, "columns": 310}, "truncated": false}
+```
+
+`field` is `name` (score 3) or `comment` (score 1). `text` is the name or comment that matched. `linked` is true when the concept already links to that table or column. At most 200 hits, best first. `searched` says how much was in the cache.
+
+### `GET /api/concepts/suggest/plan`
+
+What a tag suggestion run would execute, without running anything: `{"queries": [{"name": "uc_tags", "sql": "..."}], "row_cap": 20000, "warehouse_id": "..."|null}`. The SQL is one read-only `SELECT ... UNION ALL ...` over `system.information_schema.catalog_tags`, `schema_tags`, `table_tags` and `column_tags`. Each row has `scope`, `catalog_name`, `schema_name`, `table_name`, `column_name`, `tag_name` and `tag_value`.
+
+### `POST /api/concepts/suggest/run`
+
+Runs the plan's SQL on the selected warehouse (the error is the one of `POST /api/query` when none is selected) and groups the rows by tag key and value into **draft** concepts with origin `uc_tag`. A concept is named `key=value`, or `key` for a tag with no value, and is linked with `describes` to the tables and columns carrying that tag. Catalog and schema tags have no table or column to link, so they add a line to the definition instead.
+
+A second run updates instead of duplicating. A concept is matched by its `provenance.source_ref`, so renaming it does not break the match. Its definition, status, domain and other edits are kept. Links to newly tagged tables and columns are added, and links this run made to things no longer tagged are removed. A link a person made to the same target is left alone. A new tag whose name a manual concept already has gets the suffix ` (UC tag)`, or is skipped when that is taken too. Response:
+
+```json
+{"created": [{"id": "...", "name": "pii=email", "links_added": 1, "links_removed": 0, "links": 1}],
+ "updated": [], "skipped": [{"name": "x", "reason": "..."}], "rows": 9, "truncated": false}
+```
+
+### `GET /api/concepts/export`
+
+Section 4's export, narrowed to the concepts and their links (no other edges, no overlays). The import is `POST /api/relationships/import`.

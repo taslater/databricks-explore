@@ -445,6 +445,38 @@ def cache_times(explorer, full_name):
     return out
 
 
+def cached_metadata(explorer):
+    """Tables with the names and comments already in the local cache, for searching without a warehouse.
+
+    Reads data/cache/<profile>/<catalog>/<schema>/objects.json (table names and comments) and obj/*.json (columns).
+    Returns [{"table", "type", "comment", "columns": [{"name", "comment"}] or None}] sorted by table name; `columns` is
+    None for a table whose object file was never fetched. Only what was browsed before is there.
+    """
+    tables = {}
+    for p in explorer.root.glob("*/*/objects.json"):
+        try:
+            rows = json.loads(p.read_text(encoding="utf-8")).get("data") or []
+        except (OSError, ValueError):
+            continue
+        for o in rows:
+            if o.get("full_name"):
+                tables[o["full_name"]] = {"table": o["full_name"], "type": o.get("type"),
+                                          "comment": o.get("comment"), "columns": None}
+    for p in explorer.root.glob("*/*/obj/*.json"):
+        try:
+            info = json.loads(p.read_text(encoding="utf-8")).get("data") or {}
+        except (OSError, ValueError):
+            continue
+        name = info.get("full_name")
+        if not name:
+            continue
+        entry = tables.setdefault(name, {"table": name, "type": info.get("table_type"), "comment": None, "columns": None})
+        entry["comment"] = info.get("comment") or entry["comment"]
+        entry["columns"] = [{"name": c.get("name"), "comment": c.get("comment")}
+                            for c in info.get("columns") or [] if c.get("name")]
+    return sorted(tables.values(), key=lambda t: t["table"])
+
+
 # ---------- diagrams ----------
 
 def list_diagrams():

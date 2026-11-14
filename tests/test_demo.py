@@ -110,3 +110,16 @@ def test_data_dir_defaults_and_env_var(tmp_path):
     assert _data_dir_name(tmp_path, EXPLORER_DEMO="1") == ROOT / "data-demo"
     custom = tmp_path / "custom-data"
     assert _data_dir_name(tmp_path, EXPLORER_DATA_DIR=str(custom)) == custom
+
+
+def test_tag_suggestions_work_in_demo_mode(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(dbx, "DATA", tmp_path)
+    plan = client.get("/api/concepts/suggest/plan").json
+    assert "system.information_schema.table_tags" in plan["queries"][0]["sql"]
+    run = client.post("/api/concepts/suggest/run").json
+    names = sorted(c["name"] for c in run["created"])
+    assert names == ["certified", "domain=sales", "environment=sandbox", "pii=email", "pii=name",
+                     "sensitivity=confidential"]
+    pii = client.get("/api/concepts?q=pii=email").json["concepts"][0]
+    assert pii["status"] == "draft" and pii["provenance"]["origin"] == "uc_tag" and pii["link_count"] == 1
+    assert len(client.post("/api/concepts/suggest/run").json["updated"]) == 6
