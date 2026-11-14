@@ -1071,6 +1071,99 @@ def join_keys(store, table, info=None):
     return {"table": table, "joins": [{"table": o, "keys": k} for o, k in sorted(by_other.items())]}
 
 
+# ---------- known relationships between tables, for drawing connectors ----------
+
+CONNECTOR_KINDS = ("fk", "join_mined", "manual", "sketch")  # lineage and view dependencies are not join keys
+_KIND_RANK = {"fk": 0, "manual": 1, "sketch": 2, "join_mined": 3}
+MAX_LABEL_KEYS = 4
+
+
+def known_edges_among(store, tables, relations_of=None, times_of=None):
+    """Column-level join-key edges (foreign keys, mined joins, manual and sketch edges, every status) with both ends in `tables`.
+
+    Foreign keys are derived from `relations_of(table)` (an Explorer.relations() response, or None) and the rest are read
+    from `store`. Names are compared without regard to case. A relationship from a table to itself is left out."""
+    wanted = {t.lower() for t in tables}
+    candidates = []
+    for t in sorted(set(tables)):
+        rel = relations_of(t) if relations_of else None
+        if rel:
+            candidates += derive_edges(rel, times_of(t) if times_of else None)
+        candidates += store.edges_for(t)
+    out, seen = [], set()
+    for e in candidates:
+        a, b = e.source.table.lower(), e.target.table.lower()
+        if e.kind in CONNECTOR_KINDS and e.id not in seen and a != b and a in wanted and b in wanted:
+            seen.add(e.id)
+            out.append(e)
+    return out
+
+
+def _key_text(pairs):
+    """'order_id + line_no' for a composite key, 'customer_id = id' when the two sides name it differently."""
+    left, right = " + ".join(s for s, _ in pairs), " + ".join(t for _, t in pairs)
+    return left if left.lower() == right.lower() else f"{left} = {right}"
+
+
+def connector_plan(edges, include_proposed=False):
+    """One planned connector per pair of tables from `known_edges_among` edges: (plan, skipped).
+
+    A plan entry is {source, target, label, directed, proposed, kinds, ids}. The label lists the join keys, a composite
+    key (one foreign key constraint, or the column pairs a mined join was seen together in) as 'a + b', the keys
+    separated by commas, at most four. Rejected edges are never drawn, and proposed ones only with `include_proposed`.
+    `skipped` counts the table pairs left out for having only rejected edges, or only proposed ones."""
+    by_pair = {}
+    for e in edges:
+        by_pair.setdefault(tuple(sorted((e.source.table.lower(), e.target.table.lower()))), []).append(e)
+    plan, skipped = [], {"rejected": 0, "proposed": 0}
+    for key in sorted(by_pair):
+        es = by_pair[key]
+        usable = [e for e in es if e.status in ("derived", "accepted") or (include_proposed and e.status == "proposed")]
+        if not usable:
+            skipped["rejected" if all(e.status == "rejected" for e in es) else "proposed"] += 1
+            continue
+        usable.sort(key=lambda e: (_KIND_RANK[e.kind], e.created_at, e.id))
+        src, tgt = usable[0].source.table, usable[0].target.table
+
+        def flip(e):
+            return e.source.table.lower() != src.lower()
+
+        def pair(e):
+            s, t = e.source.column, e.target.column
+            return (t, s) if flip(e) else (s, t)
+        groups, by_constraint = [], {}
+        for e in (e for e in usable if e.kind == "fk"):
+            by_constraint.setdefault(e.provenance.source_ref or e.id, []).append(pair(e))
+        groups += list(by_constraint.values())
+        rest = [(pair(e), e) for e in usable if e.kind != "fk"]
+        present = {p for p, _ in rest}
+        together = []
+        for p, e in rest:
+            for t in (e.evidence.together if e.evidence else []):
+                members = tuple((c2, c1) if flip(e) else (c1, c2) for c1, c2 in t.columns)
+                if len(members) >= 2 and set(members) <= present:
+                    together.append((-t.runs, -len(members), members))
+        used = set()
+        for _, _, members in sorted(set(together)):
+            if not used & set(members):
+                groups.append(list(members))
+                used |= set(members)
+        groups += [[p] for p, _ in rest if p not in used]
+        texts, seen = [], set()
+        for g in groups:
+            named = [p for p in g if p[0] and p[1]]
+            if named and not set(named) <= seen:
+                seen |= set(named)
+                text = _key_text(named)
+                if text not in texts:
+                    texts.append(text)
+        label = ", ".join(texts[:MAX_LABEL_KEYS]) + (f", +{len(texts) - MAX_LABEL_KEYS} more" if len(texts) > MAX_LABEL_KEYS else "")
+        plan.append({"source": src, "target": tgt, "label": label or None, "directed": any(e.directed for e in usable),
+                     "proposed": all(e.status == "proposed" for e in usable), "kinds": sorted({e.kind for e in usable}),
+                     "ids": [e.id for e in usable]})
+    return plan, skipped
+
+
 def check_table(table):
     """Validate a table name or placeholder from a query string. Returns it normalized."""
     if not table:

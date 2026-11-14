@@ -17,6 +17,8 @@ from . import mining
 from . import ontology
 from . import relationships
 from . import sqltools
+from .mcp_server import tools_canvas
+from .mcp_server.tooling import Context, ToolError
 
 # Windows can map these to text/plain through the registry, and a browser then refuses module scripts and styles.
 for _ext, _type in ((".js", "text/javascript"), (".mjs", "text/javascript"), (".css", "text/css"), (".svg", "image/svg+xml")):
@@ -594,6 +596,21 @@ def canvas_revision(name):
 def canvas_undo(name):
     """Restore the state before the last agent write. Another undo goes one agent write further back."""
     return jsonify(canvases.undo_canvas(name))
+
+
+@app.post("/api/canvases/<name>/connect-known")
+def canvas_connect_known(name):
+    """Draw connectors for the known relationships (foreign keys, mined, manual) between the table cards of a saved canvas.
+    Body (all optional): {"ids": [card ids], "include_proposed": false}. Saved as an agent write, so the page's Undo works."""
+    body = request.get_json(silent=True) or {}
+    ids, proposed = body.get("ids"), body.get("include_proposed", False)
+    if not (ids is None or (isinstance(ids, list) and all(isinstance(i, str) for i in ids))) or not isinstance(proposed, bool):
+        return jsonify({"error": "send ids (a list of card ids) and include_proposed (true or false)"}), 400
+    ctx = Context(explorer=lambda: STATE["ex"], store=rel_store, miner=miner)
+    try:
+        return jsonify(tools_canvas.connect_known_on(ctx, name, ids, proposed))
+    except ToolError as e:
+        return jsonify({"error": str(e)}), 400
 
 
 # ---- Layout: doctor, tidy, arrange, describe, render. Each takes {"canvas": {...}} or {"name": "<saved>"}. ----
