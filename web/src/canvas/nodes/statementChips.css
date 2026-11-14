@@ -1,0 +1,28 @@
+.qw-chips {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px 0;
+}
+
+.qw-chip {
+  min-width: 24px;
+  padding: 1px 8px;
+  font-size: 12px;
+}
+
+.qw-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.qw-chip.bad {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.qw-chip.active.bad {
+  background: var(--error);
+  color: #fff;
+}
+
