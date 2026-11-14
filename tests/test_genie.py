@@ -326,3 +326,104 @@ def test_request_validation():
         genie.parse_ids({"a": "1"}, "a", "b")
     with pytest.raises(genie.GenieInvalid):
         genie.parse_ids([], "a")
+
+
+# ---------------------------------------------------------------- poll retry
+
+POLL_SC = {"conversation_id": "c", "response_id": "r", "status": "in_progress"}
+
+
+def flaky(failures):
+    """A server whose poll answers each of `failures` (an HTTP status) before it succeeds."""
+    queue = list(failures)
+
+    def on_call(body, headers):
+        if body["params"]["name"] == "genie_poll_response" and queue:
+            return queue.pop(0), {}, "upstream trouble"
+        return 200, {}, rpc(tool_result(POLL_SC), rid=body["id"])
+    return FakeHttp(session_handler(on_call))
+
+
+@pytest.fixture
+def pauses(monkeypatch):
+    slept = []
+    monkeypatch.setattr(genie.time, "sleep", slept.append)
+    return slept
+
+
+def tool_calls(http):
+    return [s for s in http.sent if s["body"].get("method") == "tools/call"]
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+def test_a_poll_that_got_a_5xx_is_tried_once_more_after_a_pause(status, pauses):
+    http = flaky([status])
+    assert client(http).poll("c", "r")["status"] == "in_progress"
+    assert len(tool_calls(http)) == 2 and pauses == [genie.POLL_RETRY_PAUSE]
+
+
+@pytest.mark.parametrize("exc", [pytest.param("connection", id="connection"), pytest.param("timeout", id="timeout")])
+def test_a_poll_that_lost_the_connection_or_timed_out_is_tried_once_more(exc, pauses):
+    import requests
+
+    queue = [requests.ConnectionError("x") if exc == "connection" else requests.Timeout()]
+    http = flaky([])
+
+    def post(url, headers, body, timeout):
+        if body.get("params", {}).get("name") == "genie_poll_response" and queue:
+            try:
+                raise queue.pop(0)
+            except requests.Timeout:
+                raise genie.GenieError("slow", 502, transient=True) from None
+            except requests.RequestException:
+                raise genie.GenieError("down", 502, transient=True) from None
+        return http(url, headers, body, timeout)
+
+    w = SimpleNamespace(config=SimpleNamespace(host=HOST, authenticate=lambda: {}), get_workspace_id=lambda: 1)
+    assert genie.GenieClient(w, post=post).poll("c", "r")["status"] == "in_progress"
+    assert pauses == [genie.POLL_RETRY_PAUSE]
+
+
+def test_default_post_marks_network_failures_as_transient(monkeypatch):
+    import requests
+
+    for exc in (requests.ConnectionError("x"), requests.Timeout()):
+        def boom(*a, _exc=exc, **k):
+            raise _exc
+
+        monkeypatch.setattr(genie.requests, "post", boom)
+        with pytest.raises(genie.GenieError) as e:
+            genie.default_post("https://x", {}, {}, 1)
+        assert e.value.transient is True
+
+
+def test_a_poll_is_retried_only_once(pauses):
+    http = flaky([502, 502, 502])
+    with pytest.raises(genie.GenieError) as e:
+        client(http).poll("c", "r")
+    assert e.value.status == 502 and "HTTP 502" in str(e.value)
+    assert len(tool_calls(http)) == 2 and len(pauses) == 1
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 429])
+def test_a_poll_is_not_retried_for_a_refusal_or_a_client_error(status, pauses):
+    http = flaky([status])
+    with pytest.raises(genie.GenieError):
+        client(http).poll("c", "r")
+    assert len(tool_calls(http)) == 1 and pauses == []
+
+
+def test_a_tool_error_in_a_poll_is_not_retried(pauses):
+    http = FakeHttp(session_handler(lambda body, headers: (200, {}, rpc(tool_result({"message": "boom"}, is_error=True), rid=body["id"]))))
+    with pytest.raises(genie.GenieError):
+        client(http).poll("c", "r")
+    assert len(tool_calls(http)) == 1 and pauses == []
+
+
+def test_ask_result_and_cancel_are_never_retried(pauses):
+    for call in (lambda c: c.ask("q"), lambda c: c.query_result("c", "r", "i"), lambda c: c.cancel("c")):
+        http = FakeHttp(session_handler(lambda body, headers: (503, {}, "down")))
+        with pytest.raises(genie.GenieError):
+            call(client(http))
+        assert len(tool_calls(http)) == 1
+    assert pauses == []

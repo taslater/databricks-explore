@@ -2,6 +2,7 @@
 import json
 import re
 import threading
+import time
 from urllib.parse import unquote
 
 import requests
@@ -11,6 +12,7 @@ SERVER_PATH = "/ai-gateway/mcp-services/system.ai.genie_one_mcp"
 CLIENT_INFO = {"name": "databricks-explore", "version": "0"}
 TIMEOUT = 60                      # seconds for one HTTP call; every tool call returns quickly (the browser polls)
 MAX_QUESTION = 4000
+POLL_RETRY_PAUSE = 0.5            # seconds before the one retry of a poll that failed in transit
 MAX_ERROR = 300                   # characters of an upstream error body kept in a message
 
 _PERMISSION = re.compile(r"permission|EXECUTE|denied|forbidden|not authorized|unauthorized", re.I)
@@ -21,11 +23,13 @@ _AGENT_COMMENT = re.compile(r"<!--.*?-->", re.S)
 
 
 class GenieError(Exception):
-    """Genie could not be reached or refused. `status` is the HTTP status the route returns (403, 429 or 502)."""
+    """Genie could not be reached or refused. `status` is the HTTP status the route returns (403, 429 or 502).
+    `transient` marks a failure in transit (HTTP 5xx, no connection, timeout) that may work on a second try."""
 
-    def __init__(self, message, status=502):
+    def __init__(self, message, status=502, transient=False):
         super().__init__(message)
         self.status = status
+        self.transient = transient
 
 
 class GenieInvalid(ValueError):
@@ -109,9 +113,9 @@ def default_post(url, headers, body, timeout):
     try:
         r = requests.post(url, headers=headers, data=json.dumps(body), timeout=timeout)
     except requests.Timeout:
-        raise GenieError("The Genie One MCP server did not answer in time. Try again.", 502) from None
+        raise GenieError("The Genie One MCP server did not answer in time. Try again.", 502, transient=True) from None
     except requests.RequestException as e:
-        raise GenieError(f"Could not reach the Genie One MCP server: {type(e).__name__}. Check the connection and the profile.", 502) from None
+        raise GenieError(f"Could not reach the Genie One MCP server: {type(e).__name__}. Check the connection and the profile.", 502, transient=True) from None
     return r.status_code, {k.lower(): v for k, v in r.headers.items()}, r.text
 
 
@@ -187,7 +191,7 @@ class GenieClient:
         if status == 429:
             raise GenieError("Genie is rate limited right now. Wait a moment and try again.", 429)
         if status >= 400 and status != 404:
-            raise GenieError(f"The Genie One MCP server answered HTTP {status}: {_snippet(text)}", 502)
+            raise GenieError(f"The Genie One MCP server answered HTTP {status}: {_snippet(text)}", 502, transient=status >= 500)
         return status, headers, text
 
     def _rpc_id(self):
@@ -253,8 +257,18 @@ class GenieClient:
         return shape_ask(self._call("genie_ask", args))
 
     def poll(self, conversation_id, response_id):
-        """One upstream poll, shaped by shape_poll."""
-        return shape_poll(self._call("genie_poll_response", {"conversation_id": conversation_id, "response_id": response_id}))
+        """One upstream poll, shaped by shape_poll. A transient failure (HTTP 5xx, no connection, timeout) is tried
+        once more after a short pause; only poll does this, because the page polls again anyway and a repeated ask,
+        result or cancel is not harmless."""
+        args = {"conversation_id": conversation_id, "response_id": response_id}
+        try:
+            sc = self._call("genie_poll_response", args)
+        except GenieError as e:
+            if not e.transient:
+                raise
+            time.sleep(POLL_RETRY_PAUSE)
+            sc = self._call("genie_poll_response", args)
+        return shape_poll(sc)
 
     def query_result(self, conversation_id, response_id, item_id):
         """The rows of one SQL item, in the Result shape."""
