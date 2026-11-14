@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 import io
 import math
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 RULES = ("fit_labels", "frames", "overlaps", "align", "spacing", "grid", "handles", "place_labels")
 ARRANGE_MODES = ("grid", "row", "column", "layered", "place")
@@ -1739,8 +1739,48 @@ def _color(v: Any, default: Optional[str]) -> Optional[str]:
     return default
 
 
+def wrap_label(text: str, max_width: float, max_lines: int, measure: Callable[[str], float]) -> list[str]:
+    """`text` broken into at most `max_lines` lines that each measure at most `max_width`, for drawing inside a box.
+
+    Breaks at spaces and at newlines, and inside a word only when the word alone is wider than a line. When the text
+    does not fit in `max_lines`, the last line ends in an ellipsis (and is cut back until it fits). `measure` returns
+    the width of a string in the unit of `max_width`. Deterministic; empty for empty text."""
+    max_lines = max(int(max_lines), 1)
+    lines: list[str] = []
+    for para in str(text).split("\n"):
+        cur = ""
+        for word in para.split():
+            while measure(word) > max_width and len(word) > 1:  # a word wider than a line is broken by characters
+                if cur:
+                    lines.append(cur)
+                    cur = ""
+                k = max((i for i in range(1, len(word) + 1) if measure(word[:i]) <= max_width), default=1)
+                lines.append(word[:k])
+                word = word[k:]
+            trial = f"{cur} {word}" if cur else word
+            if cur and measure(trial) > max_width:
+                lines.append(cur)
+                cur = word
+            else:
+                cur = trial
+        lines.append(cur)
+    while len(lines) > 1 and not lines[-1]:
+        lines.pop()
+    if not any(lines):
+        return []
+    if len(lines) <= max_lines:
+        return lines
+    last = lines[max_lines - 1]
+    while last and measure(last + "…") > max_width:
+        last = last[:-1].rstrip()
+    return lines[:max_lines - 1] + [last + "…"]
+
+
 def render_png(canvas: dict, width: int = 1200, highlight: Optional[Iterable[str]] = None) -> bytes:
-    """A schematic picture: boxes by type with ids and truncated labels, connectors with arrowheads, issue nodes outlined."""
+    """A schematic picture: boxes by type with labels wrapped inside them, connectors with arrowheads, issue nodes outlined.
+
+    A label that does not fit the box (as many lines as its height allows) ends in an ellipsis on its last line. Each
+    node's id is a small tag above its box, so it never covers the label (a frame's tag sits at its bottom edge)."""
     from PIL import Image, ImageDraw, ImageFont
 
     width = int(min(max(width, 200), 4000))
@@ -1768,7 +1808,10 @@ def render_png(canvas: dict, width: int = 1200, highlight: Optional[Iterable[str
     img = Image.new("RGB", (width, height), "white")
     d = ImageDraw.Draw(img)
     # Labels scale with the boxes (the page's 14 px default), so a label the doctor says fits also fits the picture.
-    f_lab, f_id = font(max(9, int(14 * scale))), font(9)
+    lab_size = max(9, int(14 * scale))
+    f_lab, f_id = font(lab_size), font(9)
+    line_h = lab_size * 1.25
+    tags: list[tuple[tuple[float, float], str]] = []
     by = {n["id"]: n for n in nodes}
     for n in sorted(nodes, key=lambda n: (_num(n.get("z"), -1 if n.get("type") == "frame" else 0), 0)):
         b = _box(n)
@@ -1790,20 +1833,21 @@ def render_png(canvas: dict, width: int = 1200, highlight: Optional[Iterable[str
         text = _text_of(n)
         if n.get("type") == "placeholder":
             text = str((n.get("placeholder") or {}).get("name") or "")
-        if n.get("type") == "frame":
-            tpos = (a[0] + 6, a[1] + 3)
+        measure = lambda t: d.textlength(t, font=f_lab)  # noqa: E731
+        if n.get("type") == "frame":  # one line, in the title bar
+            lines, y0 = wrap_label(text, max(c[0] - a[0] - 12, 8), 1, measure), a[1] + 3
+            xs = [a[0] + 6] * len(lines)
         else:
-            tw = d.textlength(text, font=f_lab) if text else 0
-            maxw = max(c[0] - a[0] - 8, 8)
-            while text and tw > maxw and len(text) > 1:
-                text = text.rstrip("…")[:-1] + "…"
-                tw = d.textlength(text, font=f_lab)
-            tpos = ((a[0] + c[0]) / 2 - tw / 2, (a[1] + c[1]) / 2 - 7)
-        if text:
-            d.text(tpos, text, fill="#111827", font=f_lab)
-        d.text((a[0] + 3, a[1] + 1 if n.get("type") != "frame" else c[1] - 11), str(n["id"]), fill="#6b7280", font=f_id)
+            lines = wrap_label(text, max(c[0] - a[0] - 8, 8), int((c[1] - a[1] - 4) // line_h), measure)
+            y0 = (a[1] + c[1]) / 2 - len(lines) * line_h / 2
+            xs = [(a[0] + c[0]) / 2 - measure(t) / 2 for t in lines]
+        for k, t in enumerate(lines):
+            d.text((xs[k], y0 + k * line_h), t, fill="#111827", font=f_lab)
+        tags.append(((a[0] + 1, c[1] - 11) if n.get("type") == "frame" else (a[0] + 1, a[1] - 11), str(n["id"])))
         if n["id"] in hi:
             d.rectangle([(a[0] - 3, a[1] - 3), (c[0] + 3, c[1] + 3)], outline="#dc2626", width=3)
+    for tag_pos, tag in tags:  # after every box, so a neighbor's fill never hides a tag
+        d.text(tag_pos, tag, fill="#6b7280", font=f_id)
     by_edge = {e["id"]: e for e in _edges(canvas)}
     for e, pts in _polylines(canvas):
         col = _color(e.get("color"), "#4b5563")

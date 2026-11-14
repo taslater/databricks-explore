@@ -415,7 +415,7 @@ Response `{"text": "..."}`: a compact summary for a language model, about 60 lin
 
 ### `POST /api/layout/render`
 
-Body: the input above, plus optional `width` (pixels, 200 to 4000, default 1200) and `highlight`, a list of node ids to outline in red or the string `"issues"` for every node an error or warning names. Response: `image/png`, a schematic picture (boxes by type with their ids and truncated labels, connectors with arrowheads, and connector labels in white boxes where the placement rule puts them). It is for judging layout, not a faithful render of the canvas.
+Body: the input above, plus optional `width` (pixels, 200 to 4000, default 1200) and `highlight`, a list of node ids to outline in red or the string `"issues"` for every node an error or warning names. Response: `image/png`, a schematic picture (boxes by type with their labels wrapped inside them (an ellipsis ends the last line when the box is too short) and each id as a small tag above the box, connectors with arrowheads, and connector labels in white boxes where the placement rule puts them). It is for judging layout, not a faithful render of the canvas.
 
 ---
 
