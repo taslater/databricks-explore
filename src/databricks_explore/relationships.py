@@ -1122,8 +1122,8 @@ def connector_plan(edges, include_proposed=False):
         if not usable:
             skipped["rejected" if all(e.status == "rejected" for e in es) else "proposed"] += 1
             continue
-        usable.sort(key=lambda e: (_KIND_RANK[e.kind], e.created_at, e.id))
-        src, tgt = usable[0].source.table, usable[0].target.table
+        first = min(usable, key=lambda e: (_KIND_RANK[e.kind], e.created_at, e.id))  # sets the direction; the order of `usable` is kept
+        src, tgt = first.source.table, first.target.table
 
         def flip(e):
             return e.source.table.lower() != src.lower()
@@ -1134,8 +1134,8 @@ def connector_plan(edges, include_proposed=False):
         groups, by_constraint = [], {}
         for e in (e for e in usable if e.kind == "fk"):
             by_constraint.setdefault(e.provenance.source_ref or e.id, []).append(pair(e))
-        groups += list(by_constraint.values())
-        rest = [(pair(e), e) for e in usable if e.kind != "fk"]
+        groups += [by_constraint[k] for k in sorted(by_constraint)]  # by constraint name, so the label does not depend on ids
+        rest = sorted(((pair(e), e) for e in usable if e.kind != "fk"), key=lambda pe: (pe[0][0] or "", pe[0][1] or ""))
         present = {p for p, _ in rest}
         together = []
         for p, e in rest:
