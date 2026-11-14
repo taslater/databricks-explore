@@ -19,7 +19,7 @@ from typing import Annotated, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
-import dbx
+from . import dbx
 
 DERIVED_KINDS = ("fk", "lineage", "view_dep")
 STORED_KINDS = ("join_mined", "manual", "sketch", "concept_link", "ontology")

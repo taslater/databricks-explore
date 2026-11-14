@@ -6,12 +6,9 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-
-import app as app_module  # noqa: E402
-import dbx  # noqa: E402
-import demo  # noqa: E402
+from databricks_explore import __version__, app as app_module  # noqa: E402
+from databricks_explore import dbx  # noqa: E402
+from databricks_explore import demo  # noqa: E402
 
 
 @pytest.fixture
@@ -31,7 +28,7 @@ def client(monkeypatch, tmp_path):
 
 def test_fake_profile_and_warehouses(client):
     assert [p["name"] for p in client.get("/api/profiles").json["profiles"]] == ["demo"]
-    assert client.get("/api/session").json == {"profile": "demo", "warehouse_id": "demo-wh-1"}
+    assert client.get("/api/session").json == {"profile": "demo", "warehouse_id": "demo-wh-1", "version": __version__}
     assert [w["name"] for w in client.get("/api/warehouses").json] == ["Demo Serverless", "Demo Pro (stopped)"]
 
 
@@ -99,17 +96,22 @@ def test_search_uses_the_fake_information_schema(client):
 
 
 def _data_dir_name(tmp_path, **env):
-    full = {**os.environ, "EXPLORER_DEMO": "", "EXPLORER_DATA_DIR": "", **env}
-    out = subprocess.run([sys.executable, "-c", "import dbx; print(dbx.DATA)"], cwd=ROOT,
-                         capture_output=True, text=True, env=full)
+    """dbx.DATA in a fresh interpreter. The per-user folders are redirected into tmp_path so nothing is created for real."""
+    home = {k: str(tmp_path) for k in ("HOME", "USERPROFILE", "XDG_DATA_HOME", "LOCALAPPDATA", "APPDATA")}
+    full = {**os.environ, **home, "EXPLORER_DEMO": "", "EXPLORER_DATA_DIR": "", **env}
+    out = subprocess.run([sys.executable, "-c", "from databricks_explore import dbx; print(dbx.DATA)"],
+                         capture_output=True, text=True, env=full, check=True)
     return Path(out.stdout.strip())
 
 
 def test_data_dir_defaults_and_env_var(tmp_path):
-    assert _data_dir_name(tmp_path) == ROOT / "data"
-    assert _data_dir_name(tmp_path, EXPLORER_DEMO="1") == ROOT / "data-demo"
+    user = _data_dir_name(tmp_path)
+    assert user.name == "databricks-explore"
+    assert _data_dir_name(tmp_path, EXPLORER_DEMO="1") == user / "demo"
+    assert Path(dbx.__file__).resolve().parent not in dbx.default_data_dir().parents  # never inside the installed package
     custom = tmp_path / "custom-data"
     assert _data_dir_name(tmp_path, EXPLORER_DATA_DIR=str(custom)) == custom
+    assert _data_dir_name(tmp_path, EXPLORER_DATA_DIR=str(custom), EXPLORER_DEMO="1") == custom
 
 
 def test_tag_suggestions_work_in_demo_mode(client, monkeypatch, tmp_path):

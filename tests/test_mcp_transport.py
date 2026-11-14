@@ -2,11 +2,14 @@
 import json
 import os
 import stat
+import sys
 
-import dbx
+import pytest
+
+from databricks_explore import dbx
 from mcp_helpers import Agent, agent, connected, env, offline_agent  # noqa: F401
-from mcp_server import auth, rpc
-from mcp_server.tooling import REGISTRY
+from databricks_explore.mcp_server import auth, rpc
+from databricks_explore.mcp_server.tooling import REGISTRY
 
 EXPECTED_TOOLS = {
     "status", "search_tables", "describe_table", "list_schemas", "list_tables",
@@ -129,6 +132,7 @@ def test_tools_call_errors(agent):
     assert r.get_json()["result"]["isError"] is True
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no POSIX file modes")
 def test_the_token_file_is_private_stable_and_never_logged(agent, tmp_path):
     path = tmp_path / "mcp_token"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600

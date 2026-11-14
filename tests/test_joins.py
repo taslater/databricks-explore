@@ -1,7 +1,7 @@
 """sqltools.join_pairs: which column pairs a statement joins on, through aliases, CTEs and subqueries."""
 import pytest
 
-from sqltools import JoinPair, join_pairs
+from databricks_explore.sqltools import JoinPair, join_pairs
 
 O, C, I, P, R = ("demo.sales.orders", "demo.sales.customers", "demo.sales.order_items", "demo.sales.products",
                  "demo.sales.returns")

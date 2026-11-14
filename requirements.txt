@@ -1,7 +1,0 @@
-flask>=3.0
-databricks-sdk>=0.40
-sqlglot>=30
-pydantic>=2.7
-pytest>=8
-pyyaml>=6
-pillow>=10.1

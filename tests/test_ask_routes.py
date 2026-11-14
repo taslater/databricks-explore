@@ -1,16 +1,12 @@
 """Ask routes: /api/ask, /api/ask/poll, /api/ask/result and /api/ask/cancel, through demo mode's fake Genie and a stub that fails."""
 import json
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-import app as app_module  # noqa: E402
-import dbx  # noqa: E402
-import demo  # noqa: E402
-import genie  # noqa: E402
+from databricks_explore import app as app_module  # noqa: E402
+from databricks_explore import dbx  # noqa: E402
+from databricks_explore import demo  # noqa: E402
+from databricks_explore import genie  # noqa: E402
 
 
 @pytest.fixture

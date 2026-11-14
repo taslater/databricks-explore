@@ -8,11 +8,11 @@ import re
 import pytest
 from databricks.sdk import errors
 
-import app as app_module
-import concepts
-import dbx
-import ontology
-import relationships as rel
+from databricks_explore import app as app_module
+from databricks_explore import concepts
+from databricks_explore import dbx
+from databricks_explore import ontology
+from databricks_explore import relationships as rel
 
 VIEW = "main.sales.sales_metrics"
 YAML = """
@@ -699,7 +699,7 @@ def test_routes_need_a_connection(monkeypatch):
 
 @pytest.fixture
 def demo_client(monkeypatch, tmp_path):
-    import demo
+    from databricks_explore import demo
     monkeypatch.setattr(dbx, "DEMO", True)
     monkeypatch.setattr(dbx, "WorkspaceClient", demo.FakeWorkspaceClient)
     monkeypatch.setattr(dbx, "CACHE", tmp_path / "cache")

@@ -16,9 +16,9 @@ from itertools import combinations
 
 from pydantic import ValidationError
 
-import dbx
-import relationships
-import sqltools
+from . import dbx
+from . import relationships
+from . import sqltools
 
 WINDOW_DAYS = 30
 MAX_WINDOW_DAYS = 365  # system.query.history keeps a year

@@ -1,32 +1,30 @@
-"""Local Databricks relationship explorer.  Run:  uv run --with-requirements requirements.txt app.py"""
-import os
-import sys
+"""The Flask app: REST routes, the built React UI and the MCP server. Start it with the `databricks-explore` command."""
+import mimetypes
 import time
 from pathlib import Path
-
-if "--demo" in sys.argv:  # must be set before dbx is imported: it picks the data folder and client at import
-    os.environ["EXPLORER_DEMO"] = "1"
-if "--redacted" in sys.argv:  # demo only: query history text reads <REDACTED>, to try that path
-    os.environ["EXPLORER_DEMO_REDACTED"] = "1"
 
 from flask import Flask, abort, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException, MethodNotAllowed, NotFound
 
-import canvases
-import concepts
-import dbx
-import demo
-import genie
-import layout
-import mcp_server
-import mining
-import ontology
-import relationships
-import sqltools
+from . import __version__, canvases
+from . import concepts
+from . import dbx
+from . import demo
+from . import genie
+from . import layout
+from . import mcp_server
+from . import mining
+from . import ontology
+from . import relationships
+from . import sqltools
 
-app = Flask(__name__, static_folder=None)  # the React build in web/dist is the only UI
+# Windows can map these to text/plain through the registry, and a browser then refuses module scripts and styles.
+for _ext, _type in ((".js", "text/javascript"), (".mjs", "text/javascript"), (".css", "text/css"), (".svg", "image/svg+xml")):
+    mimetypes.add_type(_type, _ext)
+
+app = Flask(__name__, static_folder=None)  # the React build in web_dist is the only UI
 STATE = {"ex": None}  # single local user -> one active connection
-WEB_DIST = Path(__file__).resolve().parent / "web" / "dist"  # built by `npm run build` in web/
+WEB_DIST = Path(__file__).resolve().parent / "web_dist"  # `npm run build` in web/ writes it; the wheel ships it
 
 
 @app.before_request
@@ -98,7 +96,7 @@ def profiles():
 def session():
     """What the server is connected to right now. Null fields when not connected. No connection needed."""
     e = STATE["ex"]
-    return jsonify({"profile": e.profile if e else None, "warehouse_id": e.warehouse_id if e else None})
+    return jsonify({"profile": e.profile if e else None, "warehouse_id": e.warehouse_id if e else None, "version": __version__})
 
 
 @app.post("/api/connect")
@@ -673,9 +671,3 @@ def layout_render():
 # ---- MCP server (mcp_server/): /mcp for coding agents, /api/agent-access for the page. Local only, bearer token. ----
 mcp_server.register(app, explorer=lambda: STATE["ex"], store=rel_store, miner=miner)
 
-
-if __name__ == "__main__":
-    # Demo mode uses its own port so the browser keeps its saved profile and warehouse apart from real use.
-    # The Werkzeug debugger and reloader only on request: the debugger can run code from an error page.
-    debug = "--debug" in sys.argv or os.environ.get("EXPLORER_DEBUG") == "1"
-    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", 8767 if dbx.DEMO else 8765)), debug=debug)

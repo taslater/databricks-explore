@@ -5,17 +5,13 @@ serves a configurable number of rows in chunks, using the real SDK response type
 """
 import json
 import re
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-import app as app_module  # noqa: E402
-import dbx  # noqa: E402
-import sqltools  # noqa: E402
+from databricks_explore import app as app_module  # noqa: E402
+from databricks_explore import dbx  # noqa: E402
+from databricks_explore import sqltools  # noqa: E402
 from databricks.sdk.service.sql import (  # noqa: E402
     ColumnInfo, ColumnInfoTypeName, ResultData, ResultManifest, ResultSchema,
     ServiceError, StatementResponse, StatementState, StatementStatus)

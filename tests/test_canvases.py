@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-import app as app_module
-import canvases
+from databricks_explore import app as app_module
+from databricks_explore import canvases
 
 # The example from contracts/api.md, section 3.
 EXAMPLE = {
@@ -378,7 +378,7 @@ def test_sketch_nodes_do_not_take_part_in_title_uniqueness(client):
 def test_schema_file_agrees_with_the_models():
     """contracts/canvas.schema.json accepts both examples and rejects what the models reject (needs jsonschema)."""
     jsonschema = pytest.importorskip("jsonschema")
-    schema = json.loads((Path(canvases.__file__).parent / "contracts" / "canvas.schema.json").read_text(encoding="utf-8"))
+    schema = json.loads((Path(__file__).resolve().parents[1] / "contracts" / "canvas.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator.check_schema(schema)
     validator = jsonschema.Draft202012Validator(schema)
     assert list(validator.iter_errors(example())) == []

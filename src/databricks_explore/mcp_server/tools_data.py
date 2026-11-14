@@ -3,11 +3,11 @@ import json
 import time
 from typing import Any
 
-import concepts
-import dbx
-import mining
-import relationships
-from relationships import RelationshipInvalid
+from .. import concepts
+from .. import dbx
+from .. import mining
+from .. import relationships
+from ..relationships import RelationshipInvalid
 
 from .sqlguard import NotReadOnly, check_read_only
 from .tooling import B, FORMAT, S, ToolError, integer, obj, strings, text, tool
@@ -63,7 +63,7 @@ def edge_line(e: dict) -> str:
 @tool("status", "Report what the app is connected to (profile, SQL warehouse, demo mode), how many canvases exist and whether a mining run is going. Call it first.",
       obj({"format": FORMAT}))
 def status(ctx, args):
-    import canvases
+    from .. import canvases
     e = ctx.explorer()
     out = {"connected": e is not None, "profile": e.profile if e else None, "warehouse_id": e.warehouse_id if e else None,
            "demo": dbx.DEMO, "canvases": len(canvases.list_canvases())}

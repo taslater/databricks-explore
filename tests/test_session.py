@@ -3,15 +3,12 @@
 No Databricks connection. dbx.Explorer and dbx.cli_login are replaced, so nothing
 talks to a workspace and no browser opens.
 """
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-import app as app_module  # noqa: E402
-import dbx  # noqa: E402
+from databricks_explore import __version__
+from databricks_explore import app as app_module  # noqa: E402
+from databricks_explore import dbx  # noqa: E402
 
 
 class FakeExplorer:
@@ -40,14 +37,14 @@ def env(monkeypatch, tmp_path):
 
 def test_session_is_null_when_not_connected(env):
     c, _ = env
-    assert c.get("/api/session").get_json() == {"profile": None, "warehouse_id": None}
+    assert c.get("/api/session").get_json() == {"profile": None, "warehouse_id": None, "version": __version__}
 
 
 def test_session_reports_profile_and_warehouse(env):
     c, _ = env
     c.post("/api/connect", json={"profile": "dev"})
     c.post("/api/warehouse", json={"id": "wh9"})
-    assert c.get("/api/session").get_json() == {"profile": "dev", "warehouse_id": "wh9"}
+    assert c.get("/api/session").get_json() == {"profile": "dev", "warehouse_id": "wh9", "version": __version__}
 
 
 def test_non_interactive_connect_succeeds_without_browser(env):
@@ -86,7 +83,7 @@ def test_profiles_skip_dunder_sections(monkeypatch, tmp_path):
 
 def test_every_route_refuses_a_foreign_host_or_origin():
     """DNS rebinding: a page under another name must not reach /api/* (it would use the connected credentials)."""
-    import app as app_module
+    from databricks_explore import app as app_module
 
     c = app_module.app.test_client()
     assert c.get("/api/profiles", headers={"Host": "evil.example:8765"}).status_code == 403

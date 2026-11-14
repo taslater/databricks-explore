@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import sqlglot
-import demo_history
+from . import demo_history
 from databricks.sdk.service import catalog as uc
 from databricks.sdk.service import iam
 from databricks.sdk.service import sql as sqlsvc
@@ -433,7 +433,7 @@ class FakeWorkspaceClient:
 #   demo_error, fail   the turn ends `failed`
 #   demo_slow          stays in progress for SLOW_DELAY seconds (to test Cancel)
 # Anything else counts orders. A follow-up in the same conversation gets one extra progress step.
-import genie  # noqa: E402  (kept with the Genie code so this block can be appended on its own)
+from . import genie  # noqa: E402  (kept with the Genie code so this block can be appended on its own)
 
 GENIE_STEP_SECONDS = 1.2
 GENIE_HOST = "https://demo.invalid"

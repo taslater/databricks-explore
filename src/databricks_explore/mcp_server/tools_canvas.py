@@ -5,8 +5,8 @@ import json
 import re
 import uuid
 
-import canvases
-import layout
+from .. import canvases
+from .. import layout
 
 from .tooling import B, FORMAT, S, ToolError, integer, obj, strings, text, tool
 

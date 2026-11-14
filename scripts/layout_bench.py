@@ -6,11 +6,8 @@ Run:  python scripts/layout_bench.py [--seed N] [--grid 20]
 import argparse
 import copy
 import random
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import layout  # noqa: E402
+from databricks_explore import layout
 
 
 def _node(nid, x, y, w=140, h=60, kind="shape", **extra):

@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import app as app_module
-import dbx
+from databricks_explore import app as app_module
+from databricks_explore import dbx
 
 
 def write(path, payload):
@@ -72,7 +72,7 @@ def test_search_sql_avoids_startswith_on_information_schema():
     on a live warehouse (seen 2026-11-14), so the name search must filter internal tables another way."""
     import inspect
 
-    import dbx
+    from databricks_explore import dbx
 
     src = inspect.getsource(dbx.Explorer.search)
     assert "NOT startswith(" not in src.replace("not NOT startswith()", "")

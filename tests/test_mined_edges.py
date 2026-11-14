@@ -1,7 +1,7 @@
 """Store support for mined edges: evidence merging, the suggestions list, bulk status, and column lineage edges."""
 import pytest
 
-import relationships as rel
+from databricks_explore import relationships as rel
 
 A, B, C = "main.sales.orders", "main.sales.customers", "main.sales.raw"
 

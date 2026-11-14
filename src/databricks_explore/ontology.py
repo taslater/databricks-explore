@@ -13,10 +13,10 @@ import yaml
 from databricks.sdk import errors
 from pydantic import ValidationError
 
-import concepts
-import dbx
-import relationships as rel
-from relationships import Concept, ConceptProvenance, Endpoint, Provenance
+from . import concepts
+from . import dbx
+from . import relationships as rel
+from .relationships import Concept, ConceptProvenance, Endpoint, Provenance
 
 DOMAINS_PATH = "/api/2.0/domains"
 PAGES_PATH = "/api/2.0/knowledge/pages"

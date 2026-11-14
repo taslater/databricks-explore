@@ -3,11 +3,11 @@ import json
 
 import pytest
 
-import app as app_module
-import canvases
-import dbx
-import demo
-from mcp_server import auth, tools_data
+from databricks_explore import app as app_module
+from databricks_explore import canvases
+from databricks_explore import dbx
+from databricks_explore import demo
+from databricks_explore.mcp_server import auth, tools_data
 
 
 class Agent:

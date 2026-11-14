@@ -10,9 +10,9 @@ from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-import dbx
-import relationships as rel
-from relationships import Concept, ConceptProvenance, Endpoint, Provenance, RelationshipInvalid
+from . import dbx
+from . import relationships as rel
+from .relationships import Concept, ConceptProvenance, Endpoint, Provenance, RelationshipInvalid
 
 TAG_ROW_CAP = 20000
 MAX_CANDIDATES = 200

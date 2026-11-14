@@ -2,7 +2,7 @@
 import time
 from typing import Any, Optional
 
-import dbx
+from .. import dbx
 
 from . import tools_canvas, tools_data  # noqa: F401  (importing registers the tools)
 from .schema import validate

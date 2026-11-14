@@ -2,15 +2,20 @@
 __pycache__/
 .pytest_cache/
 .DS_Store
-web/node_modules/
-web/dist/
+# A symlink in an agent worktree, so no trailing slash.
+web/node_modules
 .playwright-mcp/
 
-# Everything the app writes: cache, logs, canvases, diagrams, screenshots.
-# It is workspace metadata and never goes into git.
-data/
+# Build output: the web UI built into the package, wheels and sdists.
+src/databricks_explore/web_dist/
+web/dist/
+dist/
+build/
+*.egg-info/
 
-# Demo mode (python app.py --demo) writes here, apart from real data.
+# A source checkout used to write its data here. The app now uses the per-user data folder (or --data-dir),
+# but a leftover folder is workspace metadata and never goes into git.
+data/
 data-demo/
 
 # Agent worktrees.

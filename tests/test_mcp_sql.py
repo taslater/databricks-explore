@@ -1,10 +1,10 @@
 """run_sql: the read-only gate (sqlglot), the row and time caps, cancellation, and the TSV output."""
 import pytest
 
-import dbx
+from databricks_explore import dbx
 from mcp_helpers import agent, connected, env, offline_agent  # noqa: F401
-from mcp_server import tools_data
-from mcp_server.sqlguard import NotReadOnly, check_read_only
+from databricks_explore.mcp_server import tools_data
+from databricks_explore.mcp_server.sqlguard import NotReadOnly, check_read_only
 
 
 @pytest.mark.parametrize("sql", [

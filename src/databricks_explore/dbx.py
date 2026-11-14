@@ -1,18 +1,25 @@
-"""Databricks access + local JSON cache. Every remote call is logged to data/logs/calls.jsonl."""
+"""Databricks access + local JSON cache. Every remote call is logged to calls.jsonl in the data folder's logs/."""
 import configparser, json, os, re, subprocess, time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
+from platformdirs import user_data_path
 from databricks.sdk.service.sql import StatementParameterListItem, StatementState
 
-import demo
-import sqltools
+from . import demo
+from . import sqltools
 
 
-DEMO = os.environ.get("EXPLORER_DEMO") == "1"  # fake workspace with invented data (python app.py --demo)
+def default_data_dir(demo: bool = False) -> Path:
+    """The per-user data folder (never inside the installed package). Demo mode gets a demo/ folder under it."""
+    base = user_data_path("databricks-explore", appauthor=False)
+    return base / "demo" if demo else base
+
+
+DEMO = os.environ.get("EXPLORER_DEMO") == "1"  # fake workspace with invented data (databricks-explore --demo)
 # Everything the app writes lives here. Demo mode gets its own folder so demo canvases never mix with real ones.
-DATA = Path(os.environ.get("EXPLORER_DATA_DIR") or Path(__file__).parent / ("data-demo" if DEMO else "data"))
+DATA = Path(os.environ.get("EXPLORER_DATA_DIR") or default_data_dir(DEMO))
 if DEMO:
     WorkspaceClient = demo.FakeWorkspaceClient  # the one hook: Explorer builds its client from this name
 CACHE, LOGS, DIAGRAMS = DATA / "cache", DATA / "logs", DATA / "diagrams"

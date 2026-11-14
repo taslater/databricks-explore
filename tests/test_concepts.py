@@ -7,10 +7,10 @@ import sqlite3
 
 import pytest
 
-import app as app_module
-import concepts
-import dbx
-import relationships as rel
+from databricks_explore import app as app_module
+from databricks_explore import concepts
+from databricks_explore import dbx
+from databricks_explore import relationships as rel
 
 A, B = "main.sales.orders", "main.sales.customers"
 PH = "ph:7f0c2d3e-1111-4222-8333-444455556666"

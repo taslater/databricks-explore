@@ -3,10 +3,10 @@ import time
 
 import pytest
 
-import app as app_module
-import dbx
-import demo
-import demo_history
+from databricks_explore import app as app_module
+from databricks_explore import dbx
+from databricks_explore import demo
+from databricks_explore import demo_history
 
 
 @pytest.fixture

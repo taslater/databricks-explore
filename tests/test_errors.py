@@ -1,7 +1,7 @@
 """Error handling: unknown routes are 404 and wrong methods are 405, both as JSON; other exceptions stay 500."""
 import pytest
 
-import app as app_module
+from databricks_explore import app as app_module
 
 
 @pytest.fixture

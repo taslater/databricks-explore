@@ -7,7 +7,7 @@ import uuid
 from typing import Optional
 from urllib.parse import urlsplit
 
-import dbx
+from .. import dbx
 
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 

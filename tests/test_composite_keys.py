@@ -3,9 +3,9 @@ from datetime import timedelta
 
 import pytest
 
-import mining
-import relationships as rel
-from sqltools import join_analysis, join_pairs
+from databricks_explore import mining
+from databricks_explore import relationships as rel
+from databricks_explore.sqltools import join_analysis, join_pairs
 from test_mining import NOW, O, C, S, FakeEx, Q_OS, data_dir, mine, stmt, stored  # noqa: F401
 
 L, PS = "demo.sales.lineitem", "demo.sales.partsupp"

@@ -1,14 +1,10 @@
 """genie.py: the MCP client against a fake HTTP layer, and the response shaping. No network."""
 import json
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-import genie  # noqa: E402
+from databricks_explore import genie  # noqa: E402
 
 HOST = "https://ws.example.invalid"
 

@@ -3,7 +3,7 @@ import pytest
 import sqlglot
 from sqlglot import exp
 
-from sqltools import expand_refs, tables_read
+from databricks_explore.sqltools import expand_refs, tables_read
 
 
 def cte_names(sql: str) -> list[str]:

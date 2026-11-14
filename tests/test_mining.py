@@ -8,9 +8,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-import dbx
-import mining
-import relationships as rel
+from databricks_explore import dbx
+from databricks_explore import mining
+from databricks_explore import relationships as rel
 
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
 O, C, S, I, P = ("demo.sales.orders", "demo.sales.customers", "demo.sales.shipments", "demo.sales.order_items",

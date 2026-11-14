@@ -2,8 +2,8 @@
 import base64
 import json
 
-import canvases
-import layout
+from databricks_explore import canvases
+from databricks_explore import layout
 from mcp_helpers import agent, connected, env, offline_agent  # noqa: F401
 
 

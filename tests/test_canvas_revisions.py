@@ -3,8 +3,8 @@ import copy
 
 import pytest
 
-import app as app_module
-import canvases
+from databricks_explore import app as app_module
+from databricks_explore import canvases
 
 BASE = {
     "version": 2, "name": "sk", "profile": None,

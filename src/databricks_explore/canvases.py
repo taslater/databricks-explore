@@ -15,7 +15,7 @@ from typing import Annotated, Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, ValidationError, model_validator
 from pydantic_core import PydanticCustomError
 
-import dbx
+from . import dbx
 
 CANVASES = dbx.DATA / "canvases"
 CANVASES.mkdir(parents=True, exist_ok=True)
