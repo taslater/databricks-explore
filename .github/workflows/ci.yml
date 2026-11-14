@@ -1,0 +1,119 @@
+# Python tests on three operating systems, the web checks, the built wheel and sdist, and a clean install of that
+# wheel on each operating system (no Python source checkout, no Node needed to run it).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: python ${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, python: "3.11" }
+          - { os: ubuntu-latest, python: "3.13" }
+          - { os: windows-latest, python: "3.12" }
+          - { os: macos-latest, python: "3.12" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      - run: uv sync --locked --python ${{ matrix.python }}
+      - run: uv run --locked --python ${{ matrix.python }} pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npx tsc -b
+      - run: npm test
+      - run: npm run build
+
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      # The build hook runs `npm ci` and `npm run build` because src/databricks_explore/web_dist is not there yet.
+      - run: uv build
+      - run: uv run --no-project python scripts/check_dist.py dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  # Installs the wheel from the package job as a user would, with no checkout of the Python code. The one file taken
+  # from the repository is the MCP interop script, which needs only the `mcp` SDK.
+  clean-install:
+    name: clean install on ${{ matrix.os }}
+    needs: package
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          sparse-checkout: scripts/mcp_interop.py
+          sparse-checkout-cone-mode: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - name: Install the wheel as a tool
+        run: |
+          uv tool install dist/*.whl
+          uv tool dir --bin >> "$GITHUB_PATH"
+      - name: Start it, check it, run the MCP interop script, stop it
+        env:
+          PORT: "8791"
+          EXPLORER_DATA_DIR: ${{ runner.temp }}/explorer-data
+        run: |
+          set -euo pipefail
+          databricks-explore --version
+          databricks-explore --demo --no-browser --port "$PORT" > server.log 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true; echo "--- server.log"; cat server.log' EXIT
+          for _ in $(seq 1 60); do
+            curl -fsS "http://127.0.0.1:$PORT/api/profiles" > /dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS "http://127.0.0.1:$PORT/api/profiles"
+          echo
+          curl -fsS "http://127.0.0.1:$PORT/" | grep -qi "<!doctype html"
+          uv run --no-project --with mcp scripts/mcp_interop.py --url "http://127.0.0.1:$PORT"

@@ -1,15 +1,19 @@
 """Interoperability check: the official `mcp` Python SDK client against this app's MCP server, in demo mode.
 
-Run from the repo root (the SDK is installed only for this script, not in requirements.txt):
+Needs only the `mcp` SDK, not the app's code, so it can run against an installed tool:
 
-    uv run --with mcp scripts/mcp_interop.py
+    uv run --with mcp scripts/mcp_interop.py                       # from a checkout: starts its own demo server
+    uv run --no-project --with mcp scripts/mcp_interop.py --url http://127.0.0.1:8765
+                                                                   # against a demo server that is already running
 
-It starts `app.py --demo` on a free port with a temporary data folder, plays the person in the browser (connects the demo
+Without --url it starts `python -m databricks_explore --demo --no-browser` on a free port with a temporary data folder
+(the package must be importable, as after `uv sync`). Either way it plays the person in the browser (connects the demo
 profile and picks the demo warehouse over the REST API, which no MCP tool may do), then plays the agent over MCP:
 initialize, tools/list, status, search_tables, run_sql (one allowed, one rejected), and on a new canvas create_canvas,
 add_nodes with structural placement, connect, arrange (layered), doctor and render_canvas. One PASS or FAIL line each.
-Exit status is 1 when anything failed.
+Exit status is 1 when anything failed. A server it was pointed at is left running; one it started is stopped.
 """
+import argparse
 import asyncio
 import base64
 import json
@@ -21,13 +25,11 @@ import sys
 import tempfile
 import time
 import urllib.request
-from pathlib import Path
 
 import httpx2
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-ROOT = Path(__file__).resolve().parents[1]
 RESULTS: list[tuple[bool, str, str]] = []
 
 
@@ -53,27 +55,41 @@ def http(method: str, url: str, body=None):
 
 
 def start_app(port: int, data_dir: str) -> subprocess.Popen:
-    env = {**os.environ, "PORT": str(port), "EXPLORER_DATA_DIR": data_dir}
-    proc = subprocess.Popen(["uv", "run", "-q", "--with-requirements", "requirements.txt", "app.py", "--demo"], cwd=ROOT, env=env,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)  # own group: Flask's reloader forks
-    deadline = time.time() + 120
+    """Start our own demo server (the package must be importable) and wait until it answers."""
+    cmd = [sys.executable, "-m", "databricks_explore", "--demo", "--no-browser", "--port", str(port), "--data-dir", data_dir]
+    own_group = {} if sys.platform == "win32" else {"start_new_session": True}
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **own_group)
+    wait_for(f"http://127.0.0.1:{port}", proc)
+    return proc
+
+
+def wait_for(base: str, proc: "subprocess.Popen | None" = None, seconds: float = 120) -> None:
+    """Wait until the server at `base` answers /api/session. Raises when it does not, or when `proc` exits first."""
+    deadline = time.time() + seconds
     while time.time() < deadline:
         try:
-            http("GET", f"http://127.0.0.1:{port}/api/session")
-            return proc
+            http("GET", f"{base}/api/session")
+            return
         except Exception:
-            if proc.poll() is not None:
+            if proc is not None and proc.poll() is not None:
                 raise RuntimeError("the app exited while starting")
             time.sleep(0.5)
-    raise RuntimeError("the app did not start in time")
+    raise RuntimeError(f"no answer from {base} in time")
 
 
 def stop_app(proc: subprocess.Popen) -> None:
+    """Stop the server we started."""
     try:
-        os.killpg(proc.pid, signal.SIGTERM)
+        if sys.platform == "win32":
+            proc.terminate()
+        else:
+            os.killpg(proc.pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
-    proc.wait(timeout=15)
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        proc.kill()
 
 
 def texts(result) -> str:
@@ -169,20 +185,34 @@ async def agent(url: str, token: str) -> None:
             await check("render_canvas (image content)", render)
 
 
+def run_checks(base: str) -> None:
+    """The person's side over REST, then the agent's over MCP, against the server at `base`."""
+    http("POST", f"{base}/api/connect", {"profile": "demo"})  # the person, in the browser
+    http("POST", f"{base}/api/warehouse", {"id": "demo-wh-1"})
+    access = http("GET", f"{base}/api/agent-access")  # what the Agent access panel shows
+    record(access["command"].startswith("claude mcp add --transport http databricks-explore "), "Agent access command",
+           access["command"].replace(access["token"], "<token>"))
+    asyncio.run(agent(f"{base}/mcp", access["token"]))
+
+
 def main() -> int:
-    port = free_port()
-    with tempfile.TemporaryDirectory() as data_dir:
-        proc = start_app(port, data_dir)
-        try:
-            base = f"http://127.0.0.1:{port}"
-            http("POST", f"{base}/api/connect", {"profile": "demo"})  # the person, in the browser
-            http("POST", f"{base}/api/warehouse", {"id": "demo-wh-1"})
-            access = http("GET", f"{base}/api/agent-access")  # what the Agent access panel shows
-            record(access["command"].startswith("claude mcp add --transport http databricks-explore "), "Agent access command",
-                   access["command"].replace(access["token"], "<token>"))
-            asyncio.run(agent(f"{base}/mcp", access["token"]))
-        finally:
-            stop_app(proc)
+    ap = argparse.ArgumentParser(description="MCP interoperability check against the app's demo mode. "
+                                 "It creates a canvas named interop, so run it against a server whose data folder is disposable.")
+    ap.add_argument("--url", help="base URL of a demo server that is already running, e.g. http://127.0.0.1:8765; "
+                    "without it a server is started on a free port")
+    args = ap.parse_args()
+    if args.url:
+        base = args.url.rstrip("/")
+        wait_for(base)
+        run_checks(base)
+    else:
+        port = free_port()
+        with tempfile.TemporaryDirectory() as data_dir:
+            proc = start_app(port, data_dir)
+            try:
+                run_checks(f"http://127.0.0.1:{port}")
+            finally:
+                stop_app(proc)
     bad = [name for ok, name, _ in RESULTS if not ok]
     print(f"\n{len(RESULTS) - len(bad)}/{len(RESULTS)} passed" + (f"; failed: {', '.join(bad)}" if bad else ""))
     return 1 if bad else 0
