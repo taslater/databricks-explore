@@ -5,9 +5,11 @@ import {
   NEW_WINDOW_EDITOR_SPLIT,
   useCanvasStore,
 } from './canvasStore'
+import { useRunStore } from '../canvas/runState'
 
 beforeEach(() => {
   useCanvasStore.setState({ windows: [], maximizedId: null, canvasName: null })
+  useRunStore.getState().clearAll()
 })
 
 describe('new query windows', () => {
@@ -27,11 +29,11 @@ describe('new query windows', () => {
 
 describe('maximizing', () => {
   it('is not part of the windows, so nothing about it is saved', () => {
-    const id = useCanvasStore.getState().addQueryWindow({ x: 5, y: 6 })
+    const id = useCanvasStore.getState().addQueryWindow({ x: 500, y: 300 })
     useCanvasStore.getState().setMaximized(id)
     const w = useCanvasStore.getState().windows[0]
     expect(useCanvasStore.getState().maximizedId).toBe(id)
-    expect(w.position).toEqual({ x: 5, y: 6 })
+    expect(w.position).toEqual({ x: 500, y: 300 })
     expect(w.size).toEqual({ w: 760, h: 520 })
   })
 
