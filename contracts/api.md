@@ -660,7 +660,7 @@ Implemented in `ontology.py`. Databricks has no export of Genie Ontology, so the
 
 ### `GET /api/concepts/import/plan`
 
-What a run would do, without doing it: `{"steps": [...], "row_cap": 500, "warehouse_id": "..."|null}`. Each step is `{"id", "kind": "rest"|"sql", "label", ...}`: a REST step has `method`, `path` and `paginated`; a SQL step has `sql`. The steps are `domains` (`GET /api/2.0/domains`, all pages), `pages` (`GET /api/2.0/knowledge/pages`, all pages), `metric_views` (SQL over `system.information_schema.tables` where `table_type = 'METRIC_VIEW'`) and `metric_definitions` (`GET /api/2.1/unity-catalog/tables/{full_name}`, once per metric view found, for its `view_definition`).
+What a run would do, without doing it: `{"steps": [...], "row_cap": 500, "warehouse_id": "..."|null}`. Each step is `{"id", "kind": "rest"|"sql", "label", ...}`: a REST step has `method`, `path` and `paginated`; a SQL step has `sql`. The steps are `domains` (`GET /api/2.0/domains`, all pages), `pages` (`GET /api/2.0/knowledge/pages`, all pages), `metric_views` (SQL over `system.information_schema.tables` where `table_type = 'METRIC_VIEW'`) `metric_definitions` (`GET /api/2.1/unity-catalog/tables/{full_name}`, once per metric view found, for its `view_definition`) and `certification` (SQL over `system.information_schema.table_tags` and `column_tags`, which refreshes the certification cache).
 
 ### `POST /api/concepts/import/run`
 
@@ -679,7 +679,7 @@ Body ignored. Reads the sources and updates the concepts. Each source stands alo
  "unreadable": [{"view": "main.sales.broken", "reason": "the definition is not valid YAML (...)"}]}
 ```
 
-`sources.<id>.status` is `ok`, `unavailable` or `failed` (with `message`). Mapping:
+`sources.<id>.status` is `ok`, `unavailable` or `failed` (with `message`). The `certification` source (`count`: tables plus columns tagged) fails on its own like the others, for example when no warehouse is selected, and then the certification cache stays as it was; it creates and updates no concept. Mapping:
 
 - **Domains** become concept domain names, by `display_name`, else `tag_key`. A page's `domain` (`domains/<id>`, an id, a name or a tag key) is looked up in them; one that matches nothing is used as its last path segment. A domain is not a concept of its own: it only names the group, and has no definition worth keeping.
 - **Pages**: `display_name` is the name, `description` and then `body` (Markdown, kept as is) are the definition, `synonyms` are the synonyms, `state` `PUBLISHED` is `reviewed` and anything else `draft`. `provenance.source_ref` is the page `name`. A page with no `name` or no `display_name` is skipped.
@@ -689,6 +689,10 @@ Body ignored. Reads the sources and updates the concepts. Each source stands alo
 
 ### `GET /api/certification`
 
-The `system.certification_status` governed tag, read with one `SELECT` over `system.information_schema.table_tags` and `column_tags` on the selected warehouse. With no warehouse selected it answers **200** with empty maps and `"needs_warehouse": true` and runs nothing (the page does not keep that answer). Response: `{"tables": {"main.sales.orders": "certified"}, "columns": {"main.sales.orders#amount": "deprecated"}, "ignored": 0, "truncated": false}`. A column key is `<table>#<column>`. The value is `certified` or `deprecated` (case-insensitive); any other value is ignored and counted in `ignored`. The UI shows it as a badge on table nodes in the Graph tab and next to link targets in the Concepts editor.
+The `system.certification_status` governed tag, **from the local cache only**. It never queries Databricks and needs no warehouse. Response: `{"tables": {"main.sales.orders": "certified"}, "columns": {"main.sales.orders#amount": "deprecated"}, "ignored": 0, "truncated": false, "fetched_at": "2026-11-14T10:00:00+00:00"}`. When nothing is cached (or the cache file cannot be read) the maps are empty and `fetched_at` is `null`. A column key is `<table>#<column>`. The value is `certified` or `deprecated` (case-insensitive); any other value is ignored and counted in `ignored`. The cache is `certification.json` in the profile's cache folder, `{"fetched_at", "data"}` like the other cached metadata. The UI shows it as a badge on table nodes in the Graph tab and next to link targets in the Concepts editor, with `Certification: <age>` and a refresh button in the Graph toolbar and the Concepts links section.
+
+### `POST /api/certification/refresh`
+
+Body ignored. Reads the tag with one `SELECT` over `system.information_schema.table_tags` and `column_tags` on the selected warehouse (this can start a stopped warehouse), writes the cache and answers with the same shape as `GET /api/certification`, with `fetched_at` set. With no warehouse selected it answers **400** `{"error": "..."}` and runs nothing. A failed query answers 500 and leaves the previous cache as it was. The import run (`POST /api/concepts/import/run`) does the same as its last step.
 
 `POST /api/concepts/suggest/run` (section 6) skips every tag whose name starts with `system.` and lists each one under `skipped`, since those are Databricks-owned (certification shows as a badge).

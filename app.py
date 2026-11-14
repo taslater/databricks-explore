@@ -324,12 +324,19 @@ def ontology_run():
         return jsonify(ontology.run(e, store))
 
 
+@app.errorhandler(ontology.NeedsWarehouse)
+def needs_warehouse(e):
+    return jsonify({"error": str(e)}), 400
+
+
 @app.get("/api/certification")
 def certification():
-    e = ex()
-    if not e.warehouse_id:  # the tag query needs a warehouse: answer "nothing yet", not a 500
-        return jsonify({"tables": {}, "columns": {}, "ignored": 0, "truncated": False, "needs_warehouse": True})
-    return jsonify(ontology.certification(e))
+    return jsonify(ontology.cached_certification(ex()))  # the local cache only: nothing here ever wakes a warehouse
+
+
+@app.post("/api/certification/refresh")
+def certification_refresh():
+    return jsonify(ontology.refresh_certification(ex()))
 
 
 @app.get("/api/concepts/<cid>")

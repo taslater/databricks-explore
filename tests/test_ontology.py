@@ -62,8 +62,9 @@ class FakeExplorer:
 
 
 @pytest.fixture
-def fake(monkeypatch):
+def fake(monkeypatch, tmp_path):
     ex = FakeExplorer()
+    ex.root = tmp_path / "cache" / "dev"  # where the certification cache lands, as on a real Explorer
 
     def api_get(explorer, path, query=None):
         explorer.calls.append(("GET", path, dict(query or {})))
@@ -101,12 +102,14 @@ def by_name(store):
 def test_plan_lists_every_call():
     plan = ontology.plan("wh-1")
     ids = [s["id"] for s in plan["steps"]]
-    assert ids == ["domains", "pages", "metric_views", "metric_definitions"]
+    assert ids == ["domains", "pages", "metric_views", "metric_definitions", "certification"]
     rest = [s for s in plan["steps"] if s["kind"] == "rest"]
     assert all(s["method"] == "GET" for s in rest)
     assert [s["path"] for s in rest] == ["/api/2.0/domains", "/api/2.0/knowledge/pages", "/api/2.1/unity-catalog/tables/{full_name}"]
-    sql = next(s for s in plan["steps"] if s["kind"] == "sql")
+    sql = next(s for s in plan["steps"] if s["id"] == "metric_views")
     assert "system.information_schema.tables" in sql["sql"] and "METRIC_VIEW" in sql["sql"]
+    cert = next(s for s in plan["steps"] if s["id"] == "certification")
+    assert cert["kind"] == "sql" and cert["sql"] == ontology.CERT_SQL
     assert plan["warehouse_id"] == "wh-1" and plan["row_cap"] == ontology.VIEW_CAP
 
 
@@ -172,7 +175,8 @@ def test_first_run_creates_pages_and_metric_concepts(fake, store):
     assert (dim.target.column, dim.relation) == ("order_month", "describes")
     assert sorted(e["name"] for e in report["created"]) == sorted(got)
     assert report["updated"] == [] and report["skipped"] == [] and report["unchanged"] == 0
-    assert {k: v["status"] for k, v in report["sources"].items()} == {"domains": "ok", "pages": "ok", "metric_views": "ok"}
+    assert {k: v["status"] for k, v in report["sources"].items()} == {
+        "domains": "ok", "pages": "ok", "metric_views": "ok", "certification": "ok"}
     assert report["sources"]["metric_views"]["unreadable"] == 0
 
 
@@ -181,7 +185,7 @@ def test_the_run_reads_only(fake, store):
     assert [c for c in fake.calls if c[0] not in ("GET", "table", "sql")] == []
     assert all(c[0] != "GET" or c[1] in ("/api/2.0/domains", "/api/2.0/knowledge/pages") for c in fake.calls)
     sqls = [c[1] for c in fake.calls if c[0] == "sql"]
-    assert len(sqls) == 1 and sqls[0].lstrip().upper().startswith("SELECT")
+    assert len(sqls) == 2 and all(q.lstrip().upper().startswith("SELECT") for q in sqls)  # metric views, certification
 
 
 def test_pagination_follows_the_token(fake, store):
@@ -417,7 +421,7 @@ def client(tmp_path, monkeypatch, fake):
 
 def test_plan_and_run_routes(client):
     plan = client.get("/api/concepts/import/plan").json
-    assert plan["warehouse_id"] == "wh-1" and len(plan["steps"]) == 4
+    assert plan["warehouse_id"] == "wh-1" and len(plan["steps"]) == 5
     assert client.fake.calls == []  # a plan runs nothing
     run = client.post("/api/concepts/import/run").json
     assert len(run["created"]) == 6
@@ -427,23 +431,93 @@ def test_plan_and_run_routes(client):
     assert listed[0]["provenance"]["origin"] == "ontology" and listed[0]["link_count"] == 1
 
 
-def test_certification_route(client):
+def test_certification_get_never_queries_and_is_empty_with_no_cache(client):
     client.fake.cert = CERT
-    got = client.get("/api/certification").json
-    assert got["tables"]["main.sales.orders"] == "certified"
-
-
-def test_certification_without_a_warehouse_is_empty_not_an_error(client):
-    client.fake.warehouse_id = None
+    client.fake.query = lambda *a, **k: pytest.fail("the warehouse was queried")
     r = client.get("/api/certification")
     assert r.status_code == 200
-    assert r.json == {"tables": {}, "columns": {}, "ignored": 0, "truncated": False, "needs_warehouse": True}
-    assert client.fake.calls == []  # no query was attempted
+    assert r.json == {"tables": {}, "columns": {}, "ignored": 0, "truncated": False, "fetched_at": None}
+    assert client.fake.calls == []
 
 
-def test_certification_with_a_warehouse_has_no_needs_warehouse_flag(client):
+def test_certification_get_never_queries_even_with_a_cache(client):
     client.fake.cert = CERT
-    assert "needs_warehouse" not in client.get("/api/certification").json
+    assert client.post("/api/certification/refresh").status_code == 200
+    client.fake.calls.clear()
+    client.fake.query = lambda *a, **k: pytest.fail("the warehouse was queried")
+    got = client.get("/api/certification").json
+    assert got["tables"]["main.sales.orders"] == "certified" and client.fake.calls == []
+
+
+def test_certification_get_needs_no_warehouse(client):
+    client.fake.warehouse_id = None
+    r = client.get("/api/certification")
+    assert r.status_code == 200 and r.json["fetched_at"] is None and "needs_warehouse" not in r.json
+
+
+def test_certification_refresh_writes_the_cache_and_get_returns_it(client):
+    client.fake.cert = CERT
+    r = client.post("/api/certification/refresh")
+    assert r.status_code == 200
+    got = r.json
+    assert got["tables"] == {"main.sales.orders": "certified", "main.sales.old": "deprecated"}
+    assert got["columns"]["main.sales.orders#amount"] == "certified"
+    assert got["ignored"] == 1 and got["truncated"] is False and got["fetched_at"]
+    assert len([c for c in client.fake.calls if c[0] == "sql"]) == 1
+    assert (client.fake.root / "certification.json").is_file()
+    assert client.get("/api/certification").json == got
+    assert len([c for c in client.fake.calls if c[0] == "sql"]) == 1  # the read did not query again
+
+
+def test_certification_refresh_replaces_the_cache(client):
+    client.fake.cert = CERT
+    client.post("/api/certification/refresh")
+    client.fake.cert = [("table", "main", "sales", "customers", None, "certified")]
+    client.post("/api/certification/refresh")
+    assert client.get("/api/certification").json["tables"] == {"main.sales.customers": "certified"}
+
+
+def test_certification_refresh_needs_a_warehouse(client):
+    client.fake.warehouse_id = None
+    r = client.post("/api/certification/refresh")
+    assert r.status_code == 400 and "warehouse" in r.json["error"].lower()
+    assert client.fake.calls == []
+    assert not (client.fake.root / "certification.json").exists()
+
+
+def test_a_failed_refresh_keeps_the_old_cache(client):
+    client.fake.cert = CERT
+    client.post("/api/certification/refresh")
+    before = client.get("/api/certification").json
+
+    def boom(*a, **k):
+        raise RuntimeError("warehouse is stopped")
+
+    client.fake.query = boom
+    assert client.post("/api/certification/refresh").status_code == 500
+    assert client.get("/api/certification").json == before
+
+
+def test_a_corrupt_cache_reads_as_empty(client):
+    client.fake.root.mkdir(parents=True)
+    (client.fake.root / "certification.json").write_text("{not json", encoding="utf-8")
+    assert client.get("/api/certification").json["fetched_at"] is None
+
+
+def test_the_import_run_refreshes_certification(client):
+    client.fake.cert = CERT
+    run = client.post("/api/concepts/import/run").json
+    assert run["sources"]["certification"] == {"status": "ok", "count": 4}
+    assert client.get("/api/certification").json["tables"]["main.sales.orders"] == "certified"
+
+
+def test_the_import_run_reports_certification_failing_without_a_warehouse(fake, store):
+    fake.warehouse_id = None
+    report = ontology.run(fake, store)
+    assert report["sources"]["certification"]["status"] == "failed"
+    assert "warehouse" in report["sources"]["certification"]["message"].lower()
+    assert not (fake.root / "certification.json").exists()
+    assert report["sources"]["pages"]["status"] == "ok"
 
 
 def test_routes_need_a_connection(monkeypatch):
@@ -451,6 +525,7 @@ def test_routes_need_a_connection(monkeypatch):
     c = app_module.app.test_client()
     assert c.get("/api/concepts/import/plan").status_code == 500
     assert c.get("/api/certification").status_code == 500
+    assert c.post("/api/certification/refresh").status_code == 500
 
 
 # ---------- demo mode: the whole flow against the fake workspace ----------
@@ -476,7 +551,8 @@ def test_import_flow_in_demo_mode(demo_client):
     plan = c.get("/api/concepts/import/plan").json
     assert plan["warehouse_id"] == "demo-wh-1" and "METRIC_VIEW" in plan["steps"][2]["sql"]
     run = c.post("/api/concepts/import/run").json
-    assert {k: v["status"] for k, v in run["sources"].items()} == {"domains": "ok", "pages": "ok", "metric_views": "ok"}
+    assert {k: v["status"] for k, v in run["sources"].items()} == {
+        "domains": "ok", "pages": "ok", "metric_views": "ok", "certification": "ok"}
     assert run["sources"]["pages"]["count"] == 3  # two requests: the fake serves two pages at a time
     names = sorted(e["name"] for e in run["created"])
     assert names == ["Active customer", "Customer", "Headcount", "Order count", "Order month", "Total revenue", "status"]
@@ -491,7 +567,9 @@ def test_import_flow_in_demo_mode(demo_client):
 
 
 def test_certification_and_system_tags_in_demo_mode(demo_client):
-    got = demo_client.get("/api/certification").json
+    assert demo_client.get("/api/certification").json["fetched_at"] is None  # nothing is read until asked
+    got = demo_client.post("/api/certification/refresh").json
+    assert demo_client.get("/api/certification").json == got
     assert got["tables"]["demo.sales.orders"] == "certified" and got["tables"]["demo.sales.v_daily_revenue"] == "deprecated"
     assert got["columns"]["demo.sales.orders#discount_pct"] == "deprecated"
     run = demo_client.post("/api/concepts/suggest/run").json

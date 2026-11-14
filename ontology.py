@@ -7,6 +7,7 @@ lookup, and the `system.certification_status` tag through the tag tables. Everyt
 """
 import json
 import re
+from pathlib import Path
 
 import yaml
 from databricks.sdk import errors
@@ -25,6 +26,7 @@ VIEW_CAP = 500
 CERT_ROW_CAP = 20000
 CERT_TAG = "system.certification_status"
 CERT_VALUES = ("certified", "deprecated")
+CERT_CACHE = "certification.json"  # under the profile's cache folder, next to the catalog metadata
 UNAVAILABLE = "not available on this workspace"
 FIELDS = ("name", "definition", "synonyms", "domain", "status")
 _BLANK = ("", [], None)
@@ -54,6 +56,9 @@ def plan(warehouse_id=None):
          "sql": METRIC_VIEWS_SQL},
         {"id": "metric_definitions", "kind": "rest", "label": "Each metric view's definition, once per view found",
          "method": "GET", "path": TABLE_PATH, "paginated": False},
+        {"id": "certification", "kind": "sql",
+         "label": "Certification tags (system.certification_status), through the selected SQL warehouse; refreshes the local cache",
+         "sql": CERT_SQL},
     ], "row_cap": VIEW_CAP, "warehouse_id": warehouse_id}
 
 
@@ -319,7 +324,8 @@ def run(ex, store):
     """Read domains, pages and metric views and bring the `ontology` concepts in line. Read-only toward Databricks.
 
     Each source can fail on its own (a 403 or 404 on a Beta endpoint is "not available on this workspace") and the
-    others still run. Returns {"sources": {id: {"status": ok|unavailable|failed, ...}}, "created", "updated", "skipped",
+    others still run. The last source, certification, rewrites the local certification cache and touches no concept.
+    Returns {"sources": {id: {"status": ok|unavailable|failed, ...}}, "created", "updated", "skipped",
     "unchanged", "stale", "unreadable"}.
     """
     now = dbx.now()
@@ -364,6 +370,12 @@ def run(ex, store):
     except Exception as e:
         sources["metric_views"] = _failure(e)
 
+    try:  # the badges read this cache; a failure here (no warehouse, no access) leaves the old cache as it was
+        cert = refresh_certification(ex)
+        sources["certification"] = {"status": "ok", "count": len(cert["tables"]) + len(cert["columns"])}
+    except Exception as e:
+        sources["certification"] = _failure(e)
+
     seen, existing = _sync(store, page_specs + metric_specs, now, report)
     view_of = lambda ref: ref.rsplit("#", 1)[0] if "#" in ref else None  # noqa: E731
     _drop_stale(store, existing, seen,
@@ -380,9 +392,14 @@ def _definition(ex, view):
 
 # ---------- certification ----------
 
+class NeedsWarehouse(ValueError):
+    """Raised when something needs a SQL warehouse and none is selected."""
+
+
 def certification(ex):
-    """The `system.certification_status` tag on tables and columns: {"tables": {name: status}, "columns": {"table#column":
-    status}, "ignored", "truncated"}. Status is `certified` or `deprecated`; any other value is ignored and counted."""
+    """Runs the one warehouse query for the `system.certification_status` tag: {"tables": {name: status}, "columns":
+    {"table#column": status}, "ignored", "truncated"}. Status is `certified` or `deprecated`; any other value is ignored
+    and counted. Writes nothing: see refresh_certification."""
     result = ex.query(CERT_SQL, None, CERT_ROW_CAP)
     tables, columns, ignored = {}, {}, 0
     for r in concepts._rows(result):
@@ -396,3 +413,27 @@ def certification(ex):
         else:
             tables[table] = status
     return {"tables": tables, "columns": columns, "ignored": ignored, "truncated": bool(result.get("truncated"))}
+
+
+def cached_certification(ex):
+    """The certification cache as the API returns it. Never queries; empty maps and a null `fetched_at` when nothing is cached."""
+    try:
+        payload = json.loads((Path(ex.root) / CERT_CACHE).read_text(encoding="utf-8"))
+        data = payload["data"]
+        return {"tables": dict(data["tables"]), "columns": dict(data["columns"]), "ignored": int(data["ignored"]),
+                "truncated": bool(data["truncated"]), "fetched_at": payload["fetched_at"]}
+    except (OSError, ValueError, KeyError, TypeError):  # absent or unreadable: as if never fetched
+        return {"tables": {}, "columns": {}, "ignored": 0, "truncated": False, "fetched_at": None}
+
+
+def refresh_certification(ex):
+    """Runs the one tag query, writes the cache (the {"fetched_at", "data"} file shape of the other cached metadata) and
+    returns it. Raises NeedsWarehouse without a selected warehouse. A failed query leaves the old cache in place."""
+    if not ex.warehouse_id:
+        raise NeedsWarehouse("Select a SQL warehouse first: the certification tag is read with one query on it.")
+    data = certification(ex)
+    fetched_at = dbx.now()
+    path = Path(ex.root) / CERT_CACHE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"fetched_at": fetched_at, "data": data}, indent=2), encoding="utf-8")
+    return {**data, "fetched_at": fetched_at}
