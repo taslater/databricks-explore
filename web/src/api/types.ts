@@ -181,6 +181,8 @@ export interface Relationship {
   evidence: Evidence | null
   status: RelationshipStatus
   note: string
+  /** `concept_link` edges only: defines, measures, identifies, describes, is_a, part_of or related_to. */
+  relation?: string | null
   created_at: string
   updated_at: string
   columns?: ColumnPair[]
@@ -212,6 +214,8 @@ export interface RelationshipsExport {
   exported_at?: string
   edges: Relationship[]
   overlays: Array<{ kind: RelationshipKind; source: Endpoint; target: Endpoint; note: string; updated_at?: string }>
+  /** Glossary concepts (see api/concepts.ts). Optional: older files have none. */
+  concepts?: unknown[]
 }
 
 export interface ImportResult {
@@ -219,6 +223,8 @@ export interface ImportResult {
   created: number
   updated: number
   overlays: number
+  concepts?: number
+  concepts_created?: number
 }
 
 // ---- Query-history mining and suggestions (contracts/api.md section 5) ----

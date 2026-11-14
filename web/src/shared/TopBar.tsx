@@ -4,6 +4,7 @@ import { useUiStore, type MainView } from '../store/uiStore'
 const VIEWS: { id: MainView; label: string }[] = [
   { id: 'graph', label: 'Graph' },
   { id: 'canvas', label: 'Canvas' },
+  { id: 'concepts', label: 'Concepts' },
 ]
 
 export function TopBar() {
