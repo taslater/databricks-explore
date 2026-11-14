@@ -4,7 +4,7 @@ Everything is invented and deterministic (the statements, users and their order 
 anchored to the start of the current UTC day). `system_query` answers the SQL that mining.py and
 Explorer.column_lineage send, filtering on the same parameters the real tables would.
 
-Set EXPLORER_DEMO_REDACTED=1 (python app.py --demo --redacted) to make every statement_text read <REDACTED>, as it does
+Set EXPLORER_DEMO_REDACTED=1 (databricks-explore --demo --redacted) to make every statement_text read <REDACTED>, as it does
 for a reader who is neither an account admin nor in databricks_pii_access. Without it, three rows are redacted, so
 a run reports them as skipped.
 """

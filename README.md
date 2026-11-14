@@ -1,24 +1,50 @@
-# Databricks Explorer (v0.4)
+# Databricks Explorer (v0.5)
 
-Local Flask app plus a React UI to browse Unity Catalog, draw relationships (lineage, FKs, view deps, and stored ones such as user-drawn edges), and build query canvases.
+Local Flask app plus a React UI to browse Unity Catalog, draw relationships (lineage, FKs, view deps, and stored ones such as user-drawn edges), and build query canvases. It runs on your computer and listens on 127.0.0.1 only.
 
-## Run
-Build the frontend once (and again after frontend changes), then start the server.
+## Install
+You need [uv](https://docs.astral.sh/uv/) and Python 3.11 or newer (uv fetches Python if you have none). You do not need Node: the web UI is built into the package.
 ```sh
-cd web && npm ci && npm run build && cd ..
-uv run --with-requirements requirements.txt app.py
-# open http://127.0.0.1:8765
+uv tool install databricks-explore
+databricks-explore
 ```
+It prints the address (http://127.0.0.1:8765 by default) and opens it in your browser.
 
-Dev mode with hot reload: run the server as above with `--debug` (the Werkzeug reloader and debugger, off by default), then in a second terminal `cd web && npm run dev` and open http://127.0.0.1:5173 (Vite proxies `/api` to the Flask server).
+- **Upgrade:** `uv tool upgrade databricks-explore`
+- **Uninstall:** `uv tool uninstall databricks-explore` (your data folder stays; delete it by hand if you want it gone)
+- **One run without installing:** `uvx databricks-explore`
+
+Options of `databricks-explore` (also `python -m databricks_explore`):
+
+| Option | Effect |
+|---|---|
+| `--demo` | serve an invented workspace, no Databricks needed (see below) |
+| `--redacted` | with `--demo`, make query history text read `<REDACTED>` |
+| `--port N` | listen on this port (default 8765, or 8767 with `--demo`; the `PORT` variable does the same) |
+| `--data-dir DIR` | keep the app's files in `DIR` (`EXPLORER_DATA_DIR` does the same) |
+| `--no-browser` | print the address, do not open a tab |
+| `--debug` | Werkzeug debugger and reloader (the debugger can run code from an error page) |
+
+### Where your data goes
+The cache, logs, diagrams, canvases, relationship stores and the MCP token live in your per-user data folder, never inside the installed package:
+
+| System | Default folder |
+|---|---|
+| macOS | `~/Library/Application Support/databricks-explore` |
+| Linux | `~/.local/share/databricks-explore` (or `$XDG_DATA_HOME/databricks-explore`) |
+| Windows | `%LOCALAPPDATA%\databricks-explore` |
+
+Demo mode uses a `demo/` folder inside it, so invented canvases never mix with real ones. `--data-dir` or `EXPLORER_DATA_DIR` replaces the whole folder (demo mode then uses it as is). The command prints the folder it uses at startup. Paths such as `data/canvases/` elsewhere in this README and in `contracts/` mean `canvases/` inside this folder. If you ran an earlier version from a source checkout, its `data/` folder is not used any more: the command prints a hint, and `--data-dir ./data` keeps using it.
+
+Dev mode with hot reload: see Development below.
 
 ## Run without Databricks
 Demo mode serves invented catalogs, tables, views, foreign keys, lineage and query results from a fake workspace. It never contacts Databricks, so it is safe for trying the UI, screenshots and tests.
 ```sh
-uv run --with-requirements requirements.txt app.py --demo
-# open http://127.0.0.1:8767, pick profile "demo", Connect, pick warehouse "Demo Serverless"
+databricks-explore --demo
+# http://127.0.0.1:8767 opens; pick profile "demo", Connect, pick warehouse "Demo Serverless"
 ```
-`EXPLORER_DEMO=1` does the same as `--demo`. Demo mode listens on port 8767 (`PORT` overrides) so the browser keeps its saved profile apart from real use, and it writes to `data-demo/` instead of `data/`.
+`EXPLORER_DEMO=1` does the same as `--demo`. Demo mode listens on port 8767 (`--port` or `PORT` overrides) so the browser keeps its saved profile apart from real use, and it writes to the `demo/` folder described above.
 
 Magic words in a query (the rest of the SQL is ignored; any query returns a result):
 
@@ -31,9 +57,7 @@ Magic words in a query (the rest of the SQL is ignored; any query returns a resu
 
 Otherwise the result follows the first demo table named in the SQL (`demo.sales.orders` by default: 3,000 rows with ids, timestamps, dates, decimals, nulls, empty strings and long text). `GROUP BY` or `count(` gives a daily series for the Chart tab. A trailing `LIMIT n` is honored.
 
-Demo mode also has an invented query history (a few hundred statements by six fake users, with the hard SQL cases), table lineage and column lineage, so mining joins works offline. `python app.py --demo --redacted` (or `EXPLORER_DEMO_REDACTED=1`) makes every statement read `<REDACTED>`, to try the blocked path. In an ordinary demo three rows are redacted and get skipped. Mining state is kept in `data-demo/relationships/`; delete it to start over.
-
-`EXPLORER_DATA_DIR` moves everything the app writes (cache, logs, diagrams, canvases) to another folder. It defaults to `data/`, or `data-demo/` in demo mode.
+Demo mode also has an invented query history (a few hundred statements by six fake users, with the hard SQL cases), table lineage and column lineage, so mining joins works offline. `databricks-explore --demo --redacted` (or `EXPLORER_DEMO_REDACTED=1`) makes every statement read `<REDACTED>`, to try the blocked path. In an ordinary demo three rows are redacted and get skipped. Mining state is kept in `demo/relationships/` in the data folder; delete it to start over.
 
 ## Use
 - Top bar: pick a profile and **Connect** (browser login if needed). Pick a SQL warehouse to enable queries on the canvas and search across all catalogs.
@@ -115,13 +139,30 @@ The panel shows the real command (the port is the app's, 8767 in demo mode) with
 - **Canvas edits.** An agent places nodes by structure (right of, below or inside another node) and gets the layout doctor's score and a short text summary back after every edit. Every agent edit is saved to the canvas file at once and can be undone: **Undo agent change** in the top bar, or the agent's own `undo_canvas` (the last 20 are kept in `data/canvas_history/`).
 - **Live sync.** The open canvas checks for a newer revision every 2 seconds. With no unsaved edits it reloads in place and keeps your view. With unsaved edits you get "An agent changed this canvas", with **Reload** and **Keep mine**, and autosave waits for your choice.
 
-Try it without a workspace: `python app.py --demo` and `uv run --with mcp scripts/mcp_interop.py`, which starts the demo app and drives it with the official MCP Python SDK client (initialize, list tools, `status`, `search_tables`, `run_sql` allowed and rejected, then a canvas: create, add nodes, connect, arrange, doctor, render) and prints a pass or fail line for each. The full contract, every tool with its input and output, is `contracts/mcp.md`.
+Try it without a workspace: `databricks-explore --demo`, then `uv run --no-project --with mcp scripts/mcp_interop.py --url http://127.0.0.1:8767` (from a checkout, `uv run --with mcp scripts/mcp_interop.py` starts its own demo server). The script drives the demo app with the official MCP Python SDK client (initialize, list tools, `status`, `search_tables`, `run_sql` allowed and rejected, then a canvas: create, add nodes, connect, arrange, doctor, render) and prints a pass or fail line for each. The full contract, every tool with its input and output, is `contracts/mcp.md`.
 
-## Test
+## Development
 ```sh
-uv run --with-requirements requirements.txt pytest -q
+git clone <this repository> && cd databricks-explore
+uv sync                       # Python 3.11+, the app in editable mode and the dev group (pytest, jsonschema)
+cd web && npm ci && npm run build && cd ..    # once, and again after frontend changes
+uv run databricks-explore --demo --no-browser # or without --demo, from source
+uv run pytest -q
 cd web && npm test
 ```
+The build writes the UI to `src/databricks_explore/web_dist/` (git-ignored), which the app serves, with `THIRD-PARTY-NOTICES.txt` for the npm packages bundled into it. For hot reload run the server with `--debug`, then in a second terminal `cd web && npm run dev` and open http://127.0.0.1:5173 (Vite proxies `/api` to the Flask server on port 8765, so use the default port).
+
+`uv build` makes the wheel and sdist in `dist/`. If `web_dist/` is missing, a hatch build hook runs `npm ci` and `npm run build` first, and stops with a clear message when Node is not installed. `python scripts/check_dist.py dist` checks the result. Run from a source checkout, the app finds an old `data/` folder and prints a hint about `--data-dir ./data`.
+
+Layout of the source: `src/databricks_explore/` (the Python package: `app.py`, `cli.py`, `dbx.py` and the rest, `mcp_server/`), `web/` (the React UI), `tests/`, `contracts/` (API, MCP and canvas schema), `scripts/`.
+
+## Releasing
+Releases go to PyPI and GitHub from the `release` workflow when a tag `v<version>` is pushed. The tag must equal `__version__` in `src/databricks_explore/__init__.py`, the one place the version is defined. One-time setup, done by the owner:
+1. On GitHub, create the environment `pypi` (Settings, Environments) and add a required reviewer, so every publish waits for approval.
+2. On pypi.org, add a pending publisher for the project `databricks-explore` with this repository, the workflow `release.yml` and the environment `pypi` (Account settings, Publishing).
+3. Bump `__version__`, merge, then `git tag v0.5.0 && git push origin v0.5.0`. Approve the `publish` job when it waits.
+
+The CI workflow (`ci.yml`) runs the Python tests on Linux, Windows and macOS, the web checks, builds the wheel and sdist, and installs the wheel as a tool on all three systems to run the demo server and the MCP interop script against it.
 
 ## Calls
 | Need | Call |
@@ -133,4 +174,4 @@ cd web && npm test
 | canvas queries | SQL Statement Execution API on the selected warehouse |
 
 ## Feedback files
-`data/logs/calls.jsonl`, `data/cache/...`, `data/diagrams/`, `data/canvases/`, `data/canvas_history/`, `data/relationships/`, `data/mcp_token`, `data/screenshots/` (all under `EXPLORER_DATA_DIR` when set, and `data-demo/` in demo mode)
+`logs/calls.jsonl`, `cache/...`, `diagrams/`, `canvases/`, `canvas_history/`, `relationships/`, `mcp_token`, `screenshots/` (all inside the data folder described under Install)

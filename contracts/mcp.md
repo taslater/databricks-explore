@@ -31,7 +31,7 @@ MCP streamable HTTP at `POST /mcp` on the app's own port (`127.0.0.1` only), ans
 
 ## Authentication and local-only checks
 
-- **Token.** A random 32-byte URL-safe token is created at startup if `<data dir>/mcp_token` does not exist, and stored there with mode `0600` (a looser mode is tightened on next use). Every request to `/mcp` needs `Authorization: Bearer <token>` (compared in constant time), or it gets `401` with `WWW-Authenticate: Bearer`.
+- **Token.** A random 32-byte URL-safe token is created at startup if `<data dir>/mcp_token` does not exist, and stored there with mode `0600` where the OS has file modes (a looser mode is tightened on next use; on Windows the file sits in the per-user folder). Every request to `/mcp` needs `Authorization: Bearer <token>` (compared in constant time), or it gets `401` with `WWW-Authenticate: Bearer`.
 - **DNS rebinding.** A request whose `Host` is not `127.0.0.1`, `localhost` or `[::1]`, or whose `Origin` header is present and not one of those (`null` included), gets `403` before the token is looked at. A request with no `Origin` (a command line client) is fine.
 - **Logging.** The token is never logged. Each tool call adds one line to `data/logs/calls.jsonl` with the tool name, milliseconds and success, and nothing else: no arguments, SQL or results.
 

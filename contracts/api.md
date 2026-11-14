@@ -1,9 +1,10 @@
 # Explorer API contract
 
-Source of truth for backend and frontend. Flask on `127.0.0.1:8765`, all bodies JSON. Sections 1 to 5 describe `app.py` as it behaves today.
+Source of truth for backend and frontend. Flask on `127.0.0.1:8765` by default (the `--port` option changes it), all bodies JSON. Sections 1 to 5 describe `app.py` (in `src/databricks_explore/`) as it behaves today.
 
 ## Conventions
 
+- **Data folder:** `data/...` in this document and in `mcp.md` means that path inside the app's data folder: the per-user folder from `platformdirs` (`demo/` inside it in demo mode), or `--data-dir` / `EXPLORER_DATA_DIR`. See the README.
 - **Connection:** one active profile per server process (`STATE["ex"]`). Routes marked *needs connection* return an error until `POST /api/connect` succeeds.
 - **Errors (all routes):** an error body is `{"error": "<message>"}`, with these statuses:
   - **400** for a body or query that fails validation (canvases), and for a body that is not valid JSON.
@@ -23,7 +24,7 @@ Source of truth for backend and frontend. Flask on `127.0.0.1:8765`, all bodies 
 
 ### `GET /`
 
-Serves `web/dist/index.html` (the React build). Not JSON. Returns 503 with a plain-text hint if the frontend has not been built. Any other non-`/api` path serves a file from `web/dist` or falls back to `index.html`.
+Serves `index.html` from `web_dist/` inside the package (the React build; `npm run build` in `web/` writes it). Not JSON. Returns 503 with a plain-text hint if the frontend has not been built. Any other non-`/api` path serves a file from `web/dist` or falls back to `index.html`.
 
 ### `GET /api/profiles`
 
@@ -43,7 +44,7 @@ Response:
 
 No connection needed. Reports what the server is connected to now, so the page can tell whether a restore is needed.
 
-Response: `{"profile": "dev" | null, "warehouse_id": "abc123" | null}`. Both are `null` when the server has no connection (for example after the Flask process restarts).
+Response: `{"profile": "dev" | null, "warehouse_id": "abc123" | null, "version": "0.5.0"}`. `profile` and `warehouse_id` are `null` when the server has no connection (for example after the Flask process restarts). `version` is the installed `databricks-explore` version, always present.
 
 ### `POST /api/connect`
 
@@ -739,7 +740,7 @@ Body: `{"conversation_id": "..."}`. Stops the turn that is running in that conve
 
 ### Demo mode
 
-`python app.py --demo` answers from `demo.FakeGenie`, without a network. It picks a canned answer by words in the question: `revenue`, `customer` or `country`, else a count of orders. `demo_error` or `fail` ends the turn as `failed`, and `demo_slow` keeps it running for 45 seconds, to try Cancel. Each turn takes about 4 seconds, with one progress step more per poll.
+`databricks-explore --demo` answers from `demo.FakeGenie`, without a network. It picks a canned answer by words in the question: `revenue`, `customer` or `country`, else a count of orders. `demo_error` or `fail` ends the turn as `failed`, and `demo_slow` keeps it running for 45 seconds, to try Cancel. Each turn takes about 4 seconds, with one progress step more per poll.
 
 ---
 

@@ -1,6 +1,6 @@
 """Demo mode: a fake Databricks workspace with invented data, so every real route works offline.
 
-dbx.py swaps `WorkspaceClient` for `FakeWorkspaceClient` when EXPLORER_DEMO=1 (`python app.py --demo`).
+dbx.py swaps `WorkspaceClient` for `FakeWorkspaceClient` when EXPLORER_DEMO=1 (`databricks-explore --demo`).
 Nothing here talks to a network. Everything is invented and deterministic.
 
 Magic words in SQL (matched anywhere in the statement, case-insensitive):
