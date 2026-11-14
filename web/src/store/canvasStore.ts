@@ -5,6 +5,8 @@ import { create } from 'zustand'
 import type { CanvasPoint, CanvasWindow } from '../api/types'
 import type { Geometry } from '../sketch/types'
 import { renameInWindows } from '../canvas/linking/refs'
+import { placeNew } from '../canvas/placement'
+import { useRunStore } from '../canvas/runState'
 
 export interface CanvasViewport {
   x: number
@@ -32,7 +34,11 @@ interface CanvasState {
   /** UI only. Not saved. The window shown filling the canvas, or null. */
   maximizedId: string | null
   setMaximized: (id: string | null) => void
-  /** Adds a query window with a new id and a unique query_N title. Returns the id. */
+  /**
+   * Adds a query window with a new id and a unique query_N title. Returns the id. `position` is where it is
+   * wanted: it is kept when free, and otherwise moved to free space (see canvas/placement.ts). The same goes
+   * for the note and table versions.
+   */
   addQueryWindow: (position: CanvasPoint) => string
   /** Adds a query window whose SQL is `sql`. Returns the id. */
   addQueryWindowWithSql: (position: CanvasPoint, sql: string) => string
@@ -136,7 +142,7 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
       id,
       type: 'query',
       title: nextQueryTitle(windows),
-      position: { x: position.x, y: position.y },
+      position: placeNew(position, DEFAULT_QUERY_SIZE, windows, get().viewport),
       size: { ...DEFAULT_QUERY_SIZE },
       sql: '',
       collapsed: false,
@@ -159,7 +165,7 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
       id,
       type: 'note',
       title: nextFreeTitle(windows, 'note'),
-      position: { x: position.x, y: position.y },
+      position: placeNew(position, DEFAULT_NOTE_SIZE, windows, get().viewport),
       size: { ...DEFAULT_NOTE_SIZE },
       text: '',
       collapsed: false,
@@ -175,7 +181,7 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
       id,
       type: 'table',
       title: nextFreeTitle(windows, tableTitleBase(fullName)),
-      position: { x: position.x, y: position.y },
+      position: placeNew(position, DEFAULT_TABLE_SIZE, windows, get().viewport),
       size: { ...DEFAULT_TABLE_SIZE },
       table: fullName,
       collapsed: false,
@@ -231,6 +237,7 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
   removeWindows: (ids) => {
     const { windows, maximizedId } = get()
     const dead = new Set(ids)
+    useRunStore.getState().clearWindows(ids)
     set({
       windows: windows.filter((w) => !dead.has(w.id)),
       maximizedId: maximizedId !== null && dead.has(maximizedId) ? null : maximizedId,
@@ -262,11 +269,17 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
 
   canvasName: null,
   setCanvasName: (canvasName) => set({ canvasName }),
-  loadState: (next) =>
+  loadState: (next) => {
+    // Run state belongs to the windows of one open canvas. A reload of the same saved canvas (a live sync)
+    // keeps the runs of windows that are still there.
+    const keep = next.canvasName !== null && next.canvasName === get().canvasName
+    if (keep) useRunStore.getState().clearExcept(new Set(next.windows.map((w) => w.id)))
+    else useRunStore.getState().clearAll()
     set({
       canvasName: next.canvasName,
       viewport: { x: next.viewport.x, y: next.viewport.y, zoom: next.viewport.zoom },
       windows: next.windows,
       maximizedId: null,
-    }),
+    })
+  },
 }))

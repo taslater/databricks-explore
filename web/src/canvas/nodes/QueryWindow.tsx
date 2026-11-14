@@ -7,7 +7,7 @@ import { Prec } from '@codemirror/state'
 import { keymap, type EditorView } from '@codemirror/view'
 import { sql, type SQLConfig } from '@codemirror/lang-sql'
 import { useQueryClient } from '@tanstack/react-query'
-import { useCancelQuery, useQueryStatus, useSubmitQueryAsync } from '../../api/hooks'
+import { useCancelQuery, useQueryStatus } from '../../api/hooks'
 import type { CanvasWindow, QueryBody, QueryStatus, StatementState } from '../../api/types'
 import { DEFAULT_EDITOR_SPLIT, queryWindowMap, titleError, useCanvasStore } from '../../store/canvasStore'
 import { useUiStore } from '../../store/uiStore'
@@ -19,6 +19,8 @@ import { windowRefCompletion } from '../linking/completion'
 import { remoteNameSource } from '../linking/remoteNames'
 import { flashExtension, flashRanges } from '../editor/flash'
 import { planRun, type RunMode } from '../editor/statements'
+import './statementChips.css'
+import { IDLE_RUN, scriptTally, submitStatement, useRunStore, type WindowRun } from '../runState'
 
 export type QueryFlowNode = Node<Record<string, unknown>, 'query'>
 
@@ -47,25 +49,34 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
   const setMaximized = useCanvasStore((s) => s.setMaximized)
   const editorSplit = win.editor_split ?? DEFAULT_EDITOR_SPLIT
 
-  // Run state. `statementId` is the statement most recently submitted, once the async submit returns.
-  const [statementId, setStatementId] = useState<string | null>(null)
-  const [tab, setTab] = useState<'results' | 'chart'>('results')
-  // A run of several statements: the SQL of each, and which one is running. Null for a single statement.
-  const [script, setScript] = useState<{ sqls: string[]; index: number } | null>(null)
-  // Set when a script stopped early, or when there was nothing to run.
-  const [notice, setNotice] = useState<string | null>(null)
-  const submit = useSubmitQueryAsync()
-  const status = useQueryStatus(statementId)
+  // Run state lives in a store keyed by window id, not here: this view unmounts when another tab is shown,
+  // and a query started before that must still be there (and still be advancing) when the tab comes back.
+  const run = useRunStore((s) => s.runs[id] ?? IDLE_RUN)
+  const begin = useRunStore((s) => s.begin)
+  const settle = useRunStore((s) => s.settle)
+  const nextStatement = useRunStore((s) => s.nextStatement)
+  const endScript = useRunStore((s) => s.endScript)
+  const setNotice = useRunStore((s) => s.setNotice)
+  const setSelected = useRunStore((s) => s.setSelected)
+  const setTab = useRunStore((s) => s.setTab)
+  const tab = run.tab
+  const lastIndex = run.ids.length - 1
+  const latestId = run.ids[lastIndex] ?? null
+  // The statement whose result is shown: the chip picked, or the last one started.
+  const viewIndex = run.selected !== null && run.selected <= lastIndex ? run.selected : lastIndex
+  const viewId = run.ids[viewIndex] ?? null
+  const latest = useQueryStatus(latestId)
+  const status = useQueryStatus(viewId)
   const cancel = useCancelQuery()
   const viewRef = useRef<EditorView | null>(null)
-  const advancedFor = useRef<string | null>(null)
 
   const st = status.data
+  const latestSt = latest.data
   // Polling is handled by useQueryStatus (1s while PENDING or RUNNING).
-  const polling = statementId !== null && !status.isError && (st === undefined || ACTIVE_STATES.has(st.state))
-  const running = submit.isPending || polling || script !== null
+  const polling = latestId !== null && !latest.isError && (latestSt === undefined || ACTIVE_STATES.has(latestSt.state))
+  const running = run.submitting || polling || run.scriptActive
   const canRun = !running && sqlText.trim() !== ''
-  const canCancel = (polling || script !== null) && !cancel.isPending && statementId !== null
+  const canCancel = (polling || run.scriptActive) && !run.submitting && !cancel.isPending && latestId !== null
 
   // Autocomplete tree from cached catalogs and objects. Recomputed when the cache fills in.
   const namespace = useSqlNamespace()
@@ -95,14 +106,13 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
     return [sql(config), windowRefCompletion(id, config, remoteNameSource(qc, profile)), runKeys, flashExtension]
   }, [namespace, id, qc, profile, runKeys])
 
-  function submitSql(statement: string) {
+  function submitSql(statement: string, token: number) {
     // Read the store at submit time so every window's SQL is current.
     const body: QueryBody = {
       sql: statement,
       windows: queryWindowMap(useCanvasStore.getState().windows),
     }
-    setStatementId(null)
-    submit.mutate(body, { onSuccess: (res) => setStatementId(res.statement_id) })
+    submitStatement(id, token, body)
   }
 
   /** Runs the selection or the statement under the cursor ('current'), or every statement in order ('all'). */
@@ -112,49 +122,63 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
     const sel = view?.state.selection.main
     const plan = planRun(view ? view.state.doc.toString() : sqlText, sel?.from ?? 0, sel?.to ?? 0, mode)
     if (plan.sqls.length === 0) {
-      setNotice('Nothing to run.')
+      setNotice(id, 'Nothing to run.')
       return
     }
-    setNotice(null)
     if (view) flashRanges(view, plan.ranges)
-    setScript(plan.sqls.length > 1 ? { sqls: plan.sqls, index: 0 } : null)
-    submitSql(plan.sqls[0])
+    const token = begin(id, plan.sqls)
+    submitSql(plan.sqls[0], token)
   }
 
   function cancelRun() {
-    // Dropping the script keeps the remaining statements from starting.
-    setScript(null)
-    if (statementId !== null) cancel.mutate(statementId)
+    // Ending the script keeps the remaining statements from starting.
+    endScript(id)
+    if (latestId !== null) cancel.mutate(latestId)
   }
 
   // Move a script along: the next statement once this one succeeded, or stop at the first failure.
+  // This also runs when the window mounts again, so a script that was under way carries on. `settle` is true
+  // only the first time a statement's final state is seen, so nothing advances twice.
   useEffect(() => {
-    if (script === null || statementId === null || st === undefined) return
-    if (ACTIVE_STATES.has(st.state) || advancedFor.current === statementId) return
-    advancedFor.current = statementId
-    const n = script.sqls.length
-    if (st.state === 'SUCCEEDED' && script.index + 1 < n) {
-      setScript({ ...script, index: script.index + 1 })
-      submitSql(script.sqls[script.index + 1])
+    if (latestId === null) return
+    if (latest.isError && run.scriptActive) {
+      endScript(id, `Lost track of statement ${lastIndex + 1} of ${run.sqls.length}. The rest did not run.`)
       return
     }
-    if (st.state !== 'SUCCEEDED') setNotice(`Statement ${script.index + 1} of ${n} did not succeed. The rest did not run.`)
-    setScript(null)
-    // submitSql only reads the store and uses stable mutation handles, so it is left out of the dependencies.
-  }, [script, statementId, st])
+    if (latestSt === undefined || ACTIVE_STATES.has(latestSt.state)) return
+    if (!settle(id, lastIndex, latestSt.state) || !run.scriptActive) return
+    const n = run.sqls.length
+    if (latestSt.state === 'SUCCEEDED' && lastIndex + 1 < n) {
+      nextStatement(id)
+      submitSql(run.sqls[lastIndex + 1], run.token)
+      return
+    }
+    if (latestSt.state === 'SUCCEEDED') {
+      endScript(id)
+      return
+    }
+    const { ok } = scriptTally(useRunStore.getState().runs[id] ?? run)
+    endScript(id, `${ok} of ${n} statements succeeded. Statement ${lastIndex + 1} did not, and the rest did not run.`)
+    // submitSql only reads the store, and the store actions are stable, so they are left out of the dependencies.
+  }, [latestId, latestSt, latest.isError, run])
 
-  const elapsed = useElapsed(running)
-  const step = script ? `Statement ${script.index + 1} of ${script.sqls.length}: ` : ''
+  const elapsed = useElapsed(running, run.startedAt)
+  const scripted = run.sqls.length > 1
+  const step = scripted && run.scriptActive ? `Statement ${run.index + 1} of ${run.sqls.length}: ` : ''
   let statusText = ''
-  if (submit.isPending) statusText = `${step}Submitting...`
-  else if (polling) statusText = `${step}${st?.state ?? 'PENDING'}...`
-  else if (script) statusText = `${step}Starting...`
-  else if (st) statusText = st.state
+  if (run.submitting) statusText = `${step}Submitting...`
+  else if (polling) statusText = `${step}${latestSt?.state ?? 'PENDING'}...`
+  else if (run.scriptActive) statusText = `${step}Starting...`
+  else if (scripted && run.ids.length > 0 && !run.notice) {
+    const { ok, total } = scriptTally(run)
+    statusText = `${ok} of ${total} statements succeeded`
+  } else if (st) statusText = st.state
   if (running && elapsed !== null) statusText += ` ${formatElapsed(elapsed)}`
-  if (!running && notice) statusText = notice
+  if (!running && run.notice) statusText = run.notice
 
+  // A submit that failed belongs to the statement after the last one started, so it shows with the last one.
   const errorText =
-    (submit.isError && submit.error.message) ||
+    (run.submitError !== null && run.selected === null && run.submitError) ||
     (status.isError && status.error.message) ||
     (st?.state === 'FAILED' && (st.error ?? 'Query failed.')) ||
     null
@@ -246,7 +270,7 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
                     extensions={extensions}
                     onChange={(v) => {
                       setSql(id, v)
-                      setNotice(null)
+                      setNotice(id, null)
                     }}
                     onCreateEditor={(view) => {
                       viewRef.current = view
@@ -267,7 +291,7 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
                       role="tab"
                       className="qw-tab"
                       aria-selected={tab === 'results'}
-                      onClick={() => setTab('results')}
+                      onClick={() => setTab(id, 'results')}
                     >
                       Results
                     </button>
@@ -275,11 +299,13 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
                       role="tab"
                       className="qw-tab"
                       aria-selected={tab === 'chart'}
-                      onClick={() => setTab('chart')}
+                      onClick={() => setTab(id, 'chart')}
                     >
                       Chart
                     </button>
                   </div>
+
+                  <StatementChips run={run} viewIndex={viewIndex} onPick={(i) => setSelected(id, i)} />
 
                   <div className="qw-results nowheel">
                     {tab === 'results' ? (
@@ -299,19 +325,20 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
   )
 }
 
-/** Milliseconds since `active` last turned true, refreshed several times a second. Null when not active. */
-function useElapsed(active: boolean): number | null {
+/** Milliseconds since the run started (`since`), refreshed several times a second. Null when not active. */
+function useElapsed(active: boolean, since: number | null): number | null {
   const [elapsed, setElapsed] = useState<number | null>(null)
   useEffect(() => {
     if (!active) {
       setElapsed(null)
       return
     }
-    const t0 = Date.now()
-    setElapsed(0)
+    // The run's own start time, so a window that mounts mid-run does not start counting from zero.
+    const t0 = since ?? Date.now()
+    setElapsed(Date.now() - t0)
     const timer = window.setInterval(() => setElapsed(Date.now() - t0), 200)
     return () => window.clearInterval(timer)
-  }, [active])
+  }, [active, since])
   return elapsed
 }
 
@@ -369,6 +396,32 @@ function Summary({ rowCount, truncated, ms }: { rowCount: number; truncated: boo
       <span>{ms === null ? 'time n/a' : `${ms} ms`}</span>
       <CopyButton text={text} />
     </span>
+  )
+}
+
+/** One chip per statement of a script ("1 2 3"), to switch between their results. Nothing for one statement. */
+function StatementChips({ run, viewIndex, onPick }: { run: WindowRun; viewIndex: number; onPick: (i: number) => void }) {
+  if (run.sqls.length < 2) return null
+  return (
+    <div className="qw-chips nodrag" role="group" aria-label="Statement results">
+      {run.sqls.map((sqlText, i) => {
+        const state = run.states[i] ?? null
+        const started = i < run.ids.length
+        const bad = state !== null && state !== 'SUCCEEDED'
+        return (
+          <button
+            key={i}
+            className={`qw-chip${i === viewIndex ? ' active' : ''}${bad ? ' bad' : ''}`}
+            disabled={!started}
+            aria-pressed={i === viewIndex}
+            title={`Statement ${i + 1}${state ? `, ${state}` : started ? ', running' : ', not started'}: ${sqlText.trim().slice(0, 200)}`}
+            onClick={() => onPick(i)}
+          >
+            {i + 1}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
