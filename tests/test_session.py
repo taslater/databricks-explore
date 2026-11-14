@@ -82,3 +82,13 @@ def test_profiles_skip_dunder_sections(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABRICKS_CONFIG_FILE", str(cfg))
     monkeypatch.setattr(dbx, "DEMO", False)
     assert [p["name"] for p in dbx.list_profiles()] == ["dev", "__other"]
+
+
+def test_every_route_refuses_a_foreign_host_or_origin():
+    """DNS rebinding: a page under another name must not reach /api/* (it would use the connected credentials)."""
+    import app as app_module
+
+    c = app_module.app.test_client()
+    assert c.get("/api/profiles", headers={"Host": "evil.example:8765"}).status_code == 403
+    assert c.get("/api/profiles", headers={"Origin": "http://evil.example"}).status_code == 403
+    assert c.get("/api/profiles", headers={"Host": "127.0.0.1:8765", "Origin": "http://localhost:5173"}).status_code == 200

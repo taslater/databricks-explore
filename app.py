@@ -29,6 +29,14 @@ STATE = {"ex": None}  # single local user -> one active connection
 WEB_DIST = Path(__file__).resolve().parent / "web" / "dist"  # built by `npm run build` in web/
 
 
+@app.before_request
+def local_only():
+    """Every route, not only /mcp: refuse a Host or Origin that is not this machine. A DNS-rebinding page reaches
+    the app under its own name, and would otherwise use the connected workspace's credentials through /api/*."""
+    if not mcp_server.auth.host_is_local(request.host) or not mcp_server.auth.origin_is_local(request.headers.get("Origin")):
+        return jsonify({"error": "this app answers only requests addressed to 127.0.0.1 or localhost"}), 403
+
+
 def ex():
     if not STATE["ex"]:
         raise RuntimeError("Not connected. Pick a profile first.")
