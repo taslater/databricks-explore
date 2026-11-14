@@ -28,6 +28,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
   const [selected, setSelected] = useState('')
   const actions = useGraphActions()
   const drawer = useGraphStore((s) => s.drawer)
+  const showConcepts = useGraphStore((s) => s.showConcepts)
   const allColumns = useGraphStore((s) => s.nodes.length > 0 && s.nodes.every((n) => n.data.showColumns || n.id.startsWith('ph:')))
   const hasNodes = useGraphStore((s) => s.nodes.length > 0)
   const proposed = useSuggestions('proposed').data?.counts.proposed
@@ -109,6 +110,15 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
         title="Show or hide the columns of every table on the graph"
       >
         {allColumns ? 'Hide columns' : 'Show columns'}
+      </button>
+      <button
+        style={NOWRAP}
+        onClick={() => useGraphStore.getState().setShowConcepts(!showConcepts)}
+        aria-pressed={showConcepts}
+        disabled={!connected}
+        title="Draw the glossary concepts linked to the tables on the graph"
+      >
+        Concepts
       </button>
       <span className="spacer" />
       <span

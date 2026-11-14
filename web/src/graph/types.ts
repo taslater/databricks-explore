@@ -29,6 +29,18 @@ export type TableNodeData = {
 
 export type FlowNode = Node<TableNodeData, 'table'>
 
+/** A glossary concept drawn next to the tables it is linked to. Built by concepts/overlay.ts, never stored in the graph. */
+export type ConceptNodeData = {
+  conceptId: string
+  name: string
+  status: 'draft' | 'reviewed' | 'certified'
+  domain: string | null
+  /** One line per link on the graph, e.g. `defines orders.customer_id`. */
+  targets: string[]
+}
+
+export type ConceptFlowNode = Node<ConceptNodeData, 'concept'>
+
 /** Data stored on a React Flow edge. `info` is the server edge object, kept verbatim for saving and details. */
 export type EdgeData = {
   info: GraphEdge
