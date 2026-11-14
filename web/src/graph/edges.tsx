@@ -3,6 +3,9 @@ import type { GraphEdgeKind } from '../api/types'
 import { KIND_STYLE } from './edgeStyles'
 import type { FlowEdge } from './types'
 
+/** Width in pixels of the invisible path that takes clicks and hovers, so a thin line is easy to hit. React Flow's default is 20. */
+export const EDGE_INTERACTION_WIDTH = 32
+
 /** Rejected edges are barely there, proposed ones are lighter than accepted or derived ones. */
 const STATUS_OPACITY = { rejected: 0.3, proposed: 0.65 } as const
 
@@ -28,6 +31,7 @@ function makeEdge(kind: GraphEdgeKind | 'stale') {
         path={path}
         markerStart={markerStart}
         markerEnd={markerEnd}
+        interactionWidth={EDGE_INTERACTION_WIDTH}
         style={{
           strokeWidth: 1.6,
           ...kindStyle,

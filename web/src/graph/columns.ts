@@ -50,19 +50,50 @@ export type HandleSide = 'l' | 'r'
 /** Id of one handle on a column row. Each row has a source and a target handle on each side. */
 export const columnHandleId = (role: HandleRole, side: HandleSide, column: string): string => `${role}-${side}:${column}`
 
-/** The handle pair for an edge between two columns: facing each other, by which node is further right. */
+/** The horizontal extent of a node: where its left edge is and how wide it is. Only this decides which side an edge uses. */
+export interface Span {
+  x: number
+  width: number
+}
+
+/**
+ * Which side of each node a column edge uses. Side by side (a gap between them), the edge leaves the facing sides, so
+ * it runs straight across. Stacked (their horizontal extents overlap, nothing to face), both ends use the same side:
+ * the edge leaves, bends once outside the nodes and comes back in, instead of crossing over to the far side of the
+ * target and curling back. That side is the right one unless the target sits further left.
+ */
+export function columnSides(source: Span, target: Span, selfLoop: boolean): { source: HandleSide; target: HandleSide } {
+  if (selfLoop) return { source: 'r', target: 'r' }
+  if (target.x >= source.x + source.width) return { source: 'r', target: 'l' }
+  if (target.x + target.width <= source.x) return { source: 'l', target: 'r' }
+  const both: HandleSide = target.x + target.width / 2 >= source.x + source.width / 2 ? 'r' : 'l'
+  return { source: both, target: both }
+}
+
+/** The handle pair for an edge between two columns (see columnSides). */
 export function columnHandles(
-  sourceX: number,
-  targetX: number,
+  source: Span,
+  target: Span,
   selfLoop: boolean,
   sourceColumn: string,
   targetColumn: string,
 ): { sourceHandle: string; targetHandle: string } {
-  if (selfLoop) return { sourceHandle: columnHandleId('s', 'r', sourceColumn), targetHandle: columnHandleId('t', 'r', targetColumn) }
-  return targetX >= sourceX
-    ? { sourceHandle: columnHandleId('s', 'r', sourceColumn), targetHandle: columnHandleId('t', 'l', targetColumn) }
-    : { sourceHandle: columnHandleId('s', 'l', sourceColumn), targetHandle: columnHandleId('t', 'r', targetColumn) }
+  const side = columnSides(source, target, selfLoop)
+  return {
+    sourceHandle: columnHandleId('s', side.source, sourceColumn),
+    targetHandle: columnHandleId('t', side.target, targetColumn),
+  }
 }
 
 /** A short label for a column pair, e.g. `orders.customer_id`. */
 export const columnLabel = (table: string, column: string): string => `${table.split('.').pop() ?? table}.${column}`
+
+/**
+ * The nodes that appeared since `before` and should show their columns because Show columns is on: table nodes,
+ * not placeholders. Nodes already on the graph keep whatever they were set to.
+ */
+export function newTableIds(columnsOn: boolean, before: readonly string[], nodes: ReadonlyArray<{ id: string }>): string[] {
+  if (!columnsOn) return []
+  const had = new Set(before)
+  return nodes.map((n) => n.id).filter((id) => !had.has(id) && !id.startsWith('ph:'))
+}

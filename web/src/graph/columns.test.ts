@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { GraphEdge, Relationship, RelationshipsResponse } from '../api/types'
-import { COLUMN_LIMIT, columnHandleId, columnHandles, columnsOf, findColumn, visibleColumns } from './columns'
+import { COLUMN_LIMIT, columnHandleId, columnHandles, columnSides, columnsOf, newTableIds, findColumn, visibleColumns } from './columns'
 import { deriveFlow } from './derive'
 import { nameOf, schemaOf } from './format'
 import { DEFAULT_FILTERS, useGraphStore } from './graphStore'
@@ -84,16 +84,33 @@ describe('visibleColumns', () => {
 })
 
 describe('column handles', () => {
-  it('face each other by node position, and loop on the right side for a self edge', () => {
-    expect(columnHandles(0, 400, false, 'a', 'b')).toEqual({
-      sourceHandle: columnHandleId('s', 'r', 'a'),
-      targetHandle: columnHandleId('t', 'l', 'b'),
-    })
-    expect(columnHandles(400, 0, false, 'a', 'b')).toEqual({
-      sourceHandle: columnHandleId('s', 'l', 'a'),
-      targetHandle: columnHandleId('t', 'r', 'b'),
-    })
-    expect(columnHandles(0, 0, true, 'a', 'b').targetHandle).toBe(columnHandleId('t', 'r', 'b'))
+  const at = (x: number, width = 200) => ({ x, width })
+  const sides = (a: ReturnType<typeof at>, b: ReturnType<typeof at>) => {
+    const h = columnHandles(a, b, false, 'a', 'b')
+    return [h.sourceHandle, h.targetHandle]
+  }
+
+  it('face each other when the nodes sit side by side', () => {
+    expect(sides(at(0), at(400))).toEqual([columnHandleId('s', 'r', 'a'), columnHandleId('t', 'l', 'b')])
+    expect(sides(at(400), at(0))).toEqual([columnHandleId('s', 'l', 'a'), columnHandleId('t', 'r', 'b')])
+  })
+
+  it('face each other when the gap is a single pixel, and not when they overlap by one', () => {
+    expect(columnSides(at(0), at(200), false)).toEqual({ source: 'r', target: 'l' })
+    expect(columnSides(at(0), at(199), false)).toEqual({ source: 'r', target: 'r' })
+    expect(columnSides(at(200), at(0), false)).toEqual({ source: 'l', target: 'r' })
+  })
+
+  it('use the same side on both nodes when they are stacked, so the edge does not curl through the nodes', () => {
+    expect(columnSides(at(0), at(0), false)).toEqual({ source: 'r', target: 'r' })
+    expect(columnSides(at(0), at(50), false)).toEqual({ source: 'r', target: 'r' })
+    expect(columnSides(at(100), at(40), false)).toEqual({ source: 'l', target: 'l' })
+    expect(columnSides(at(0, 300), at(100, 100), false)).toEqual({ source: 'r', target: 'r' }) // a narrow node under a wide one
+  })
+
+  it('loop on the right side for a self edge', () => {
+    expect(columnHandles(at(0), at(0), true, 'a', 'b').targetHandle).toBe(columnHandleId('t', 'r', 'b'))
+    expect(columnSides(at(0), at(0), true)).toEqual({ source: 'r', target: 'r' })
   })
 })
 
@@ -228,5 +245,21 @@ describe('mining text helpers', () => {
   })
   it('labels a column pair with short table names', () => {
     expect(pairLabel({ source: { table: A, column: 'customer_id' }, target: { table: B, column: 'id' } })).toBe('orders.customer_id ↔ customers.id')
+  })
+})
+
+describe('Show columns follows the global setting', () => {
+  it('names the nodes that arrived since, and only while the setting is on', () => {
+    const nodes = [{ id: 'a.b.t1' }, { id: 'a.b.t2' }, { id: 'ph:1234' }]
+    expect(newTableIds(true, ['a.b.t1'], nodes)).toEqual(['a.b.t2'])
+    expect(newTableIds(false, ['a.b.t1'], nodes)).toEqual([])
+    expect(newTableIds(true, ['a.b.t1', 'a.b.t2', 'ph:1234'], nodes)).toEqual([])
+  })
+
+  it('is a store setting that survives clearing the graph', () => {
+    useGraphStore.getState().setColumnsOn(true)
+    useGraphStore.getState().clear()
+    expect(useGraphStore.getState().columnsOn).toBe(true)
+    useGraphStore.getState().setColumnsOn(false)
   })
 })
