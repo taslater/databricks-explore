@@ -1706,7 +1706,8 @@ def render_png(canvas: dict, width: int = 1200, highlight: Optional[Iterable[str
             return ImageFont.load_default()
     img = Image.new("RGB", (width, height), "white")
     d = ImageDraw.Draw(img)
-    f_lab, f_id = font(max(9, int(13 * min(scale * 1.6, 1.2)))), font(9)
+    # Labels scale with the boxes (the page's 14 px default), so a label the doctor says fits also fits the picture.
+    f_lab, f_id = font(max(9, int(14 * scale))), font(9)
     by = {n["id"]: n for n in nodes}
     for n in sorted(nodes, key=lambda n: (_num(n.get("z"), -1 if n.get("type") == "frame" else 0), 0)):
         b = _box(n)

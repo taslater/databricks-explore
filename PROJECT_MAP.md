@@ -182,7 +182,7 @@ Root: `databricks-explore` | files: 218
   - `def shape_result(sc)`: A query result in the Result shape of POST /api/query (contracts/api.md section 3), so the results grid reads it.
   - `def default_post(url, headers, body, timeout)`: POST a JSON body. Returns (status, response headers with lower-case keys, body text). Network failures are GenieError.
   - `class GenieClient()`: Talks to the Genie One MCP server as the connected user. One MCP session is reused until the server drops it.
-- `layout.py` (80,908 B)
+- `layout.py` (81,009 B)
   - Layout doctor, tidy, arrange, describe and render for saved canvases (format version 2). Pure: no Flask, no SDK.
   - `class LayoutError(ValueError)`: The request cannot be laid out (unknown id, bad mode or option). The route returns it as HTTP 400.
   - `def fit_size(n: dict, max_w: float=MAX_FIT_W) -> tuple[int, int]`: The node's size grown just enough for its label to fit by the doctor's estimate; never smaller than it is now.
