@@ -435,4 +435,6 @@ export interface CanvasDoc {
 
 export interface SavedResponse {
   saved: string
+  /** Canvas saves only: the canvas's revision after this write. */
+  revision?: number
 }

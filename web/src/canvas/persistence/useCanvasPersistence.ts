@@ -4,6 +4,7 @@
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import * as api from '../../api/client'
+import { getCanvasRevision } from '../../api/agent'
 import type { CanvasDoc } from '../../api/types'
 import { useSaveCanvas, useSetWarehouse } from '../../api/hooks'
 import { useCanvasStore } from '../../store/canvasStore'
@@ -11,6 +12,7 @@ import { useSketchStore } from '../../sketch/sketchStore'
 import { useUiStore } from '../../store/uiStore'
 import { fromCanvasFile, parseCanvasFile, toCanvasFile, type CanvasFile } from './canvasFile'
 import { usePersistStore } from './persistStore'
+import { useSyncStore } from './syncStore'
 
 export const AUTOSAVE_DELAY_MS = 1500
 
@@ -19,12 +21,12 @@ function errorText(e: unknown): string {
 }
 
 /** The profile a save records: the connected one, else the one the open file had, else none. */
-function saveProfile(): string | null {
+export function saveProfile(): string | null {
   return useUiStore.getState().connectedProfile ?? usePersistStore.getState().fileProfile
 }
 
 /** Validated file for the current state, plus its JSON for change detection. Throws on invalid state. */
-function buildFile(name: string, profile: string | null): { file: CanvasFile; json: string } {
+export function buildFile(name: string, profile: string | null): { file: CanvasFile; json: string } {
   const { viewport, windows } = useCanvasStore.getState()
   const { nodes: sketchNodes, edges } = useSketchStore.getState()
   const warehouseId = useUiStore.getState().warehouseId
@@ -113,7 +115,9 @@ export function useCanvasPersistence(): CanvasPersistence {
 
     persist.setStatus('saving')
     try {
-      await latest.current.save(built.file as unknown as CanvasDoc)
+      const saved = await latest.current.save(built.file as unknown as CanvasDoc)
+      // The revision the server gave this write: the page has it, so the poll does not mistake it for someone else's.
+      if (typeof saved?.revision === 'number') useSyncStore.getState().setKnown(name, saved.revision)
     } catch (e) {
       usePersistStore.getState().setStatus('error', errorText(e), true)
       return false
@@ -155,6 +159,8 @@ export function useCanvasPersistence(): CanvasPersistence {
     timer.current = setTimeout(() => {
       timer.current = null
       void enqueue(async () => {
+        // Something else saved this canvas while the page had edits: wait for Reload or Keep mine, do not overwrite it.
+        if (useSyncStore.getState().conflict !== null) return
         const current = useCanvasStore.getState().canvasName
         if (current !== null) await writeCanvas(current, false)
       })
@@ -169,15 +175,25 @@ export function useCanvasPersistence(): CanvasPersistence {
     const unsubscribeSketch = useSketchStore.subscribe((s, prev) => {
       if (s.nodes !== prev.nodes || s.edges !== prev.edges) scheduleAutosave()
     })
+    // "Keep mine" on the agent-changed banner: write the page's version now.
+    const unsubscribeSync = useSyncStore.subscribe((s, prev) => {
+      if (s.keepRequests === prev.keepRequests) return
+      void enqueue(async () => {
+        const current = useCanvasStore.getState().canvasName
+        if (current !== null) await writeCanvas(current, false)
+      })
+    })
     return () => {
       unsubscribe()
       unsubscribeSketch()
+      unsubscribeSync()
       if (timer.current !== null) void enqueue(flushPending)
     }
     // The functions used here only read refs and stores, so subscribing once on mount is correct.
   }, [])
 
   function saveCurrent(): Promise<void> {
+    useSyncStore.getState().keepMine() // an explicit Save is the person's choice to overwrite a newer revision
     return enqueue(async () => {
       cancelTimer()
       const name = useCanvasStore.getState().canvasName
@@ -195,6 +211,12 @@ export function useCanvasPersistence(): CanvasPersistence {
   function open(name: string): Promise<void> {
     return enqueue(async () => {
       await flushPending()
+
+      // The revision first and the file second: a write in between only makes the page reload once more.
+      const revision = await getCanvasRevision(name).then(
+        (r) => r.revision,
+        () => null,
+      )
 
       let file: CanvasFile
       try {
@@ -236,6 +258,8 @@ export function useCanvasPersistence(): CanvasPersistence {
         return
       }
       usePersistStore.getState().markSaved(baseline)
+      useSyncStore.getState().setConflict(null)
+      if (revision !== null) useSyncStore.getState().setKnown(name, revision)
 
       const notices: string[] = []
       if (warehouseError) notices.push(warehouseError)
