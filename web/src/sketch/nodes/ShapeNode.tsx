@@ -68,6 +68,7 @@ export function ShapeNode({ id, selected }: NodeProps<SketchFlowNode>) {
 function ShapeBody({ node, selected }: { node: SketchNode; selected: boolean }) {
   const id = node.id
   const editing = useSketchStore((s) => s.editingId === id)
+  const seed = useSketchStore((s) => (s.editingId === id ? s.editingSeed : null))
   const setEditing = useSketchStore((s) => s.setEditing)
   const setLabel = useSketchStore((s) => s.setLabel)
   const resize = useResizeHandlers(id)
@@ -110,6 +111,7 @@ function ShapeBody({ node, selected }: { node: SketchNode; selected: boolean }) 
       <InlineText
         value={node.label ?? ''}
         editing={editing}
+        seed={seed}
         onCommit={(v) => {
           setLabel(id, v)
           setEditing(null)
