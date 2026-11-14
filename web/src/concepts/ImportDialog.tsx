@@ -8,6 +8,7 @@ const SOURCE_LABEL: Record<string, string> = {
   domains: 'Domains',
   pages: 'Pages',
   metric_views: 'Metric views',
+  certification: 'Certification tags',
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
@@ -129,7 +130,8 @@ export function ImportDialog() {
       >
         <h3>Import from Databricks</h3>
         <p className="hint">
-          Reads Genie Ontology domains and pages, the measures and dimensions of metric views, and nothing else. Every call is read-only.
+          Reads Genie Ontology domains and pages, the measures and dimensions of metric views, and the certification tags (which also
+          refreshes the local certification cache), and nothing else. Every call is read-only.
           Domains and pages are Beta endpoints; one that is not available on this workspace is reported and the rest still run. Imported
           concepts have origin “ontology”. Running it again updates them by their source, keeps your edits to what the source did not
           change, and removes only the links it made itself.

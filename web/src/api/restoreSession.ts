@@ -45,7 +45,7 @@ export async function restoreSession(qc: QueryClient): Promise<void> {
     return
   }
   // The profile is marked connected only after the saved warehouse is on the server again. Marking it first let
-  // queries that need a warehouse (certification) fire while the server had none, and they failed.
+  // queries that need a warehouse fire while the server had none, and they failed.
   await restoreWarehouse(qc, target, session)
   useUiStore.getState().setConnectedProfile(target)
 }

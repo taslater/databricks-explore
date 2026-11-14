@@ -327,13 +327,14 @@ export interface Certification {
   columns: Record<string, CertificationStatus>
   ignored: number
   truncated: boolean
-  /** True when the server has no warehouse yet: the maps are empty and the answer must not be kept. */
-  needs_warehouse?: boolean
+  /** When the cache was filled (ISO time), or null when nothing is cached yet and the maps are empty. */
+  fetched_at: string | null
 }
 
 export const getImportPlan = () => call<ImportPlan>('GET', '/api/concepts/import/plan')
 export const runImport = () => call<ImportReport>('POST', '/api/concepts/import/run', {})
 export const getCertification = () => call<Certification>('GET', '/api/certification')
+export const refreshCertification = () => call<Certification>('POST', '/api/certification/refresh', {})
 
 /** The steps of an import run, for the confirm dialog. Runs nothing. */
 export function useImportPlan(enabled: boolean) {
@@ -349,19 +350,33 @@ export function useImportPlan(enabled: boolean) {
 
 export function useRunImport() {
   const changed = useChanged()
-  return useMutation({ mutationFn: runImport, onSuccess: changed })
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: runImport,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['certification'] }) // the run refreshed the certification cache too
+      return changed()
+    },
+  })
 }
 
-/** Certified and deprecated tables and columns. One read-only query on the selected warehouse; nothing without one. */
+/** Certified and deprecated tables and columns, from the server's local cache. Reading it never runs a query. */
 export function useCertification() {
   const profile = useProfile()
-  const warehouseId = useUiStore((s) => s.warehouseId)
   return useQuery({
-    queryKey: ['certification', profile, warehouseId],
+    queryKey: ['certification', profile],
     queryFn: getCertification,
-    enabled: profile !== null && warehouseId !== null,
-    // An answer that said "no warehouse yet" is stale at once, so the next mount or focus asks again.
-    staleTime: (q) => (q.state.data?.needs_warehouse ? 0 : 10 * 60 * 1000),
+    enabled: profile !== null,
     retry: false,
+  })
+}
+
+/** The one warehouse query, on a click. Needs a selected warehouse; the answer replaces what the badges read. */
+export function useRefreshCertification() {
+  const profile = useProfile()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: refreshCertification,
+    onSuccess: (data) => qc.setQueryData(['certification', profile], data),
   })
 }

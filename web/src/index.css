@@ -2523,6 +2523,19 @@ button.as-link {
   margin-left: -4px;
 }
 
+.cert-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cert-control button {
+  padding: 0 6px;
+}
+
 .cert-badge {
   display: inline-block;
   margin-left: 6px;

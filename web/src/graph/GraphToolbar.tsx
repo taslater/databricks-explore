@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import * as api from '../api/client'
 import { useDiagrams, useSaveDiagram } from '../api/hooks'
+import { CertificationControl } from '../concepts/CertificationControl'
 import { useUiStore } from '../store/uiStore'
 import { messageOf } from './actions'
 import { toDiagramBody, fromDiagram } from './diagram'
@@ -120,6 +121,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
       >
         Concepts
       </button>
+      <CertificationControl />
       <span className="spacer" />
       <span
         style={{ flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}

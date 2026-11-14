@@ -8,6 +8,7 @@ import { columnsOf, findColumn } from '../graph/columns'
 import { useUiStore } from '../store/uiStore'
 import { useGraphStore } from '../graph/graphStore'
 import { CertBadge } from './CertBadge'
+import { CertificationControl } from './CertificationControl'
 import { certificationOf } from './certification'
 import { conceptIdOf, defaultRelation, parseTypedName, relationsFor, sourceLabel, targetLabel } from './model'
 import { useConceptsStore } from './conceptsStore'
@@ -38,6 +39,7 @@ export function LinksSection({ concept, names }: { concept: ConceptDetail; names
   return (
     <section className="concept-links" aria-label="Links">
       <h4>Links</h4>
+      <CertificationControl />
       {concept.links.length === 0 && concept.incoming.length === 0 && <p className="hint">Not linked to anything yet.</p>}
       <ul className="link-rows">
         {concept.links.map((l) => {

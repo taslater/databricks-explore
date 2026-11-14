@@ -40,7 +40,6 @@ export function useSetWarehouse() {
     mutationFn: (id: string | null) => api.setWarehouse(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['warehouses'] })
-      void qc.invalidateQueries({ queryKey: ['certification'] }) // read again now that the server has the warehouse
     },
   })
 }
