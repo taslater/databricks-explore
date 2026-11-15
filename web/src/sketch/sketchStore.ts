@@ -40,6 +40,18 @@ import type {
 } from './types'
 import { EMPTY_HOST } from './types'
 
+/** A connector to add in bulk: the ends are node ids, the rest is how it looks. */
+export interface EdgeSpec {
+  source: string
+  target: string
+  label?: string
+  /** An arrowhead at the target (the default) or not. */
+  directed?: boolean
+  /** An arrowhead at the source too. */
+  bidir?: boolean
+  dashed?: boolean
+}
+
 export type EdgeStyle = Pick<SketchEdge, 'line' | 'arrow_start' | 'arrow_end' | 'dashed' | 'color'>
 
 /** Geometry and connector-side changes from the layout tools, keyed by node and connector id. */
@@ -113,6 +125,12 @@ export interface SketchState {
   syncHeight: (id: string, h: number) => void
 
   connect: (conn: ConnectionLike) => string | null
+  /**
+   * Adds connectors between existing nodes in one undo step, right side to left side (the layout runs left to right),
+   * keeping the current selection. A pair that already has a connector, in either direction, is skipped. Unlike
+   * `connect` it does not need the Canvas on screen. Returns how many were added.
+   */
+  addEdges: (specs: EdgeSpec[]) => number
   updateEdge: (id: string, patch: Partial<SketchEdge>, key?: string) => void
   reverseEdge: (id: string) => void
   /** Records that a connector was saved to the relationship store (or no longer is). Not an undo step. */
@@ -408,6 +426,33 @@ export function createSketchStore(): UseBoundStore<StoreApi<SketchState>> {
         const edge = defaultEdge(id, conn.source, conn.target, sideOf(conn.sourceHandle), sideOf(conn.targetHandle), get().edgeStyle)
         set({ edges: [...get().edges, edge], selectedIds: [], selectedEdgeIds: [id], tool: 'select' })
         return id
+      },
+
+      addEdges: (specs) => {
+        const { edges } = get()
+        const used = edges.map((e) => e.id)
+        const joined = new Set(edges.flatMap((e) => [`${e.source}\u0000${e.target}`, `${e.target}\u0000${e.source}`]))
+        const fresh: SketchEdge[] = []
+        for (const sp of specs) {
+          const key = `${sp.source}\u0000${sp.target}`
+          if (sp.source === sp.target || joined.has(key)) continue
+          joined.add(key)
+          joined.add(`${sp.target}\u0000${sp.source}`)
+          const id = nextId('c', used)
+          used.push(id)
+          const edge = defaultEdge(id, sp.source, sp.target, 'r', 'l', {
+            ...DEFAULT_EDGE_STYLE,
+            arrow_end: sp.directed !== false,
+            arrow_start: sp.bidir === true,
+            dashed: sp.dashed === true,
+          })
+          if (sp.label) edge.label = sp.label
+          fresh.push(edge)
+        }
+        if (fresh.length === 0) return 0
+        checkpoint()
+        set({ edges: [...edges, ...fresh] })
+        return fresh.length
       },
 
       updateEdge: (id, patch, key) => {

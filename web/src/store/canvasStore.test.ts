@@ -50,3 +50,25 @@ describe('maximizing', () => {
     expect(useCanvasStore.getState().maximizedId).toBeNull()
   })
 })
+
+describe('adding a block of table cards at given positions', () => {
+  it('keeps the positions, gives each a unique id and title, and returns the ids by table', () => {
+    const ids = useCanvasStore.getState().addTableWindowsAt([
+      { table: 'a.b.orders', position: { x: 10, y: 20 } },
+      { table: 'c.d.orders', position: { x: 500, y: 20 } },
+      { table: 'a.b.items', position: { x: 10, y: 400 } },
+    ])
+    const ws = useCanvasStore.getState().windows
+    expect(ws.map((w) => [w.id, w.title, w.table, w.position])).toEqual([
+      ['w1', 'orders', 'a.b.orders', { x: 10, y: 20 }],
+      ['w2', 'orders_2', 'c.d.orders', { x: 500, y: 20 }],
+      ['w3', 'items', 'a.b.items', { x: 10, y: 400 }],
+    ])
+    expect(ids).toEqual({ 'a.b.orders': 'w1', 'c.d.orders': 'w2', 'a.b.items': 'w3' })
+    expect(ws.every((w) => w.type === 'table' && w.size.w === 320 && w.size.h === 300)).toBe(true)
+  })
+  it('does nothing for an empty list', () => {
+    expect(useCanvasStore.getState().addTableWindowsAt([])).toEqual({})
+    expect(useCanvasStore.getState().windows).toEqual([])
+  })
+})

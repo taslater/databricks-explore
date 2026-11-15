@@ -5,6 +5,7 @@ from typing import Any
 
 from .. import concepts
 from .. import dbx
+from .. import lineage as lineage_walk
 from .. import mining
 from .. import ontology
 from .. import relationships
@@ -246,6 +247,45 @@ def get_relationships(ctx, args):
     lines += [edge_line(x) for x in edges[:EDGE_LIMIT]]
     if len(edges) > EDGE_LIMIT:
         lines.append(f"... {len(edges) - EDGE_LIMIT} more; use format json")
+    lines += [f"error: {x}" for x in out["errors"]]
+    return text("\n".join(lines))
+
+
+DIRECTION = {"type": "string", "enum": ["downstream", "upstream", "both"],
+             "description": "downstream (default): what is built from the table; upstream: what it is built from; both"}
+DEPTH = integer(1, lineage_walk.MAX_DEPTH, f"hops to follow, default 3, at most {lineage_walk.MAX_DEPTH}")
+
+
+@tool("lineage", "Walk table lineage and view dependencies from one table, several hops at once (get_relationships is one hop). One line per edge with its hop and kind, then the tables reached, marked [certified] or [deprecated] when the certification cache is loaded. Uses the cache; a table never expanded is read from Databricks (tables.get and table lineage, one call each), at most 60 tables per walk. Foreign keys, mined and manual joins are not followed (see get_relationships).",
+      obj({"table": TABLE, "direction": DIRECTION, "depth": DEPTH, "format": FORMAT}, ("table",)))
+def lineage(ctx, args):
+    e = ctx.need_explorer()
+    table = relationships.check_table(args["table"])
+    if table.startswith("ph:"):
+        raise ToolError("a placeholder has no lineage")
+    out = lineage_walk.walk(lambda t: e.relations(t), table, args.get("direction", "downstream"), args.get("depth", 3))
+    cert = ontology.cached_certification(e)
+    loaded = bool(cert["fetched_at"])
+    if loaded:
+        for n in out["nodes"]:
+            if n["table"] in cert["tables"]:
+                n["certification"] = cert["tables"][n["table"]]
+    if _wants_json(args):
+        return _json({k: out[k] for k in ("nodes", "edges", "truncated", "errors")})
+    n_tables = len(out["nodes"]) - 1
+    lines = [f"lineage of {table}, {out['direction']}, depth {out['depth']}: {n_tables} other table(s), {len(out['edges'])} edge(s)"]
+    lines += [f"hop {x['hop']} {x['kind']} {x['source']} -> {x['target']}" for x in out["edges"]]
+    if not out["edges"]:
+        lines.append("no lineage or view dependencies found (lineage only shows queries run since lineage was enabled; try get_relationships)")
+    lines.append("tables reached:")
+    for n in out["nodes"]:
+        where = "start" if n["side"] == "start" else f"hop {n['hop']} {n['side']}"
+        lines.append(f"  {n['table']}" + (f" {n['kind']}" if n["kind"] else "") + f" ({where})"
+                     + (f" [{n['certification']}]" if n.get("certification") else ""))
+    if out["truncated"]:
+        lines.append(f"stopped at {lineage_walk.NODE_CAP} tables: use a smaller depth or walk one direction")
+    if not loaded:
+        lines.append("certification cache not loaded, so [certified]/[deprecated] marks are missing")
     lines += [f"error: {x}" for x in out["errors"]]
     return text("\n".join(lines))
 

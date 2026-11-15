@@ -46,6 +46,11 @@ interface CanvasState {
   addNoteWindow: (position: CanvasPoint) => string
   /** Adds a table card for the full name catalog.schema.table. Returns the id. */
   addTableWindow: (position: CanvasPoint, fullName: string) => string
+  /**
+   * Adds a table card for each entry at exactly the position given (no free-space search: the caller laid the block
+   * out), with unique titles, and pans so the block is in view. Returns the new card ids by table name.
+   */
+  addTableWindowsAt: (cards: Array<{ table: string; position: CanvasPoint }>) => Record<string, string>
   /** Sets the Markdown body of a note window. */
   setText: (id: string, text: string) => void
   /** Trims and validates the title. Returns an error message, or null when saved. */
@@ -202,6 +207,34 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
     }
     set(withWindowInView([...windows, win], win, get().viewport))
     return id
+  },
+
+  addTableWindowsAt: (cards) => {
+    let windows = get().windows
+    const ids: Record<string, string> = {}
+    const added: CanvasWindow[] = []
+    for (const c of cards) {
+      const win: CanvasWindow = {
+        id: nextWindowId(windows),
+        type: 'table',
+        title: nextFreeTitle(windows, tableTitleBase(c.table)),
+        position: { x: c.position.x, y: c.position.y },
+        size: { ...DEFAULT_TABLE_SIZE },
+        table: c.table,
+        collapsed: false,
+      }
+      windows = [...windows, win]
+      added.push(win)
+      ids[c.table] = win.id
+    }
+    if (added.length === 0) return ids
+    const left = Math.min(...added.map((w) => w.position.x))
+    const top = Math.min(...added.map((w) => w.position.y))
+    const right = Math.max(...added.map((w) => w.position.x + w.size.w))
+    const bottom = Math.max(...added.map((w) => w.position.y + w.size.h))
+    const view = revealOnCanvas({ x: left, y: top, w: right - left, h: bottom - top }, get().viewport)
+    set(view ? { windows, viewport: view } : { windows })
+    return ids
   },
 
   setText: (id, text) => set({ windows: patch(get().windows, id, { text }) }),
