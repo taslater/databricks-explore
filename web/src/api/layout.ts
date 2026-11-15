@@ -17,6 +17,7 @@ export type IssueKind =
   | 'label_collision'
   | 'far_away'
   | 'off_grid'
+  | 'empty_label'
 
 export type TidyRule = 'fit_labels' | 'frames' | 'overlaps' | 'align' | 'spacing' | 'grid' | 'handles' | 'place_labels' | 'lines'
 

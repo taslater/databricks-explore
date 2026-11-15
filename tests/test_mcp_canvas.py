@@ -296,6 +296,33 @@ def test_add_nodes_sizes_a_sketch_node_to_its_label_unless_w_is_given(agent):
     assert not any(i["kind"] == "label_overflow" and i["nodes"] != ["b"] for i in layout.doctor(saved())["issues"])
 
 
+def test_text_is_an_alias_of_label_on_sketch_nodes(agent):
+    agent.ok("create_canvas", name="d")
+    agent.ok("add_nodes", name="d", nodes=[
+        {"type": "sticky", "id": "s1", "text": "from text", "at": {"x": 0, "y": 0}},
+        {"type": "text", "id": "t1", "text": "T", "at": {"x": 300, "y": 0}},
+        {"type": "shape", "id": "sh", "text": "S", "at": {"x": 600, "y": 0}},
+        {"type": "frame", "id": "f1", "text": "Frame", "at": {"x": 0, "y": 400}},
+        {"type": "sticky", "id": "s2", "label": "label wins", "text": "ignored", "at": {"x": 900, "y": 0}},
+        {"type": "note", "id": "n1", "text": "body", "at": {"x": 600, "y": 400}}])
+    by = {w["id"]: w for w in saved()["windows"]}
+    assert [by[i]["label"] for i in ("s1", "t1", "sh", "f1", "s2")] == ["from text", "T", "S", "Frame", "label wins"]
+    assert by["n1"]["text"] == "body" and "label" not in by["n1"]
+    agent.ok("update_nodes", name="d", updates=[{"id": "s1", "text": "renamed"}, {"id": "s2", "label": "L", "text": "T"},
+                                                 {"id": "n1", "text": "new body"}])
+    by = {w["id"]: w for w in saved()["windows"]}
+    assert by["s1"]["label"] == "renamed" and "text" not in by["s1"]
+    assert by["s2"]["label"] == "L" and "text" not in by["s2"]
+    assert by["n1"]["text"] == "new body"
+
+
+def test_a_blank_sticky_scores_an_empty_label_warning(agent):
+    agent.ok("create_canvas", name="d")
+    out = agent.ok("add_nodes", name="d", nodes=[{"type": "sticky", "id": "s1", "at": {"x": 0, "y": 0}}])
+    assert "1 warning" in out
+    assert [i["kind"] for i in layout.doctor(saved())["issues"]] == ["empty_label"]
+
+
 def test_tidy_tool_offers_fit_labels_and_place_labels(agent):
     agent.ok("create_canvas", name="d")
     agent.ok("add_nodes", name="d", nodes=[

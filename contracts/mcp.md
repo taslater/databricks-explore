@@ -42,7 +42,7 @@ For the "Agent access" panel in the top bar. Same Host and Origin checks as `/mc
 ```json
 {"url": "http://127.0.0.1:8765/mcp", "token": "...",
  "command": "claude mcp add --transport http databricks-explore http://127.0.0.1:8765/mcp --header \"Authorization: Bearer ...\"",
- "tools": 34}
+ "tools": 35}
 ```
 
 ### `POST /api/agent-access/token`
@@ -61,9 +61,10 @@ All of these read the app's connection. Catalog data comes from the local cache 
 | --- | --- | --- |
 | `status` | `format` | Profile, selected warehouse, demo mode, saved canvas count, mining state and join suggestion counts. Works without a connection (it says so) |
 | `search_tables` | `*q`, `scope` (`auto`, `cache`), `limit` (1-300, default 25) | A header line with the match count and source, then `catalog.schema.table  TYPE` per line. `auto` searches `system.information_schema` when a warehouse is selected (as the page's search box does), else the local cache; `cache` never uses the warehouse |
-| `describe_table` | `*name` (`catalog.schema.table`), `refresh`, `format` | Header with type and fetch time, comment, one line per column (`name type [NOT NULL] -- comment`), PK/FK constraints, the first 400 characters of a view's definition. Reads the cache; one `tables.get` if the table was never opened. JSON: the `GET /api/object` body |
+| `describe_table` | `*name` (`catalog.schema.table`), `refresh`, `definition_chars` (1-20000, default 400), `format` | Header with type and fetch time, comment, one line per column (`name type [NOT NULL] -- comment`), PK/FK constraints, a view or metric-view definition (cut at `definition_chars`; a cut ends in `... (cut at N of M characters; raise definition_chars ...)`), and a `tags:` section: the table's tags, then each tagged column's (`  <column>: tag=value, bare_label`), `system.certification_status` included, or `tags: none`. Tags come from one read-only query on the selected warehouse against `<catalog>.information_schema.table_tags` and `column_tags`, cached under the profile's cache folder like column lineage (`<catalog>/<schema>/tags/<table>.json`; a cached copy needs no warehouse, `refresh` re-reads). With no warehouse and no cache the line is `tags: select a warehouse to read tags`; a failed query gives `tags: could not be read (<reason>)`, and the rest of the description is unaffected. Reads the cache; one `tables.get` if the table was never opened. JSON: the `GET /api/object` body (no tags) |
+| `find_by_tag` | `*tag_name`, `tag_value`, `catalog`, `limit` (1-1000, default 100), `format` | The tables and columns that carry the tag: a count header, then `table <catalog.schema.table>` or `column <catalog.schema.table>#<column>` per line (with `  tag=value` when no `tag_value` was given). One read-only query on `system.information_schema.table_tags` and `column_tags` through the selected warehouse, logged like other queries; nothing is cached. Needs a warehouse. Certification is the tag `system.certification_status` (`certified` or `deprecated`). JSON: `{rows: [{scope, table, column, tag_name, tag_value}], truncated}` |
 | `list_schemas` | `catalog`, `format` | The schemas of the catalog, or the catalogs when `catalog` is omitted. Cached |
-| `list_tables` | `*catalog`, `*schema`, `limit` (1-1000, default 200), `format` | `name TYPE -- comment` per line. Cached |
+| `list_tables` | `*catalog`, `*schema`, `limit` (1-1000, default 200), `format` | `name TYPE [certified] -- comment` per line. Cached. A table is marked `[certified]` or `[deprecated]` when the app's certification cache (`certification.json`, `contracts/api.md` section 8) has it; when that cache was never loaded the header line says so once, and no marks appear. It never queries: the cache is refreshed in the app |
 
 ## Tools: relationships and mining
 
@@ -74,8 +75,8 @@ All of these read the app's connection. Catalog data comes from the local cache 
 | `set_relationship_status` | `*id`, `status` (`proposed`, `accepted`, `rejected`), `note` | The edge line. A derived id (`fk:`, `lineage:`, `view_dep:`) takes only `note`. At least one of `status` and `note` |
 | `mining_suggestions` | `status` (default `proposed`), `table`, `limit` (1-200, default 20), `format` | A count header (with the counts for all statuses), then one edge line per mined join, most evidence first |
 | `usage` | `limit` (1-100, default 10), `format` | Busiest tables and table pairs from the last mining run, or `No usage yet` |
-| `mine_plan` | `window_days` (1-365, default 30), `full` | The time window, whether it is incremental, the warehouse, and the exact read-only SQL on `system.query.history` and `system.access.table_lineage`. Runs nothing |
-| `mine_run` | `*confirm` (must be `true`), `window_days`, `full` | Runs mining through the selected warehouse (read-only SQL on system tables) and stores proposed `join_mined` edges locally. Waits up to 25 seconds, then reports the result counts (`mining succeeded; 338 statements, 8 join pairs, ...`) or `still going`. Needs a selected warehouse. Statement text is never stored, as in `contracts/api.md` section 5 |
+| `mine_plan` | `window_days` (1-365, default 30), `full` | The time window, whether it is incremental, the warehouse, a note that the window ends one hour before now on purpose (query history arrives late, so the newest hour is left for the next run), and the exact read-only SQL on `system.query.history` and `system.access.table_lineage`. Runs nothing |
+| `mine_run` | `*confirm` (must be `true`), `window_days`, `full` | Runs mining through the selected warehouse (read-only SQL on system tables) and stores proposed `join_mined` edges locally. Waits up to 25 seconds, then reports the result counts (`mining succeeded; 338 statements, 8 join pairs, ...`) or `still going`. Ends with the same note about the newest hour being left for the next run. Needs a selected warehouse. Statement text is never stored, as in `contracts/api.md` section 5 |
 
 ## Tools: concepts
 
@@ -93,11 +94,12 @@ Concept ids are the uuids of `contracts/api.md` section 6. There is no delete to
 
 ## Tool: run_sql
 
-`run_sql(statement, max_rows?, timeout_s?)` runs **one** read-only statement on the SQL warehouse the app selected.
+`run_sql(statement, max_rows?, timeout_s?, max_cell_chars?)` runs **one** read-only statement on the SQL warehouse the app selected.
 
 - **Gate.** The statement is parsed with sqlglot (Databricks dialect). Exactly one statement is accepted, and it must be a `SELECT` or `WITH ... SELECT` (also `UNION` and a parenthesized query), `DESCRIBE`/`DESC`, `SHOW` or `EXPLAIN`. Everything else is rejected, with `Rejected: <reason>` as an error result and no call to the warehouse: other statement kinds (`INSERT`, `DROP`, `MERGE`, `COPY`, `OPTIMIZE`, `SET`, `USE`, `CALL`, ...), more than one statement, an empty or unparseable statement, `SELECT ... INTO`, any DML or DDL node anywhere in the tree (so none hides in a CTE or subquery), and the functions `reflect`, `java_method`, `try_reflect` and `http_request`.
 - **Caps.** `max_rows` is 1 to 1000 (default 100). `timeout_s` is 1 to 300 (default 60). A statement still running at the timeout is cancelled (`statement.cancel`) and the result is an error. The statement runs through the app's usual `query_async` and `query_status`, so it is logged like any query.
-- **Output.** Text: a `columns: name TYPE, ...` line (the warehouse's type text), a TSV header line, the rows, and a closing line such as `(5 row(s) shown; the query has more than 5 rows (cap 5); 412 ms)`. A cell longer than 200 characters is cut with `...`, tabs and newlines in a cell become spaces, `NULL` is the word `NULL`, and the rows stop at about 24,000 characters (the closing line then says so).
+- **Output.** Text: a `columns: name TYPE, ...` line (the warehouse's type text), a TSV header line, the rows, and a closing line such as `(5 row(s) shown; the query has more than 5 rows (cap 5); 412 ms)`. A cell longer than `max_cell_chars` (50 to 4000, default 200) is cut with `...`, tabs and newlines in a cell become spaces, `NULL` is the word `NULL`, and the rows stop at about 24,000 characters (the closing line then says so).
+- **Metric views** are queried with `SELECT MEASURE(`name`) ... GROUP BY ...`, not `SELECT *` (the tool description says so).
 - **Errors** (`isError`): rejected by the gate, not connected, no warehouse selected, timed out, or the warehouse's own error.
 
 ## Tools: canvases
@@ -110,7 +112,7 @@ A canvas is the saved file of `contracts/api.md` section 3 (format version 2 for
 | --- | --- |
 | `type` | `shape` (with `shape`: `rect`, `rounded`, `ellipse`, `diamond`, `cylinder`), `text`, `sticky`, `frame`, `placeholder` (a table that does not exist yet: `name`, `columns` of `{name, type?, key?}`), `query` (`sql`, `title`), `note` (`text`, `title`) or `table` (`table` = `catalog.schema.table`) |
 | `id` | Optional. Otherwise `s<n>` for sketch types and `w<n>` for query, note and table windows, the lowest free number |
-| `label`, `title` | `label` is the text of a sketch node. `title` names a query, note or table window (used as `{{title}}` in SQL). A title already taken gets `_2`, `_3`, ... |
+| `label`, `text`, `title` | `label` is the text of a sketch node (`shape`, `text`, `sticky`, `frame`); on those types `text` is accepted as an alias of `label`, and `label` wins when both are given. For a `note`, `text` is the note body. `update_nodes` follows the same rule. A sticky or text node left with no label renders blank, and the doctor reports `empty_label`. `title` names a query, note or table window (used as `{{title}}` in SQL). A title already taken gets `_2`, `_3`, ... |
 | `w`, `h`, `fill`, `stroke`, `font_size`, `locked` | Optional. Styles default to what the page uses for a new node of that type. So does size, except that **a sketch node given no `w` is sized to its label** with `layout.fit_size`: at least the default size, widened to the label up to 320 px, then wrapped and taller. Give `w` to keep exactly the size you ask for (the doctor then reports `label_overflow` if it does not fit) |
 | `place` | **Preferred.** `{relation, anchor, gap?}`: `right_of`, `left_of`, `below`, `above` an existing node, or `inside` a frame (the frame grows). The anchor may be a node added earlier in the same call. Consecutive nodes with the same `place` are placed together and stack (a column for `right_of`/`left_of`, a row for `below`/`above`). It uses `layout.arrange` mode `place`. `right_of` and `left_of` top-align the node with the anchor (`align`: `start` is the default there, `center` and `end` are the other choices; `below` and `above` center by default). A node that would land on something moves down first, up to 600 px, and only then further along the requested side; `below` and `above` move further along their own direction. `gap` defaults to 40 |
 | `at` | `{x, y}` absolute position. Give `place` or `at`, not both. With neither, the node goes below the existing content (the origin on an empty canvas) |

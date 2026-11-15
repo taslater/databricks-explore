@@ -37,6 +37,26 @@ GROUP BY 1, 2, 3, 4
 ORDER BY last_seen DESC
 LIMIT 5000"""
 
+# Unity Catalog tags of one table and of its columns, read from the table's own catalog. Same column shape as the other tag queries.
+TABLE_TAGS_SQL = """SELECT 'table' AS scope, catalog_name, schema_name, table_name, CAST(NULL AS STRING) AS column_name, tag_name, tag_value
+FROM {catalog}.information_schema.table_tags
+WHERE schema_name = :sch AND table_name = :tbl
+UNION ALL
+SELECT 'column', catalog_name, schema_name, table_name, column_name, tag_name, tag_value
+FROM {catalog}.information_schema.column_tags
+WHERE schema_name = :sch AND table_name = :tbl
+LIMIT 2000"""
+
+# Tables and columns carrying one tag, across the metastore (or one catalog); {value} and {catalog} add the optional filters.
+FIND_BY_TAG_SQL = """SELECT 'table' AS scope, catalog_name, schema_name, table_name, CAST(NULL AS STRING) AS column_name, tag_name, tag_value
+FROM system.information_schema.table_tags
+WHERE tag_name = :tag{filters}
+UNION ALL
+SELECT 'column', catalog_name, schema_name, table_name, column_name, tag_name, tag_value
+FROM system.information_schema.column_tags
+WHERE tag_name = :tag{filters}
+LIMIT {limit}"""
+
 # What the lineage API returns per upstream/downstream, besides tableInfo
 ENTITY_KEYS = {"jobInfos": "job", "notebookInfos": "notebook", "pipelineInfos": "pipeline",
                "dashboardV3Infos": "dashboard", "queryInfos": "query", "fileInfo": "file"}
@@ -321,6 +341,51 @@ class Explorer:
                                    "Pick one.")
             return self.sql(COLUMN_LINEAGE_SQL, t=full_name)
         return self._cached(f"{self._dir(full_name)}/column_lineage/{safe(full_name)}.json", fetch, refresh)
+
+    def tags(self, full_name, refresh=False):
+        """Unity Catalog tags of one table and its columns: {"table": {tag: value}, "columns": {column: {tag: value}}}.
+
+        One read-only warehouse query on <catalog>.information_schema, cached like column lineage (a cached copy is
+        returned without a warehouse; `refresh` re-reads). Raises RuntimeError without a warehouse and no cache.
+        """
+        def fetch():
+            if not self.warehouse_id:
+                raise RuntimeError("Tags are read with a SQL warehouse (information_schema.table_tags). Pick one.")
+            catalog, schema, table = full_name.split(".", 2)
+            rows = self.sql(TABLE_TAGS_SQL.format(catalog="`" + catalog.replace("`", "``") + "`"), sch=schema, tbl=table)
+            out = {"table": {}, "columns": {}}
+            for r in rows:
+                if r["table_name"] != table or r["schema_name"] != schema or not r.get("tag_name"):
+                    continue
+                if r["scope"] == "column" and r.get("column_name"):
+                    out["columns"].setdefault(r["column_name"], {})[r["tag_name"]] = r.get("tag_value") or ""
+                elif r["scope"] == "table":
+                    out["table"][r["tag_name"]] = r.get("tag_value") or ""
+            return out
+        return self._cached(f"{self._dir(full_name)}/tags/{safe(full_name)}.json", fetch, refresh)
+
+    def find_by_tag(self, tag_name, tag_value=None, catalog=None, limit=100):
+        """Tables and columns carrying a tag, from system.information_schema (one warehouse query, never cached).
+
+        Returns {"rows": [{"scope", "table", "column", "tag_name", "tag_value"}], "truncated"}. Raises RuntimeError
+        without a warehouse.
+        """
+        params = {"tag": tag_name}
+        filters = ""
+        if tag_value is not None:
+            filters += " AND tag_value = :val"
+            params["val"] = tag_value
+        if catalog:
+            filters += " AND catalog_name = :cat"
+            params["cat"] = catalog
+        rows = self.sql(FIND_BY_TAG_SQL.format(filters=filters, limit=int(limit) + 1), **params)
+        rows = [r for r in rows if r.get("tag_name") == tag_name
+                and (tag_value is None or (r.get("tag_value") or "") == tag_value) and r.get("scope") in ("table", "column")
+                and (not catalog or r["catalog_name"] == catalog)]
+        return {"rows": [{"scope": r["scope"], "table": f"{r['catalog_name']}.{r['schema_name']}.{r['table_name']}",
+                          "column": r.get("column_name") if r["scope"] == "column" else None,
+                          "tag_name": r["tag_name"], "tag_value": r.get("tag_value") or ""} for r in rows[:limit]],
+                "truncated": len(rows) > limit}
 
     # ---- edge details: what produced a lineage link, and when ----
     def _link(self, kind, info):

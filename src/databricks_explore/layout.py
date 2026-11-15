@@ -40,12 +40,13 @@ PENALTY = {  # score points per issue: (each, cap)
     "overlap": (8, 40), "edge_through_node": (6, 24), "bad_handle_side": (3, 15), "outside_frame": (4, 16),
     "near_alignment": (1.5, 12), "uneven_spacing": (3, 12), "label_overflow": (2, 10), "edge_crossings": (1.5, 15),
     "far_away": (2, 6), "off_grid": (0.5, 5), "label_collision": (2, 10), "derived_through_node": (3, 12),
+    "empty_label": (2, 10),
 }
 SEVERITY = {
     "overlap": "error", "edge_through_node": "error", "bad_handle_side": "warning", "outside_frame": "warning",
     "near_alignment": "warning", "uneven_spacing": "warning", "label_overflow": "warning",
     "edge_crossings": "warning", "far_away": "info", "off_grid": "info", "label_collision": "warning",
-    "derived_through_node": "warning",
+    "derived_through_node": "warning", "empty_label": "warning",
 }
 
 
@@ -902,6 +903,10 @@ def doctor(canvas: dict, grid: Optional[float] = None) -> dict:
                                  'tidy with fit_labels grows the node to fit',
                                  None if locked[n["id"]] else _tidy_fix(["fit_labels"], [n["id"]]),
                                  needs={"w": need[0], "h": need[1]}))
+    for n in nodes:
+        if n.get("type") in ("sticky", "text") and not str(n.get("label") or "").strip():
+            issues.append(_issue("empty_label", n["id"], [n["id"]],
+                                 f'{n.get("type")} {n["id"]} has no label, so it renders blank; set label (text is accepted as an alias)', None))
     edge_by = {e["id"]: e for e in _edges(canvas)}
     for eid, kind, other in _label_collisions(canvas):
         e = edge_by[eid]

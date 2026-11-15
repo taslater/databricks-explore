@@ -6,6 +6,7 @@ from typing import Any
 from .. import concepts
 from .. import dbx
 from .. import mining
+from .. import ontology
 from .. import relationships
 from ..relationships import RelationshipInvalid
 
@@ -14,9 +15,12 @@ from .tooling import B, FORMAT, S, ToolError, integer, obj, strings, text, tool
 
 POLL_SECONDS = 1.0       # how often run_sql asks the warehouse whether the statement finished
 MINE_WAIT_SECONDS = 25   # how long mine_run waits for the run before saying it is still going
-CELL_CHARS = 200         # a longer cell is cut, so one blob cannot fill the agent's context
+CELL_CHARS = 200         # a longer cell is cut, so one blob cannot fill the agent's context (max_cell_chars changes it)
+DEFINITION_CHARS = 400   # how much of a view definition describe_table shows (definition_chars changes it)
 TSV_CHARS = 24000        # the most characters of rows run_sql returns
 EDGE_LIMIT = 60
+SETTLE_NOTE = ("note: the window ends one hour before now on purpose. Query history arrives late, so the newest hour is left "
+               "for the next run (this is not a bug).")
 
 TABLE = {"type": "string", "minLength": 1, "description": "full name catalog.schema.table"}
 ENDPOINT = {"type": "object", "required": ["table"], "additionalProperties": False,
@@ -109,8 +113,31 @@ def _constraints(info: dict) -> list[str]:
     return out
 
 
-@tool("describe_table", "Columns, types, comments and constraints of one table. Reads the local cache; fetches from Unity Catalog once if the table was never opened.",
-      obj({"name": TABLE, "refresh": {"type": "boolean", "description": "re-read from Unity Catalog"}, "format": FORMAT}, ("name",)))
+def _tag_text(tags: dict) -> str:
+    return ", ".join(f"{k}={v}" if v else k for k, v in sorted(tags.items()))
+
+
+def _tag_lines(e, name: str, refresh: bool) -> list[str]:
+    """The tags section of describe_table: the table's tags, then each tagged column's. Never fails the call."""
+    try:
+        data = e.tags(name, refresh)["data"]
+    except Exception as err:  # no warehouse and nothing cached, or no access to information_schema
+        if not e.warehouse_id:
+            return ["tags: select a warehouse to read tags"]
+        return [f"tags: could not be read ({dbx.clean_error(err)})"]
+    if not data["table"] and not data["columns"]:
+        return ["tags: none"]
+    lines = ["tags:"]
+    if data["table"]:
+        lines.append(f"  table: {_tag_text(data['table'])}")
+    lines += [f"  {col}: {_tag_text(t)}" for col, t in sorted(data["columns"].items())]
+    return lines
+
+
+@tool("describe_table", "Columns, types, comments, constraints and Unity Catalog tags (including system.certification_status) of one table. Reads the local cache; fetches from Unity Catalog once if the table was never opened. Tags are read with one query on the selected warehouse and cached; refresh re-reads both. A view or metric view definition is cut at 400 characters unless definition_chars is raised.",
+      obj({"name": TABLE, "refresh": {"type": "boolean", "description": "re-read from Unity Catalog (and re-read the tags)"},
+           "definition_chars": integer(1, 20000, "how many characters of a view or metric-view definition to show (default 400)"),
+           "format": FORMAT}, ("name",)))
 def describe_table(ctx, args):
     e = ctx.need_explorer()
     res = e.object(_three_part(args["name"]), bool(args.get("refresh")))
@@ -128,7 +155,35 @@ def describe_table(ctx, args):
     if _constraints(info):
         lines.append("constraints: " + "; ".join(_constraints(info)))
     if info.get("view_definition"):
-        lines.append("view definition: " + " ".join(info["view_definition"].split())[:400])
+        definition, limit = " ".join(info["view_definition"].split()), args.get("definition_chars", DEFINITION_CHARS)
+        lines.append("view definition: " + definition[:limit]
+                     + (f"... (cut at {limit} of {len(definition)} characters; raise definition_chars, up to 20000, to see more)"
+                        if len(definition) > limit else ""))
+    lines += _tag_lines(e, args["name"], bool(args.get("refresh")))
+    return text("\n".join(lines))
+
+
+@tool("find_by_tag", "List the tables and columns that carry a Unity Catalog tag, optionally with one value, in one catalog or all of them. One read-only query on system.information_schema (table_tags and column_tags) through the selected warehouse; nothing is cached. Certification is the tag system.certification_status (certified or deprecated).",
+      obj({"tag_name": {"type": "string", "minLength": 1}, "tag_value": {"type": "string", "description": "only this value"},
+           "catalog": {"type": "string", "minLength": 1}, "limit": integer(1, 1000, "default 100"), "format": FORMAT}, ("tag_name",)))
+def find_by_tag(ctx, args):
+    e = ctx.need_explorer()
+    if not e.warehouse_id:
+        raise ToolError("No SQL warehouse is selected: pick one in the app first (tags are read from system.information_schema).")
+    limit = args.get("limit", 100)
+    try:
+        out = e.find_by_tag(args["tag_name"], args.get("tag_value"), args.get("catalog"), limit)
+    except Exception as err:
+        raise ToolError(f"Could not read the tag tables: {dbx.clean_error(err)}") from err
+    if _wants_json(args):
+        return _json(out)
+    what = args["tag_name"] + (f"={args['tag_value']}" if args.get("tag_value") is not None else "")
+    lines = [f"{len(out['rows'])}{'+' if out['truncated'] else ''} hit(s) for tag {what}" + (f" in {args['catalog']}" if args.get("catalog") else "")]
+    for r in out["rows"]:
+        lines.append(f"{r['scope']} {r['table']}" + (f"#{r['column']}" if r["column"] else "")
+                     + (f"  {r['tag_name']}={r['tag_value']}" if args.get("tag_value") is None and r["tag_value"] else ""))
+    if out["truncated"]:
+        lines.append(f"... more than {limit}; raise limit or narrow with tag_value or catalog")
     return text("\n".join(lines))
 
 
@@ -144,7 +199,7 @@ def list_schemas(ctx, args):
                                                            for r in res["data"])]))
 
 
-@tool("list_tables", "List the tables and views of one schema with their types and comments. Cached.",
+@tool("list_tables", "List the tables and views of one schema with their types and comments. Cached. A table is marked [certified] or [deprecated] when the app's certification cache (system.certification_status) says so; the header says when that cache is not loaded.",
       obj({"catalog": {"type": "string", "minLength": 1}, "schema": {"type": "string", "minLength": 1},
            "limit": integer(1, 1000), "format": FORMAT}, ("catalog", "schema")))
 def list_tables(ctx, args):
@@ -154,8 +209,13 @@ def list_tables(ctx, args):
         return _json(res)
     limit = args.get("limit", 200)
     rows = res["data"]
-    lines = [f"{len(rows)} objects in {args['catalog']}.{args['schema']}"]
-    lines += [f"{r['name']} {r.get('type') or ''}" + (f" -- {r['comment']}" if r.get("comment") else "") for r in rows[:limit]]
+    cert = ontology.cached_certification(e)
+    lines = [f"{len(rows)} objects in {args['catalog']}.{args['schema']}"
+             + ("" if cert["fetched_at"] else "; certification cache not loaded, so [certified]/[deprecated] marks are missing "
+                "(refresh certification in the app: Concepts tab, or Import from Databricks)")]
+    lines += [f"{r['name']} {r.get('type') or ''}"
+              + (f" [{cert['tables'][r['full_name']]}]" if r.get("full_name") in cert["tables"] else "")
+              + (f" -- {r['comment']}" if r.get("comment") else "") for r in rows[:limit]]
     if len(rows) > limit:
         lines.append(f"... {len(rows) - limit} more")
     return text("\n".join(lines))
@@ -254,13 +314,14 @@ def usage(ctx, args):
     return text("\n".join(lines))
 
 
-@tool("mine_plan", "Show what a mining run would read (time window and the exact read-only SQL on system tables). Runs nothing.",
+@tool("mine_plan", "Show what a mining run would read (time window and the exact read-only SQL on system tables). Runs nothing. The window always ends an hour before now: query history arrives late, so the newest hour is left for the next run.",
       obj({"window_days": integer(1, mining.MAX_WINDOW_DAYS), "full": B}))
 def mine_plan(ctx, args):
     e = ctx.need_explorer()
     p = mining.plan(e.profile, args.get("window_days", mining.WINDOW_DAYS), bool(args.get("full")))
     lines = [f"window {p['since']} to {p['until']}; {'incremental from ' + p['cursor'] if p['incremental'] else 'full window'}; "
-             f"row cap {p['row_cap']}; warehouse {e.warehouse_id or 'none selected'}"]
+             f"row cap {p['row_cap']}; warehouse {e.warehouse_id or 'none selected'}",
+             SETTLE_NOTE]
     if p.get("remine_reason"):
         lines.append(f"note: {p['remine_reason']}")
     for q in p["queries"]:
@@ -268,7 +329,7 @@ def mine_plan(ctx, args):
     return text("\n".join(lines))
 
 
-@tool("mine_run", "Run query-history mining: read-only SQL on system.query.history and system.access.table_lineage through the selected warehouse. Stores proposed join edges locally. Requires confirm: true; call mine_plan first.",
+@tool("mine_run", "Run query-history mining: read-only SQL on system.query.history and system.access.table_lineage through the selected warehouse. Stores proposed join edges locally. Requires confirm: true; call mine_plan first. The run reads up to an hour before now, because query history arrives late; the newest hour is picked up by the next run.",
       obj({"confirm": {"type": "boolean", "const": True, "description": "must be true"}, "window_days": integer(1, mining.MAX_WINDOW_DAYS),
            "full": B}, ("confirm",)), read_only=False)
 def mine_run(ctx, args):
@@ -290,6 +351,7 @@ def mine_run(ctx, args):
         r = st["result"]
         out += (f"; {r['statements']} statements, {r['pairs']} join pairs, {r['created']} new, {r['updated']} updated"
                 + ("; hit the row cap, run again to continue" if r.get("capped") else ""))
+        out += "\n" + SETTLE_NOTE
     return text(out)
 
 
@@ -415,20 +477,20 @@ def find_candidates(ctx, args):
 
 # ---------------------------------------------------------------- SQL
 
-def _cell(v) -> str:
+def _cell(v, max_chars: int = CELL_CHARS) -> str:
     s = "NULL" if v is None else str(v)
     s = s.replace("\t", " ").replace("\r", " ").replace("\n", " ")
-    return s if len(s) <= CELL_CHARS else s[:CELL_CHARS] + "..."
+    return s if len(s) <= max_chars else s[:max_chars] + "..."
 
 
-def tsv(result: dict, max_rows: int) -> str:
+def tsv(result: dict, max_rows: int, max_cell_chars: int = CELL_CHARS) -> str:
     """A result as column types, a TSV header and TSV rows, cut by row count and by size, with a closing line that says so."""
     cols = result["columns"]
     lines = ["columns: " + ", ".join(f"{c['name']} {c.get('type_text') or c.get('type')}" for c in cols),
              "\t".join(c["name"] for c in cols)]
     size, shown = sum(map(len, lines)), 0
     for row in result["rows"]:
-        line = "\t".join(_cell(v) for v in row)
+        line = "\t".join(_cell(v, max_cell_chars) for v in row)
         if size + len(line) > TSV_CHARS:
             break
         lines.append(line)
@@ -445,9 +507,10 @@ def tsv(result: dict, max_rows: int) -> str:
     return "\n".join([*lines, f"({note}; {result.get('ms')} ms)"])
 
 
-@tool("run_sql", "Run one read-only statement (SELECT or WITH...SELECT, DESCRIBE, SHOW or EXPLAIN) on the SQL warehouse the app selected. Rows and time are capped and a slow statement is cancelled. Returns column types and TSV.",
+@tool("run_sql", "Run one read-only statement (SELECT or WITH...SELECT, DESCRIBE, SHOW or EXPLAIN) on the SQL warehouse the app selected. Rows and time are capped and a slow statement is cancelled. A cell longer than max_cell_chars (default 200) is cut and ends in \"...\". Returns column types and TSV. Metric views need SELECT MEASURE(`name`) ... GROUP BY ..., not SELECT *.",
       obj({"statement": {"type": "string", "minLength": 1}, "max_rows": integer(1, 1000, "default 100"),
-           "timeout_s": integer(1, 300, "default 60")}, ("statement",)))
+           "timeout_s": integer(1, 300, "default 60"),
+           "max_cell_chars": integer(50, 4000, "cut each cell after this many characters (default 200)")}, ("statement",)))
 def run_sql(ctx, args):
     e = ctx.need_explorer()
     try:
@@ -469,4 +532,4 @@ def run_sql(ctx, args):
         time.sleep(min(POLL_SECONDS, max(0.0, deadline - time.time())))
     if st["state"] != "SUCCEEDED":
         raise ToolError(f"Statement {st['state'].lower()}" + (f": {st['error']}" if st.get("error") else ""))
-    return text(tsv(st, max_rows))
+    return text(tsv(st, max_rows, args.get("max_cell_chars", CELL_CHARS)))
