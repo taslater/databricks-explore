@@ -26,6 +26,7 @@
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.21.0",
     "react-vega": "^8.0.0",
+    "remark-gfm": "^4.0.1",
     "vega": "^6.4.0",
     "vega-lite": "^6.5.0",
     "zod": "^4.6.7",
