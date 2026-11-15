@@ -34,7 +34,7 @@ Root: `databricks-explore` | files: 259
 
 ## contracts/
 
-- `contracts/api.md` (73,124 B)
+- `contracts/api.md` (73,326 B)
   - Explorer API contract
 - `contracts/canvas.schema.json` (15,080 B)
   - Explorer canvas
@@ -258,7 +258,7 @@ Root: `databricks-explore` | files: 259
   - `def shape_result(sc)`: A query result in the Result shape of POST /api/query (contracts/api.md section 3), so the results grid reads it.
   - `def default_post(url, headers, body, timeout)`: POST a JSON body. Returns (status, response headers with lower-case keys, body text). Network failures are GenieError.
   - `class GenieClient()`: Talks to the Genie One MCP server as the connected user. One MCP session is reused until the server drops it.
-- `src/databricks_explore/layout.py` (92,415 B)
+- `src/databricks_explore/layout.py` (92,793 B)
   - Layout doctor, tidy, arrange, describe and render for saved canvases (format version 2). Pure: no Flask, no SDK.
   - `class LayoutError(ValueError)`: The request cannot be laid out (unknown id, bad mode or option). The route returns it as HTTP 400.
   - `def fit_size(n: dict, max_w: float=MAX_FIT_W) -> tuple[int, int]`: The node's size grown just enough for its label to fit by the doctor's estimate; never smaller than it is now.
@@ -382,7 +382,7 @@ Root: `databricks-explore` | files: 259
   - `def strings(description: str='') -> dict`: A list of strings property.
   - `def tool(name: str, description: str, schema: dict, read_only: bool=True, destructive: bool=False)`: Register a handler `fn(ctx, args) -> str | list of MCP content blocks` as a tool.
   - `def text(s: str) -> list[dict]`: One MCP text block.
-- `src/databricks_explore/mcp_server/tools_canvas.py` (30,897 B)
+- `src/databricks_explore/mcp_server/tools_canvas.py` (31,837 B)
   - The canvas tools: read, add and change nodes and connectors, lay them out, render. Every write is saved and undoable.
   - `def list_canvases(ctx, args)`
   - `def get_canvas(ctx, args)`
@@ -758,7 +758,7 @@ Root: `databricks-explore` | files: 259
   - `def test_unparseable_sql_raises_value_error(sql)`
   - `def test_deeply_nested_sql_is_a_parse_failure_not_a_crash()`
   - `def test_pairs_are_named_tuples()`
-- `tests/test_layout.py` (48,771 B)
+- `tests/test_layout.py` (49,528 B)
   - layout.py: doctor, tidy, arrange, describe and render_png on hand-built canvases and on perturbed generated ones.
   - `def node(nid, x, y, w=120, h=60, kind='shape', **extra)`
   - `def edge(eid, a, b, sh=None, th=None, **extra)`
@@ -777,6 +777,7 @@ Root: `databricks-explore` | files: 259
   - `def test_bad_handle_side()`
   - `def test_outside_frame_and_its_fix()`
   - `def test_label_overflow()`
+  - `def test_empty_label_flags_blank_stickies_and_text_but_not_shapes_or_frames()`
   - `def test_far_away_needs_an_outlier()`
   - `def test_off_grid_only_when_grid_is_on()`
   - `def test_flat_geometry_is_read_too()`
@@ -883,7 +884,7 @@ Root: `databricks-explore` | files: 259
   - `def test_bad_requests_are_json_errors(client, path, body, status)`
   - `def test_non_json_body_is_a_400(client)`
   - `def test_tidy_route_fits_labels_and_places_connector_labels(client)`
-- `tests/test_mcp_canvas.py` (21,344 B)
+- `tests/test_mcp_canvas.py` (22,990 B)
   - The canvas tools: structural placement, auto tidy, the effect report, undo, and what each edit saves.
   - `def boxes(canvas)`
   - `def saved(name='d')`
@@ -910,6 +911,8 @@ Root: `databricks-explore` | files: 259
   - `def test_agent_edits_keep_a_version_1_canvas_valid_and_move_it_to_version_2(agent, connected)`
   - `def test_an_agent_write_changes_the_revision_the_page_polls(agent, connected)`
   - `def test_add_nodes_sizes_a_sketch_node_to_its_label_unless_w_is_given(agent)`
+  - `def test_text_is_an_alias_of_label_on_sketch_nodes(agent)`
+  - `def test_a_blank_sticky_scores_an_empty_label_warning(agent)`
   - `def test_tidy_tool_offers_fit_labels_and_place_labels(agent)`
   - `def test_place_right_of_top_aligns_by_default_and_takes_align(agent)`
   - `def test_update_nodes_accepts_nodes_as_an_alias_for_updates(agent)`
@@ -1281,7 +1284,7 @@ Root: `databricks-explore` | files: 259
 - `web/src/api/client.ts` (7,706 B)
 - `web/src/api/concepts.ts` (12,022 B)
 - `web/src/api/hooks.ts` (8,850 B)
-- `web/src/api/layout.ts` (3,174 B)
+- `web/src/api/layout.ts` (3,192 B)
 - `web/src/api/queryClient.ts` (338 B)
 - `web/src/api/restoreSession.test.ts` (5,488 B)
 - `web/src/api/restoreSession.ts` (2,946 B)

@@ -39,8 +39,11 @@ STYLE_PROPS = {"fill": {"type": "string", "description": "CSS color"}, "stroke":
 NODE = {"type": "object", "required": ["type"], "additionalProperties": False,
         "description": "type shape (set shape), text, sticky, frame, placeholder (table that does not exist yet), query (sql), note (text) or table (table = catalog.schema.table). Place it with place (preferred) or at; with neither it goes below the existing content.",
         "properties": {"type": {"type": "string", "enum": list(NODE_TYPES)}, "id": {"type": "string", "minLength": 1},
-                       "label": S, "title": {"type": "string", "description": "query, note and table windows: unique, used as {{title}} in SQL"},
-                       "shape": {"type": "string", "enum": list(SHAPES)}, "sql": S, "text": S, "table": S,
+                       "label": {"type": "string", "description": "shape, text, sticky and frame: the text shown on the node"},
+                       "title": {"type": "string", "description": "query, note and table windows: unique, used as {{title}} in SQL"},
+                       "shape": {"type": "string", "enum": list(SHAPES)}, "sql": S,
+                       "text": {"type": "string", "description": "note: the note body. shape, text, sticky and frame: an alias of label (label wins if both are given)"},
+                       "table": S,
                        "name": {"type": "string", "description": "placeholder: the table name"}, "columns": {"type": "array", "items": COLUMN},
                        "w": {"type": "number", "exclusiveMinimum": 0, "description": "omit it and a sketch node is sized to fit its label"},
                        "h": {"type": "number", "exclusiveMinimum": 0},
@@ -156,10 +159,11 @@ def build_node(canvas: dict, spec: dict) -> dict:
     for key in ("fill", "stroke", "font_size", "locked"):
         if key in spec:
             node[key] = spec[key]
+    label = spec["label"] if "label" in spec else spec.get("text")  # text is an alias of label on sketch nodes; label wins
     if kind == "shape":
-        node.update(shape=shape, label=spec.get("label", ""))
+        node.update(shape=shape, label=label if label is not None else "")
     elif kind in ("text", "sticky", "frame"):
-        node["label"] = spec.get("label", "Group" if kind == "frame" else "")
+        node["label"] = label if label is not None else ("Group" if kind == "frame" else "")
     elif kind == "placeholder":
         cols = spec.get("columns") or [{"name": "id", "type": "bigint", "key": "pk"}]
         node["placeholder"] = {"id": str(uuid.uuid4()), "name": spec.get("name") or spec.get("label") or "new_table", "columns": cols}
@@ -245,7 +249,9 @@ def add_query_window(ctx, args):
     return text(_edit(args["name"], mutate, args.get("auto_tidy", True)))
 
 
-UPDATE_FIELDS = {"label": S, "title": S, "sql": S, "text": S, "table": S, "shape": {"type": "string", "enum": list(SHAPES)},
+UPDATE_FIELDS = {"label": {"type": "string", "description": "shape, text, sticky and frame: the text shown on the node"}, "title": S, "sql": S,
+                 "text": {"type": "string", "description": "note: the note body. shape, text, sticky and frame: an alias of label (label wins if both are given)"},
+                 "table": S, "shape": {"type": "string", "enum": list(SHAPES)},
                  "collapsed": B, "z": {"type": "number"}, "w": {"type": "number", "exclusiveMinimum": 0},
                  "h": {"type": "number", "exclusiveMinimum": 0}, "name": S, "columns": {"type": "array", "items": COLUMN},
                  "linked": {"type": ["string", "null"]}, "place": PLACE, "at": POINT, **STYLE_PROPS}
@@ -287,6 +293,10 @@ def _apply(canvas: dict, n: dict, u: dict) -> None:
     for key in ("label", "sql", "text", "table", "shape", "collapsed", "z", "fill", "stroke", "font_size", "locked"):
         if key in u:
             n[key] = u[key]
+    if n.get("type") in ("shape", "text", "sticky", "frame") and "text" in u:  # text is an alias of label on sketch nodes; label wins
+        n.pop("text", None)
+        if "label" not in u:
+            n["label"] = u["text"]
     if "title" in u and u["title"] != n.get("title"):
         old = n.get("title")
         n["title"] = u["title"]

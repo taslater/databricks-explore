@@ -139,6 +139,17 @@ def test_label_overflow():
     assert "label_overflow" not in kinds(layout.doctor(canvas([node("a", 0, 0, 120, 60, label="Orders")])))
 
 
+def test_empty_label_flags_blank_stickies_and_text_but_not_shapes_or_frames():
+    blank = [node("s1", 0, 0, kind="sticky", label=""), node("s2", 200, 0, kind="sticky", label="  "),
+             node("t1", 400, 0, kind="text"), node("sh", 0, 200, label=""), node("f", 600, 600, 100, 100, "frame", label="")]
+    r = layout.doctor(canvas(blank))
+    flagged = sorted(i["nodes"][0] for i in r["issues"] if i["kind"] == "empty_label")
+    assert flagged == ["s1", "s2", "t1"]
+    assert all(i["severity"] == "warning" and i["fix"] is None for i in r["issues"] if i["kind"] == "empty_label")
+    ok = canvas([node("s1", 0, 0, kind="sticky", label="hello"), node("t1", 300, 0, kind="text", label="T")])
+    assert "empty_label" not in kinds(layout.doctor(ok))
+
+
 def test_far_away_needs_an_outlier():
     near = [node(f"n{i}", (i % 3) * 200, (i // 3) * 100) for i in range(6)]
     assert "far_away" not in kinds(layout.doctor(canvas(near)))
