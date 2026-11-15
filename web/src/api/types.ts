@@ -138,6 +138,25 @@ export interface GraphEdge {
   target_column?: string
 }
 
+/** One connector the Graph draws on the canvas for a pair of tables (POST /api/relationships/connectors). */
+export interface CanvasConnector {
+  /** Source to target: child to parent for a foreign key, the table read to the table built from it for lineage. */
+  source: string
+  target: string
+  /** The join columns, `lineage`, or `view`. May be empty. */
+  label: string
+  directed: boolean
+  proposed: boolean
+  /** Lineage runs both ways: an arrowhead at the start too. */
+  bidir: boolean
+  kinds: string[]
+}
+
+export interface ConnectorsResponse {
+  connectors: CanvasConnector[]
+  skipped: { rejected: number; proposed: number; lineage_covered: number }
+}
+
 export interface RelationsResponse {
   nodes: GraphNode[]
   edges: GraphEdge[]

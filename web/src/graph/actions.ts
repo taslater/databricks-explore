@@ -2,9 +2,10 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import * as api from '../api/client'
-import { useCanvasStore } from '../store/canvasStore'
+import { DEFAULT_TABLE_SIZE, useCanvasStore } from '../store/canvasStore'
+import { useSketchStore } from '../sketch/sketchStore'
 import { useUiStore } from '../store/uiStore'
-import type { CanvasWindow, GraphEdge } from '../api/types'
+import type { CanvasConnector, CanvasWindow, GraphEdge } from '../api/types'
 import { schemaOf } from './format'
 import { useGraphStore } from './graphStore'
 import { columnsOf } from './columns'
@@ -14,6 +15,8 @@ import { JOIN_KEYS_STALE_MS } from '../api/hooks'
 import { joinSql, planJoins } from './joinQuery'
 import { newTableIds } from './columns'
 import { patchIds, toColumnEdges, toRelations } from './relationships'
+import { edgeShown } from './derive'
+import { lineagePath, pathConnectors, planSend, sendSummary, type PathDirection } from './sendSelection'
 
 export function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -41,29 +44,16 @@ export async function fetchCurrentEdge(info: GraphEdge): Promise<GraphEdge | und
   return undefined
 }
 
-/** Gap between the right edge of the canvas and a card sent from the graph. */
+/** Gap between the right edge of the canvas content and a block of cards sent from the graph. */
 const SEND_GAP = 40
 
-/**
- * Adds a table card for `fullName` to the canvas store. The canvas tab does not need to be open:
- * the store is shared, and the card is there when the Canvas tab is shown. The card goes to the
- * right of the existing windows. A table that already has a card is not added twice.
- * Returns a status line for the graph toolbar.
- */
-export function sendToCanvas(fullName: string): string {
-  const canvas = useCanvasStore.getState()
-  if (canvas.windows.some((w) => w.type === 'table' && w.table === fullName)) {
-    return `${fullName} is already on the canvas`
-  }
-  canvas.addTableWindow(rightOf(canvas.windows), fullName)
-  return `Added ${fullName} to the canvas`
-}
-
-/** Top-left point to the right of every window, or the origin when the canvas is empty. */
-function rightOf(windows: CanvasWindow[]): { x: number; y: number } {
+/** Top-left of a block of cards sent from the graph: right of every window, level with the top of the content. */
+export function sendOrigin(windows: ReadonlyArray<Pick<CanvasWindow, 'position' | 'size'>>): { x: number; y: number } {
   if (windows.length === 0) return { x: 0, y: 0 }
-  const right = Math.max(...windows.map((w) => w.position.x + w.size.w))
-  return { x: right + SEND_GAP, y: 0 }
+  return {
+    x: Math.max(...windows.map((w) => w.position.x + w.size.w)) + SEND_GAP,
+    y: Math.min(...windows.map((w) => w.position.y)),
+  }
 }
 
 /** Shared by the graph actions and the picker so they use the same query cache. */
@@ -262,7 +252,70 @@ export function useGraphActions() {
       }
     }
 
+    /**
+     * Sends tables to the Canvas as cards laid out left to right by dependency, with a connector for each known
+     * relationship among them (foreign keys, mined and manual joins, lineage and view dependencies, labeled as the
+     * MCP tool connect_known labels them). A table that already has a card gets none; connectors still reach it.
+     * `fallback` is drawn when the server cannot plan the connectors. The Canvas tab need not be open.
+     */
+    async function sendTables(ids: string[], fallback: CanvasConnector[] = []) {
+      const tables = ids.filter((id) => !isPlaceholder(id) && !id.startsWith('concept:'))
+      if (tables.length === 0) {
+        useGraphStore.getState().setStatus('Select at least one table', true)
+        return
+      }
+      let connectors = fallback
+      let proposed = 0
+      let warning = ''
+      if (tables.length > 1) {
+        useGraphStore.getState().setStatus('reading relationships…')
+        try {
+          const resp = await api.getConnectors(tables)
+          connectors = resp.connectors
+          proposed = resp.skipped.proposed
+        } catch (e) {
+          warning = `; could not read the relationships (${messageOf(e)})`
+        }
+      }
+      const canvas = useCanvasStore.getState()
+      const have = new Set(canvas.windows.filter((w) => w.type === 'table' && w.table).map((w) => w.table!.toLowerCase()))
+      const plan = planSend(tables, have, connectors, sendOrigin([...canvas.windows, ...useSketchStore.getState().nodes]), DEFAULT_TABLE_SIZE)
+      const added = canvas.addTableWindowsAt(plan.cards)
+      const cardOf = new Map<string, string>()
+      for (const w of useCanvasStore.getState().windows) {
+        if (w.type === 'table' && w.table && !cardOf.has(w.table.toLowerCase())) cardOf.set(w.table.toLowerCase(), w.id)
+      }
+      for (const [table, id] of Object.entries(added)) cardOf.set(table.toLowerCase(), id)
+      const specs = plan.links.flatMap((c) => {
+        const source = cardOf.get(c.source.toLowerCase())
+        const target = cardOf.get(c.target.toLowerCase())
+        return source && target
+          ? [{ source, target, label: c.label || undefined, directed: c.directed, bidir: c.bidir, dashed: c.proposed }]
+          : []
+      })
+      const drawn = useSketchStore.getState().addEdges(specs)
+      useGraphStore.getState().setStatus(sendSummary(plan, drawn, { proposed }) + warning, warning !== '')
+    }
+
+    /** Sends the chain of lineage and view dependencies the graph shows from one table, downstream or upstream. */
+    async function sendPath(id: string, direction: PathDirection) {
+      const g = useGraphStore.getState()
+      const now = Date.now()
+      const shown = g.edges.map((e) => e.data!.info).filter((info) => edgeShown(info, g.filters, g.staleDays, now))
+      const path = lineagePath(id, direction, shown)
+      if (path.tables.length === 1) {
+        g.setStatus(
+          `No ${direction} lineage from ${id.split('.').pop()} on the graph. Double-click a node to load its neighbors first.`,
+          true,
+        )
+        return
+      }
+      await sendTables(path.tables, pathConnectors(path.edges))
+    }
+
     return {
+      sendTables,
+      sendPath,
       queryTables,
       expand,
       openObject,

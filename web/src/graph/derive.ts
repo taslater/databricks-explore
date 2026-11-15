@@ -1,6 +1,7 @@
 // Turns the stored graph (nodes, edges, filters) into what React Flow draws.
 // Pure: the same inputs always give the same output, so it can be unit tested.
 import { MarkerType } from '@xyflow/react'
+import type { GraphEdge } from '../api/types'
 import { columnHandles, findColumn, visibleColumns } from './columns'
 import { ageDays, EDGE_COLORS } from './format'
 import { estimateSize } from './layout'
@@ -71,6 +72,17 @@ export function handlesFor(
     : { sourceHandle: 'src-t', targetHandle: 'tgt-b' }
 }
 
+/** Lineage whose last_seen is older than `staleDays`. */
+export function isStale(info: GraphEdge, staleDays: number, now: number): boolean {
+  return info.kind === 'lineage' && (ageDays(info.last_seen, now) ?? -1) > staleDays
+}
+
+/** Whether the filters let an edge show: its kind is on, and it is neither stale nor rejected unless those are on too. */
+export function edgeShown(info: GraphEdge, filters: EdgeFilters, staleDays: number, now: number): boolean {
+  const stale = isStale(info, staleDays, now)
+  return (filters[info.kind] ?? false) && !(stale && !filters.showStale) && !(info.status === 'rejected' && !filters.showRejected)
+}
+
 export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: FlowEdge[] } {
   const now = input.now ?? Date.now()
   const { filters, focusSchema, hoverId } = input
@@ -81,11 +93,8 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
   const edgeStale = new Map<string, boolean>()
   for (const e of input.edges) {
     const info = e.data!.info
-    const stale = info.kind === 'lineage' && (ageDays(info.last_seen, now) ?? -1) > input.staleDays
-    const kindShown = filters[info.kind] ?? false
-    const rejected = info.status === 'rejected'
-    edgeStale.set(e.id, stale)
-    edgeHidden.set(e.id, !kindShown || (stale && !filters.showStale) || (rejected && !filters.showRejected))
+    edgeStale.set(e.id, isStale(info, input.staleDays, now))
+    edgeHidden.set(e.id, !edgeShown(info, filters, input.staleDays, now))
   }
 
   // Node visibility: a node is hidden when it has edges and all of them are hidden. The focus node always shows.

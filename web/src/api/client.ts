@@ -12,6 +12,7 @@ import type {
   EdgeDetailsResponse,
   BulkStatusBody,
   ImportResult,
+  ConnectorsResponse,
   JoinsResponse,
   MiningPlan,
   MiningStatus,
@@ -168,6 +169,13 @@ export const getRelationships = (table: string, refresh = false, level: 'table' 
 
 /** The tables `table` is known to join to, with the column pairs: foreign keys, mined joins and manual edges. Local only. */
 export const getJoinKeys = (table: string) => get<JoinsResponse>(`/api/relationships/joins${qs({ table })}`)
+
+/**
+ * The connectors to draw between these tables on the canvas: one per pair, from foreign keys, mined and manual joins
+ * and lineage and view dependencies, labeled as the MCP tool connect_known labels them.
+ */
+export const getConnectors = (tables: string[], includeProposed = false) =>
+  post<ConnectorsResponse>('/api/relationships/connectors', { tables, include_proposed: includeProposed, include_lineage: true })
 
 /** Creates a `manual` edge. 201 when new, 200 when the same edge existed (it is re-accepted). */
 export const createRelationship = (body: RelationshipCreate) => post<Relationship>('/api/relationships', body)

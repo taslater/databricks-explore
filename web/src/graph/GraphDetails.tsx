@@ -4,7 +4,7 @@ import { useEdge, useJoinKeys, useObject } from '../api/hooks'
 import { formatConstraints } from './constraints'
 import { keyDetail, rankKeys } from '../canvas/linking/joinKeys'
 import type { EdgeFlow, GraphEdge, JoinKey, Producer, RelationshipStatus } from '../api/types'
-import { fetchCurrentEdge, messageOf, sendToCanvas, useGraphActions } from './actions'
+import { fetchCurrentEdge, messageOf, useGraphActions } from './actions'
 import { DERIVED_KINDS, KIND_LABEL, KIND_STYLE, STORED_KINDS } from './edgeStyles'
 import { ageDays, fmtAge, fmtTime, lastPart } from './format'
 import { DEFAULT_STALE_DAYS, useGraphStore } from './graphStore'
@@ -33,6 +33,9 @@ export function GraphDetails() {
     const picked = allNodes.filter((n) => n.selected && !n.id.startsWith('ph:')).map((n) => n.id)
     return picked.length > 0 ? picked : selectedNode && !selectedNode.id.startsWith('ph:') ? [selectedNode.id] : []
   }, [allNodes, selectedNode])
+  const several = pickedTables.length > 1
+  // With one table picked, its details; with several, the list (the last-clicked node alone would mislead).
+  const detailNode = several ? undefined : (allNodes.find((n) => n.id === pickedTables[0]) ?? selectedNode)
 
   // Keep the field's own text so the user can clear it and type a new number. The store gets the parsed value.
   const [daysText, setDaysText] = useState(String(staleDays))
@@ -95,13 +98,29 @@ export function GraphDetails() {
           Refresh selected
         </button>
         <button
-          onClick={() => {
-            if (selectedNode) useGraphStore.getState().setStatus(sendToCanvas(selectedNode.id))
-          }}
-          disabled={!selectedNode}
-          title="Add a table card for this object to the canvas"
+          onClick={() => void actions.sendTables(pickedTables)}
+          disabled={pickedTables.length === 0}
+          title={
+            several
+              ? 'Add the selected tables to the canvas as cards, laid out left to right by dependency, with connectors for the known relationships among them'
+              : 'Add a table card for this object to the canvas'
+          }
         >
-          Send to canvas
+          {several ? `Send ${pickedTables.length} tables to canvas` : 'Send to canvas'}
+        </button>
+        <button
+          onClick={() => void actions.sendPath(pickedTables[0], 'downstream')}
+          disabled={pickedTables.length !== 1}
+          title="Send this table and everything built from it that the graph shows (lineage and view dependencies), with connectors. Select one table."
+        >
+          Send downstream path
+        </button>
+        <button
+          onClick={() => void actions.sendPath(pickedTables[0], 'upstream')}
+          disabled={pickedTables.length !== 1}
+          title="Send this table and everything it is built from that the graph shows (lineage and view dependencies), with connectors. Select one table."
+        >
+          Send upstream path
         </button>
         <button
           onClick={() => void actions.queryTables(pickedTables)}
@@ -117,7 +136,8 @@ export function GraphDetails() {
       </div>
 
       <div className="details-body">
-        {selectedNode && <NodeDetails id={selectedNode.id} node={selectedNode} />}
+        {several && <SelectionDetails tables={pickedTables} />}
+        {detailNode && <NodeDetails id={detailNode.id} node={detailNode} />}
         {selectedEdge && <EdgeDetails edge={selectedEdge} staleDays={staleDays} />}
       </div>
     </div>
@@ -145,6 +165,21 @@ function KindFilter({ kind }: { kind: GraphEdge['kind'] }) {
       </svg>
       {KIND_LABEL[kind]}
     </label>
+  )
+}
+
+/** The tables ticked on the graph, when there is more than one. */
+function SelectionDetails({ tables }: { tables: string[] }) {
+  return (
+    <div>
+      <h3>{tables.length} tables selected</h3>
+      <ul className="constraints">
+        {tables.map((t) => (
+          <li key={t}>{t}</li>
+        ))}
+      </ul>
+      <p className="hint">Shift-click a selected table to remove it. Send them to the canvas together, with their connectors.</p>
+    </div>
   )
 }
 
