@@ -63,6 +63,37 @@
     }
   },
   "$defs": {
+    "result": {
+      "type": "object",
+      "required": ["columns", "rows", "row_count", "truncated", "ran_at", "sql_hash"],
+      "additionalProperties": false,
+      "description": "A result snapshot. The app keeps at most 500 rows and about 256 KB of JSON (the cap on rows is enforced here, the byte cap by whoever writes it) and sets `truncated` when a cap applies.",
+      "properties": {
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {"type": "string"},
+              "type": {"type": "string", "description": "Databricks type name, for example STRING, BIGINT, DECIMAL, DATE."},
+              "type_text": {"type": ["string", "null"], "description": "The SQL type text, for example decimal(10,2)."}
+            }
+          }
+        },
+        "rows": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {"type": "array", "items": {"type": ["string", "null"]}},
+          "description": "One array per row, aligned with columns. Values are strings or null, as the statement API returns them."
+        },
+        "row_count": {"type": "integer", "minimum": 0, "description": "How many rows the run returned. May be more than rows holds."},
+        "truncated": {"type": "boolean", "description": "True when the run was cut at its row limit or fewer rows were kept than the run returned."},
+        "ran_at": {"type": "string", "description": "When the statement finished, ISO 8601 UTC."},
+        "sql_hash": {"type": "string", "description": "A hash of the SQL that ran, after {{title}} expansion (sha256, first 16 hex digits, trailing semicolons and outer whitespace ignored). The page marks the result stale when no statement of the window's current SQL hashes to this."}
+      }
+    },
     "point": {
       "type": "object",
       "required": [
@@ -192,6 +223,14 @@
           "exclusiveMinimum": 0,
           "exclusiveMaximum": 100,
           "description": "Query windows only. Percent of the window body the SQL editor takes. Absent means the default split."
+        },
+        "result": {
+          "$ref": "#/$defs/result",
+          "description": "Query windows only. The result the window last ran, so a reader sees evidence without pressing Run. Optional."
+        },
+        "view": {
+          "enum": ["results", "chart"],
+          "description": "Query windows only. The tab the window shows: the results grid or the chart. Absent means results."
         },
         "label": {
           "type": "string",

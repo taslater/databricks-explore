@@ -237,6 +237,7 @@ Response: `{"saved": "<safe(name)>"}`
 - Sketch nodes live in `windows`, with the same `id`, `position` and `size`, and a `type` of `shape` (with `shape`: `rect`, `rounded`, `ellipse`, `diamond` or `cylinder`), `text`, `sticky`, `frame` or `placeholder`. They carry `label` instead of `title` (not unique, not used in `{{title}}`), and optionally `fill`, `stroke` (CSS colors), `font_size`, `locked` and `z`. Any node, including query windows, may carry `locked` and `z`. A frame holds other nodes only by geometry: moving it moves the unlocked nodes lying inside it.
 - A `placeholder` node is a table that does not exist yet: `placeholder: {id, name, columns: [{name, type, key?}], linked?}`. `id` is a UUID, and the relationship store knows the table as `ph:<id>`. `key` is `pk` or `fk`. `linked` is the full name of the real table it stands for, once it exists. A placeholder that is linked is named by that real table in stored edges.
 - `edges[]` are connectors: `id`, `source`, `target` (window ids), `source_handle` and `target_handle` (`t`, `r`, `b` or `l`), `line` (`straight`, `step` or `curve`), `arrow_start`, `arrow_end`, `dashed`, `label`, `label_offset`, `color`, and `relationship`. `label_offset` is optional (default 0): the pixels the label is moved along the segment it sits on (section 3b, "Connector labels"); `tidy` sets it. `relationship` is `{id?, source_column?, target_column?}` and means the connector was saved to the relationship store as a `sketch` edge (section 4) with that stored id. Edge ids are unique, and both ends must name an existing window.
+- **Saved results.** A query window may carry `result`, a snapshot of what it last ran, and `view`, the tab it shows (`results` or `chart`; absent means results). `result` is `{columns: [{name, type, type_text?}], rows, row_count, truncated, ran_at, sql_hash}`: `rows` are arrays of strings or null aligned with `columns` (as in the Result shape) and at most 500, and the writer keeps about 256 KB of JSON at most (it drops rows from the end until it fits). `row_count` is how many rows the run returned and `truncated` is `true` when the run was cut at its row limit or fewer rows were kept than it returned. `ran_at` is ISO 8601 UTC. `sql_hash` is the first 16 hex digits of the SHA-256 of the SQL that ran, after `{{title}}` expansion, with outer whitespace and trailing semicolons removed. The page shows the stored grid and chart when it opens the window, and marks the result **stale** when no statement of the window's current SQL (split at top-level semicolons, expanded, hashed through `POST /api/query/hashes`) matches `sql_hash`. The server stores a `result` as received (validated like any window field), and an agent's `run_window` writes one. A chart reads its data from the window's result and takes column names as field names.
 - Saving a connector to the relationship store is a separate, explicit step (the client calls `POST /api/relationships/import` with one `sketch` edge). Saving a canvas never writes to the store.
 
 ### `POST /api/query`
@@ -253,7 +254,7 @@ Response: 200, Result shape. Errors: 500 `{"error": ...}`, including Databricks 
 
 Submits the statement without waiting (Databricks `wait_timeout` of `0s`) and returns immediately.
 
-Response: `{"statement_id": "<id>"}`. A SQL error may not show until the first `GET`, where it appears as `state: "FAILED"`.
+Response: `{"statement_id": "<id>", "sql_hash": "<hash>"}`. `sql_hash` is the hash of the SQL that was submitted, after `{{title}}` expansion (see "Saved results" under the canvas format), which the page stores with the window's result. A SQL error may not show until the first `GET`, where it appears as `state: "FAILED"`.
 
 ### `POST /api/query/tables`
 
@@ -262,6 +263,14 @@ No connection needed. Body: `{"sql": "...", "windows": {...}?}` (same `sql` and 
 Expands `{{title}}` references when `windows` is given, then returns the fully qualified table names the statement reads (sqlglot). CTE names are excluded. Used by the canvas to draw edges from a query window to table cards.
 
 Response: `{"tables": ["main.sales.orders", ...]}`. Unparseable SQL or an unknown or cyclic reference returns 500 `{"error": ...}`.
+
+### `POST /api/query/hashes`
+
+No connection needed. Body: `{"statements": ["SELECT ...", ...], "windows": {...}?}` (`windows` as in the Query body).
+
+Expands `{{title}}` references in each statement when `windows` is given, and returns the hash of each expanded statement, in order. The page uses it to tell whether a window's saved result still matches its SQL.
+
+Response: `{"hashes": ["3f2a9c01d4e7b856", null, ...]}`. An entry is `null` when that statement cannot be expanded (an unknown title, a cycle) and so cannot match a saved result.
 
 ### `GET /api/query/<id>`
 

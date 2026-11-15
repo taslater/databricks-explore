@@ -5,6 +5,7 @@ Each function is a stub until its owner implements it.
 """
 from __future__ import annotations
 
+import hashlib
 from typing import Iterable, NamedTuple
 
 import sqlglot
@@ -187,6 +188,21 @@ def _strip_trailing_semicolons(text: str) -> str:
         text = text[: toks[-1].start]
         toks = toks[:-1]
     return text.rstrip()
+
+
+def window_refs(sql: str) -> list[str]:
+    """The titles `{{title}}` names in the SQL, in first-seen order without repeats. ValueError when a reference is malformed."""
+    return list(dict.fromkeys(title for _, _, title in _find_refs(sql)))
+
+
+def sql_hash(sql: str) -> str:
+    """A short stable hash of the SQL that ran (after {{title}} expansion), for telling a saved result from a changed query.
+
+    The text is trimmed and its trailing semicolons dropped first, so `SELECT 1;` and `SELECT 1` hash alike."""
+    text = sql.strip()
+    while text.endswith(";"):
+        text = text[:-1].rstrip()
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
 def tables_read(sql: str) -> list[str]:

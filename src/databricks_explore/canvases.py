@@ -10,9 +10,10 @@ that every save bumps, and agent writes keep the replaced file as a snapshot so 
 import json
 import os
 import threading
+from datetime import datetime, timezone
 from typing import Annotated, Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, ValidationError, model_validator
 from pydantic_core import PydanticCustomError
 
 from . import dbx
@@ -66,6 +67,49 @@ class Chart(BaseModel):
     vega_lite: dict[str, Any]
 
 
+MAX_RESULT_ROWS = 500          # most rows a window's saved result keeps
+MAX_RESULT_BYTES = 256 * 1024  # about this much JSON (the rows and columns), so a canvas file stays small
+
+
+class ResultColumn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    type: str = ""
+    type_text: Optional[str] = None
+
+
+class ResultSnapshot(BaseModel):
+    """The result a query window last ran, kept in the canvas file so a reader sees evidence without pressing Run."""
+    model_config = ConfigDict(extra="forbid")
+    columns: list[ResultColumn]
+    rows: Annotated[list[list[Optional[StrictStr]]], Field(max_length=MAX_RESULT_ROWS)]
+    row_count: Annotated[StrictInt, Field(ge=0)]
+    truncated: StrictBool
+    ran_at: Annotated[str, Field(min_length=1)]
+    sql_hash: Annotated[str, Field(min_length=1)]
+
+
+def result_snapshot(result: dict, sql_hash: str, ran_at: Optional[str] = None) -> dict:
+    """A window's `result` field from a finished statement (the Result shape of GET /api/query/<id>).
+
+    Keeps at most MAX_RESULT_ROWS rows and about MAX_RESULT_BYTES of JSON (rows are dropped from the end until it fits).
+    `row_count` is how many rows the run returned and `truncated` is true when the run was cut at its row limit or
+    this function kept fewer rows than the run returned."""
+    columns = [{"name": c["name"], "type": c.get("type") or "", **({"type_text": c["type_text"]} if c.get("type_text") else {})}
+               for c in result.get("columns", [])]
+    rows = [[None if v is None else str(v) for v in row] for row in result.get("rows", [])][:MAX_RESULT_ROWS]
+    total = result.get("row_count", len(result.get("rows", [])))
+    size = len(json.dumps(columns, separators=(",", ":")))
+    kept = 0
+    for row in rows:
+        size += len(json.dumps(row, separators=(",", ":"))) + 1
+        if size > MAX_RESULT_BYTES:
+            break
+        kept += 1
+    return {"columns": columns, "rows": rows[:kept], "row_count": total, "truncated": bool(result.get("truncated")) or kept < total,
+            "ran_at": ran_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "sql_hash": sql_hash}
+
+
 WindowType = Literal["query", "chart", "note", "table", "shape", "text", "sticky", "frame", "placeholder"]
 REQUIRED_BY_TYPE = {"query": "sql", "chart": "chart", "note": "text", "table": "table",
                     "shape": "shape", "placeholder": "placeholder"}
@@ -109,6 +153,8 @@ class Window(BaseModel):
     locked: Optional[StrictBool] = None
     z: Optional[StrictFloat] = None
     placeholder: Optional[Placeholder] = None
+    result: Optional[ResultSnapshot] = None
+    view: Optional[Literal["results", "chart"]] = None
 
     @model_validator(mode="after")
     def _type_needs_its_field(self):

@@ -485,7 +485,22 @@ def query_tables():
 @app.post("/api/query/async")
 def query_async():
     body = request.json
-    return jsonify({"statement_id": ex().query_async(_query_sql(body), body.get("params"), body.get("max_rows", 5000))})
+    sql = _query_sql(body)
+    return jsonify({"statement_id": ex().query_async(sql, body.get("params"), body.get("max_rows", 5000)),
+                    "sql_hash": sqltools.sql_hash(sql)})
+
+
+@app.post("/api/query/hashes")
+def query_hashes():
+    """The hash of each statement after {{title}} expansion, so the page can tell whether a saved result still matches."""
+    body = request.json
+    out = []
+    for statement in body["statements"]:
+        try:
+            out.append(sqltools.sql_hash(sqltools.expand_refs(statement, body["windows"]) if body.get("windows") else statement))
+        except ValueError:  # an unknown title, a cycle or SQL that does not read: it cannot match a saved result
+            out.append(None)
+    return jsonify({"hashes": out})
 
 
 @app.get("/api/query/<sid>")
