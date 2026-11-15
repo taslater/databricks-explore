@@ -237,6 +237,7 @@ Response: `{"saved": "<safe(name)>"}`
 - Sketch nodes live in `windows`, with the same `id`, `position` and `size`, and a `type` of `shape` (with `shape`: `rect`, `rounded`, `ellipse`, `diamond` or `cylinder`), `text`, `sticky`, `frame` or `placeholder`. They carry `label` instead of `title` (not unique, not used in `{{title}}`), and optionally `fill`, `stroke` (CSS colors), `font_size`, `locked` and `z`. Any node, including query windows, may carry `locked` and `z`. A frame holds other nodes only by geometry: moving it moves the unlocked nodes lying inside it.
 - A `placeholder` node is a table that does not exist yet: `placeholder: {id, name, columns: [{name, type, key?}], linked?}`. `id` is a UUID, and the relationship store knows the table as `ph:<id>`. `key` is `pk` or `fk`. `linked` is the full name of the real table it stands for, once it exists. A placeholder that is linked is named by that real table in stored edges.
 - `edges[]` are connectors: `id`, `source`, `target` (window ids), `source_handle` and `target_handle` (`t`, `r`, `b` or `l`), `line` (`straight`, `step` or `curve`), `arrow_start`, `arrow_end`, `dashed`, `label`, `label_offset`, `color`, and `relationship`. `label_offset` is optional (default 0): the pixels the label is moved along the segment it sits on (section 3b, "Connector labels"); `tidy` sets it. `relationship` is `{id?, source_column?, target_column?}` and means the connector was saved to the relationship store as a `sketch` edge (section 4) with that stored id. Edge ids are unique, and both ends must name an existing window.
+- **Saved results.** A query window may carry `result`, a snapshot of what it last ran, and `view`, the tab it shows (`results` or `chart`; absent means results). `result` is `{columns: [{name, type, type_text?}], rows, row_count, truncated, ran_at, sql_hash}`: `rows` are arrays of strings or null aligned with `columns` (as in the Result shape) and at most 500, and the writer keeps about 256 KB of JSON at most (it drops rows from the end until it fits). `row_count` is how many rows the run returned and `truncated` is `true` when the run was cut at its row limit or fewer rows were kept than it returned. `ran_at` is ISO 8601 UTC. `sql_hash` is the first 16 hex digits of the SHA-256 of the SQL that ran, after `{{title}}` expansion, with outer whitespace and trailing semicolons removed. The page shows the stored grid and chart when it opens the window, and marks the result **stale** when no statement of the window's current SQL (split at top-level semicolons, expanded, hashed through `POST /api/query/hashes`) matches `sql_hash`. The server stores a `result` as received (validated like any window field), and an agent's `run_window` writes one. A chart reads its data from the window's result and takes column names as field names.
 - Saving a connector to the relationship store is a separate, explicit step (the client calls `POST /api/relationships/import` with one `sketch` edge). Saving a canvas never writes to the store.
 
 ### `POST /api/query`
@@ -253,7 +254,7 @@ Response: 200, Result shape. Errors: 500 `{"error": ...}`, including Databricks 
 
 Submits the statement without waiting (Databricks `wait_timeout` of `0s`) and returns immediately.
 
-Response: `{"statement_id": "<id>"}`. A SQL error may not show until the first `GET`, where it appears as `state: "FAILED"`.
+Response: `{"statement_id": "<id>", "sql_hash": "<hash>"}`. `sql_hash` is the hash of the SQL that was submitted, after `{{title}}` expansion (see "Saved results" under the canvas format), which the page stores with the window's result. A SQL error may not show until the first `GET`, where it appears as `state: "FAILED"`.
 
 ### `POST /api/query/tables`
 
@@ -262,6 +263,14 @@ No connection needed. Body: `{"sql": "...", "windows": {...}?}` (same `sql` and 
 Expands `{{title}}` references when `windows` is given, then returns the fully qualified table names the statement reads (sqlglot). CTE names are excluded. Used by the canvas to draw edges from a query window to table cards.
 
 Response: `{"tables": ["main.sales.orders", ...]}`. Unparseable SQL or an unknown or cyclic reference returns 500 `{"error": ...}`.
+
+### `POST /api/query/hashes`
+
+No connection needed. Body: `{"statements": ["SELECT ...", ...], "windows": {...}?}` (`windows` as in the Query body).
+
+Expands `{{title}}` references in each statement when `windows` is given, and returns the hash of each expanded statement, in order. The page uses it to tell whether a window's saved result still matches its SQL.
+
+Response: `{"hashes": ["3f2a9c01d4e7b856", null, ...]}`. An entry is `null` when that statement cannot be expanded (an unknown title, a cycle) and so cannot match a saved result.
 
 ### `GET /api/query/<id>`
 
@@ -339,7 +348,7 @@ No connection needed, no body. Puts back the newest snapshot, the file as it was
 
 #### `POST /api/canvases/<name>/connect-known`
 
-Needs a connection. Draws connectors between the table cards of a saved canvas for the relationships the app knows (Unity Catalog foreign keys, mined joins, manual ones), the same as the MCP tool `connect_known` (`contracts/mcp.md`). Body, all optional: `{"ids": ["<card id>", ...], "include_proposed": false}`. Response: `{"added": ["c1", ...], "skipped": {"rejected": 0, "proposed": 1, "existing": 0}, "message": "<the edit report>"}`. The write is saved as an agent write (`by: "agent"`, one snapshot), so the page picks it up through the revision poll and its Undo agent change button reverts it. **400** for a bad body, an id that is not a table card, fewer than two table cards, or no connection; **404** for an unknown canvas. When no new relationship is found nothing is written and `added` is empty.
+Needs a connection. Draws connectors between the table cards of a saved canvas for the relationships the app knows (Unity Catalog foreign keys, mined joins, manual ones), the same as the MCP tool `connect_known` (`contracts/mcp.md`). Body, all optional: `{"ids": ["<card id>", ...], "include_proposed": false, "include_lineage": false}`; `include_lineage` also draws lineage and view-dependency connectors (source to target, labeled `lineage` or `view`; a pair that has a key connector is not drawn twice). Response: `{"added": ["c1", ...], "skipped": {"rejected": 0, "proposed": 1, "existing": 0}, "message": "<the edit report>"}`. The write is saved as an agent write (`by: "agent"`, one snapshot), so the page picks it up through the revision poll and its Undo agent change button reverts it. **400** for a bad body, an id that is not a table card, fewer than two table cards, or no connection; **404** for an unknown canvas. When no new relationship is found nothing is written and `added` is empty.
 
 Decisions made after T0 review (these override anything above):
 
@@ -421,7 +430,7 @@ Response `{"text": "..."}`: a compact summary for a language model, about 60 lin
 
 ### `POST /api/layout/render`
 
-Body: the input above, plus optional `width` (pixels, 200 to 4000, default 1200) and `highlight`, a list of node ids to outline in red or the string `"issues"` for every node an error or warning names. Response: `image/png`, a schematic picture (boxes by type with their labels wrapped inside them (an ellipsis ends the last line when the box is too short) and each id as a small tag above the box, connectors with arrowheads, and connector labels in white boxes where the placement rule puts them). It is for judging layout, not a faithful render of the canvas.
+Body: the input above, plus optional `width` (pixels, 200 to 4000, default 1200) and `highlight`, a list of node ids to outline in red or the string `"issues"` for every node an error or warning names. Response: `image/png`, a picture of what a reader sees, drawn by `layout.render_png` (Pillow, deterministic): shapes, stickies, text nodes and frames with their `label` wrapped to the node's width at its `font_size` (an ellipsis ends the last line that fits when the label does not all fit); a note with its title and its text with the Markdown markers removed (`layout.strip_markdown`), as many lines as fit; a query window with its title, the first lines of its SQL (`layout.sql_excerpt`, split at the window's `editor_split`) and below them either the first rows of its saved `result` as a small table (`layout.result_grid`: NULL as `NULL`, long cells cut, columns that do not fit as an ellipsis, `N rows` when not every row is drawn) or, when the window's `view` is `chart`, `chart: <mark>, N rows` (`bar+rule` for a layered spec), or `no saved result`; a table card with its title and full table name; a placeholder table with its columns; connectors with arrowheads, and connector labels in white boxes where the placement rule puts them. Each id is a small tag above its box. Text is scaled with the picture (a scalable font where Pillow 10.1 or later has one, the one fixed size before that), so a large canvas drawn at a small `width` has small text; a larger `width` makes it readable. A collapsed window shows only its title. The picture does not mark a saved result as stale (that needs the SQL expanded; `get_canvas` reports it).
 
 ---
 
@@ -608,6 +617,20 @@ How one table is known to join to others, for completion and for listing a pair'
 ### `POST /api/relationships/bulk`
 
 Sets one status on several stored edges, all or none. Body `{"ids": ["e_..."], "status": "accepted"}` with 1 to 1000 ids and a `status` of `proposed`, `accepted` or `rejected`. Response `{"updated": 2}`. Errors: 400 (empty, a derived id, an unknown key), 404 (an id that does not exist; nothing is changed).
+
+### `POST /api/relationships/connectors`
+
+The connectors the Graph's **Send to canvas** draws for a set of tables, planned by the same code as the MCP tool `connect_known` (`contracts/mcp.md`). Needs a connection; local reads only (the cached table metadata and lineage, and a read from Databricks for a table never expanded, as `GET /api/relationships` does), no write. Body `{"tables": ["cat.sch.t", ...], "include_proposed": false, "include_lineage": true}`: 1 to 80 table names (a `ph:` or `concept:` name is ignored); both flags optional, `include_lineage` defaulting to true. Response:
+
+```json
+{"connectors": [{"source": "demo.sales.orders", "target": "demo.sales.customers", "label": "customer_id",
+                 "directed": true, "proposed": false, "bidir": false, "kinds": ["fk"]},
+                {"source": "demo.sales.orders", "target": "demo.sales.v_daily_revenue", "label": "view",
+                 "directed": true, "proposed": false, "bidir": false, "kinds": ["view_dep", "lineage"]}],
+ "skipped": {"rejected": 0, "proposed": 1, "lineage_covered": 0}}
+```
+
+One connector per pair of the given tables, `source` to `target`: child to parent for a foreign key, the table that is read to the table built from it for lineage. `label` lists the join columns (`customer_id`, `cust = id`, `order_id + line_no`, several keys separated by commas), or is `lineage`, or `view` when the pair has a view dependency. `kinds` are the edge kinds behind it (`fk`, `join_mined`, `manual`, `sketch`, `lineage`, `view_dep`). A proposed (unreviewed mined) join is returned only with `include_proposed`, marked `proposed`; a rejected one never. A pair with a key connector gets no second connector for its lineage (`skipped.lineage_covered` counts those). `bidir` is true when lineage runs both ways. Errors: 400 for a bad body, more than 80 tables, a malformed name or no connection.
 
 ### `GET /api/relationships?table=<name>&level=column`
 

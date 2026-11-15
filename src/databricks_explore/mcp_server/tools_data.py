@@ -5,6 +5,7 @@ from typing import Any
 
 from .. import concepts
 from .. import dbx
+from .. import lineage as lineage_walk
 from .. import mining
 from .. import ontology
 from .. import relationships
@@ -246,6 +247,45 @@ def get_relationships(ctx, args):
     lines += [edge_line(x) for x in edges[:EDGE_LIMIT]]
     if len(edges) > EDGE_LIMIT:
         lines.append(f"... {len(edges) - EDGE_LIMIT} more; use format json")
+    lines += [f"error: {x}" for x in out["errors"]]
+    return text("\n".join(lines))
+
+
+DIRECTION = {"type": "string", "enum": ["downstream", "upstream", "both"],
+             "description": "downstream (default): what is built from the table; upstream: what it is built from; both"}
+DEPTH = integer(1, lineage_walk.MAX_DEPTH, f"hops to follow, default 3, at most {lineage_walk.MAX_DEPTH}")
+
+
+@tool("lineage", "Walk table lineage and view dependencies from one table, several hops at once (get_relationships is one hop). One line per edge with its hop and kind, then the tables reached, marked [certified] or [deprecated] when the certification cache is loaded. Uses the cache; a table never expanded is read from Databricks (tables.get and table lineage, one call each), at most 60 tables per walk. Foreign keys, mined and manual joins are not followed (see get_relationships).",
+      obj({"table": TABLE, "direction": DIRECTION, "depth": DEPTH, "format": FORMAT}, ("table",)))
+def lineage(ctx, args):
+    e = ctx.need_explorer()
+    table = relationships.check_table(args["table"])
+    if table.startswith("ph:"):
+        raise ToolError("a placeholder has no lineage")
+    out = lineage_walk.walk(lambda t: e.relations(t), table, args.get("direction", "downstream"), args.get("depth", 3))
+    cert = ontology.cached_certification(e)
+    loaded = bool(cert["fetched_at"])
+    if loaded:
+        for n in out["nodes"]:
+            if n["table"] in cert["tables"]:
+                n["certification"] = cert["tables"][n["table"]]
+    if _wants_json(args):
+        return _json({k: out[k] for k in ("nodes", "edges", "truncated", "errors")})
+    n_tables = len(out["nodes"]) - 1
+    lines = [f"lineage of {table}, {out['direction']}, depth {out['depth']}: {n_tables} other table(s), {len(out['edges'])} edge(s)"]
+    lines += [f"hop {x['hop']} {x['kind']} {x['source']} -> {x['target']}" for x in out["edges"]]
+    if not out["edges"]:
+        lines.append("no lineage or view dependencies found (lineage only shows queries run since lineage was enabled; try get_relationships)")
+    lines.append("tables reached:")
+    for n in out["nodes"]:
+        where = "start" if n["side"] == "start" else f"hop {n['hop']} {n['side']}"
+        lines.append(f"  {n['table']}" + (f" {n['kind']}" if n["kind"] else "") + f" ({where})"
+                     + (f" [{n['certification']}]" if n.get("certification") else ""))
+    if out["truncated"]:
+        lines.append(f"stopped at {lineage_walk.NODE_CAP} tables: use a smaller depth or walk one direction")
+    if not loaded:
+        lines.append("certification cache not loaded, so [certified]/[deprecated] marks are missing")
     lines += [f"error: {x}" for x in out["errors"]]
     return text("\n".join(lines))
 
@@ -512,16 +552,29 @@ def tsv(result: dict, max_rows: int, max_cell_chars: int = CELL_CHARS) -> str:
            "timeout_s": integer(1, 300, "default 60"),
            "max_cell_chars": integer(50, 4000, "cut each cell after this many characters (default 200)")}, ("statement",)))
 def run_sql(ctx, args):
+    max_rows = args.get("max_rows", 100)
+    sid = submit_read_only(ctx, args["statement"], max_rows)
+    st = await_statement(ctx.need_explorer(), sid, time.time() + args.get("timeout_s", 60), args.get("timeout_s", 60))
+    return text(tsv(st, max_rows, args.get("max_cell_chars", CELL_CHARS)))
+
+
+def submit_read_only(ctx, statement: str, max_rows: int) -> str:
+    """The read-only gate (sqlguard) and the submit, shared by run_sql and the canvas tools that run a window. Returns the
+    statement id. Raises ToolError: `Rejected: ...` from the gate, not connected, or no warehouse selected."""
     e = ctx.need_explorer()
     try:
-        sql = check_read_only(args["statement"])
+        sql = check_read_only(statement)
     except NotReadOnly as err:
         raise ToolError(f"Rejected: {err}") from err
     if not e.warehouse_id:
         raise ToolError("No SQL warehouse is selected: pick one in the app first.")
-    max_rows, timeout = args.get("max_rows", 100), args.get("timeout_s", 60)
-    sid = e.query_async(sql, None, max_rows)
-    deadline = time.time() + timeout
+    return e.query_async(sql, None, max_rows)
+
+
+def await_statement(e, sid: str, deadline: float, timeout: int) -> dict:
+    """Poll a submitted statement until it finishes and return its result (the shape of GET /api/query/<id>).
+
+    A statement still running at `deadline` is cancelled. Raises ToolError for a timeout, or a statement that did not succeed."""
     while True:
         st = e.query_status(sid)
         if st["state"] not in ("PENDING", "RUNNING"):
@@ -532,4 +585,4 @@ def run_sql(ctx, args):
         time.sleep(min(POLL_SECONDS, max(0.0, deadline - time.time())))
     if st["state"] != "SUCCEEDED":
         raise ToolError(f"Statement {st['state'].lower()}" + (f": {st['error']}" if st.get("error") else ""))
-    return text(tsv(st, max_rows, args.get("max_cell_chars", CELL_CHARS)))
+    return st

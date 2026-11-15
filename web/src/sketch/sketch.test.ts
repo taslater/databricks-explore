@@ -153,6 +153,30 @@ describe('sketch store with a host', () => {
     st().align('left')
     expect(st().nodes[0].position.x).toBe(0)
   })
+  it('adds connectors in bulk as one undo step: right to left, labeled, no duplicates, selection kept', () => {
+    const st = () => useStore.getState()
+    const a = st().addNode('shape', { x: 0, y: 200 })
+    st().select([a])
+    const n = st().addEdges([
+      { source: 'w1', target: a, label: 'lineage' },
+      { source: a, target: 'w1' }, // the other way round: the pair is already joined
+      { source: 'w1', target: 'w1' },
+      { source: 'w1', target: a, label: 'again' },
+    ])
+    expect(n).toBe(1)
+    expect(st().edges).toHaveLength(1)
+    expect(st().edges[0]).toMatchObject({ source: 'w1', target: a, source_handle: 'r', target_handle: 'l', label: 'lineage', arrow_end: true, arrow_start: false, dashed: false })
+    expect(st().selectedIds).toEqual([a])
+    expect(st().addEdges([{ source: 'w1', target: a }])).toBe(0)
+    st().undo()
+    expect(st().edges).toHaveLength(0)
+  })
+  it('draws a bidirectional proposed connector with both arrowheads, dashed', () => {
+    const st = () => useStore.getState()
+    const a = st().addNode('shape', { x: 0, y: 200 })
+    st().addEdges([{ source: 'w1', target: a, bidir: true, dashed: true, directed: false }])
+    expect(st().edges[0]).toMatchObject({ arrow_start: true, arrow_end: false, dashed: true })
+  })
   it('keeps a pruned edge list in step with the host', () => {
     const st = () => useStore.getState()
     const a = st().addNode('shape', { x: 0, y: 0 })

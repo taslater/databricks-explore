@@ -166,6 +166,29 @@ async def agent(url: str, token: str) -> None:
                 return not failed(r) and "connected orders->customers" in texts(r), texts(r).splitlines()[0]
             await check("connect", connect)
 
+            async def window_run():
+                chart = {"mark": "bar", "encoding": {"x": {"field": "order_id", "type": "quantitative"},
+                                                     "y": {"field": "amount", "type": "quantitative"}}}
+                r = await call(session, "add_query_window", name="interop", sql="SELECT order_id, amount FROM demo.sales.orders", title="orders_q",
+                               chart=chart, view="chart", place={"relation": "below", "anchor": "note", "gap": 60})
+                added = texts(r).splitlines()[0]
+                run = await call(session, "run_window", name="interop", id="w1", max_rows=5)
+                back = await call(session, "get_canvas", name="interop")
+                return (not failed(r) and not failed(run) and "saved in w1 (5 rows)" in texts(run)
+                        and "w1 'orders_q': 5 rows" in texts(back) and "chart bar, opens on chart" in texts(back)), added + " | " + texts(run).splitlines()[-1]
+            await check("add_query_window with a chart, run_window saves the result", window_run)
+
+            async def window_rejected():
+                await call(session, "add_query_window", name="interop", sql="DROP TABLE demo.sales.orders", title="bad", place={"relation": "right_of", "anchor": "w1"})
+                r = await call(session, "run_window", name="interop", id="w2")
+                return failed(r) and texts(r).startswith("Rejected:"), texts(r)
+            await check("run_window: a DROP window is rejected", window_rejected)
+
+            async def window_remove():
+                r = await call(session, "remove_nodes", name="interop", ids=["w2"])
+                return not failed(r), texts(r).splitlines()[0]
+            await check("remove_nodes (the rejected window)", window_remove)
+
             async def arrange():
                 r = await call(session, "arrange", name="interop", mode="layered", direction="LR")
                 return not failed(r) and texts(r).startswith("arranged (layered)"), texts(r).splitlines()[0]

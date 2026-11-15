@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useCanvases } from '../api/hooks'
 import { useCanvasStore } from '../store/canvasStore'
+import { useUiStore } from '../store/uiStore'
+import { runAllWindows, stopRunAll, useBatchStore } from './runAll'
 import { useSketchStore } from '../sketch/sketchStore'
 import { useCanvasPersistence } from './persistence/useCanvasPersistence'
 import { usePersistStore, type PersistPhase } from './persistence/persistStore'
@@ -38,6 +40,9 @@ type DialogState =
 export function CanvasToolbar() {
   const canvasName = useCanvasStore((s) => s.canvasName)
   const windowCount = useCanvasStore((s) => s.windows.length)
+  const queryCount = useCanvasStore((s) => s.windows.filter((w) => w.type === 'query').length)
+  const connected = useUiStore((s) => s.connectedProfile !== null)
+  const batch = useBatchStore()
   const sketchCount = useSketchStore((s) => s.nodes.length)
   const phase = usePersistStore((s) => s.phase)
   const message = usePersistStore((s) => s.message)
@@ -134,6 +139,32 @@ export function CanvasToolbar() {
           Doctor
         </button>
         <ArrangeMenu />
+        <button
+          onClick={runAllWindows}
+          disabled={batch.active || queryCount === 0 || !connected}
+          title={
+            connected
+              ? 'Run every query window. A window that references another through {{title}} runs after it.'
+              : 'Connect to a profile to run queries.'
+          }
+        >
+          Run all windows
+        </button>
+        {batch.active && (
+          <>
+            <span className="hint canvas-message" role="status">
+              Running {batch.finished} of {batch.total}
+            </span>
+            <button onClick={stopRunAll} title="Cancel the statements still running and start no more">
+              Stop
+            </button>
+          </>
+        )}
+        {!batch.active && batch.summary && (
+          <span className="hint canvas-message" role="status">
+            {batch.summary}
+          </span>
+        )}
         <span className="canvas-name" title="Canvas name">
           {canvasName ?? 'Unnamed canvas'}
         </span>
