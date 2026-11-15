@@ -26,6 +26,7 @@ for _ext, _type in ((".js", "text/javascript"), (".mjs", "text/javascript"), (".
 
 app = Flask(__name__, static_folder=None)  # the React build in web_dist is the only UI
 STATE = {"ex": None}  # single local user -> one active connection
+MAX_CONNECTOR_TABLES = 80  # tables one POST /api/relationships/connectors reads relations for
 WEB_DIST = Path(__file__).resolve().parent / "web_dist"  # `npm run build` in web/ writes it; the wheel ships it
 
 
@@ -603,14 +604,37 @@ def canvas_connect_known(name):
     """Draw connectors for the known relationships (foreign keys, mined, manual) between the table cards of a saved canvas.
     Body (all optional): {"ids": [card ids], "include_proposed": false}. Saved as an agent write, so the page's Undo works."""
     body = request.get_json(silent=True) or {}
-    ids, proposed = body.get("ids"), body.get("include_proposed", False)
-    if not (ids is None or (isinstance(ids, list) and all(isinstance(i, str) for i in ids))) or not isinstance(proposed, bool):
-        return jsonify({"error": "send ids (a list of card ids) and include_proposed (true or false)"}), 400
+    ids, proposed, lineage = body.get("ids"), body.get("include_proposed", False), body.get("include_lineage", False)
+    if (not (ids is None or (isinstance(ids, list) and all(isinstance(i, str) for i in ids)))
+            or not isinstance(proposed, bool) or not isinstance(lineage, bool)):
+        return jsonify({"error": "send ids (a list of card ids), include_proposed and include_lineage (true or false)"}), 400
     ctx = Context(explorer=lambda: STATE["ex"], store=rel_store, miner=miner)
     try:
-        return jsonify(tools_canvas.connect_known_on(ctx, name, ids, proposed))
+        return jsonify(tools_canvas.connect_known_on(ctx, name, ids, proposed, lineage))
     except ToolError as e:
         return jsonify({"error": str(e)}), 400
+
+
+@app.post("/api/relationships/connectors")
+def relationship_connectors():
+    """The connectors the Graph draws on the canvas for tables it sends: one per pair of the given tables, from the known
+    relationships among them. Body: {"tables": [name, ...], "include_proposed": false, "include_lineage": true}."""
+    body = request.get_json(silent=True) or {}
+    tables, proposed, lineage = body.get("tables"), body.get("include_proposed", False), body.get("include_lineage", True)
+    if (not isinstance(tables, list) or not tables or not all(isinstance(t, str) and t for t in tables)
+            or not isinstance(proposed, bool) or not isinstance(lineage, bool)):
+        return jsonify({"error": "send tables (a list of table names), include_proposed and include_lineage (true or false)"}), 400
+    if len(tables) > MAX_CONNECTOR_TABLES:
+        return jsonify({"error": f"at most {MAX_CONNECTOR_TABLES} tables at a time"}), 400
+    ctx = Context(explorer=lambda: STATE["ex"], store=rel_store, miner=miner)
+    try:
+        names = [relationships.check_table(t) for t in dict.fromkeys(tables) if not t.startswith(("ph:", "concept:"))]
+        plan, skipped = tools_canvas.known_connector_plan(ctx, names, proposed, lineage)
+    except ToolError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"connectors": [{"source": p["source"], "target": p["target"], "label": p["label"], "directed": p["directed"],
+                                    "proposed": p["proposed"], "bidir": p.get("bidir", False), "kinds": p.get("kinds", [])}
+                                   for p in plan], "skipped": skipped})
 
 
 # ---- Layout: doctor, tidy, arrange, describe, render. Each takes {"canvas": {...}} or {"name": "<saved>"}. ----

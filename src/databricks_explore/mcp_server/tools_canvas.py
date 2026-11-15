@@ -8,6 +8,7 @@ import uuid
 from .. import canvases
 from .. import dbx
 from .. import layout
+from .. import lineage as lineage_walk
 from .. import relationships
 
 from .tooling import B, FORMAT, S, ToolError, integer, obj, strings, text, tool
@@ -421,33 +422,62 @@ def _known_specs(canvas: dict, plan: list, cards: dict[str, str]) -> tuple[list,
             existing += 1
             continue
         spec = {"source": a, "target": b, "arrow_end": p["directed"], "dashed": p["proposed"]}
+        if p.get("bidir"):
+            spec["arrow_start"] = True
         if p["label"]:
             spec["label"] = p["label"]
         specs.append(spec)
     return specs, existing
 
 
-def connect_known_on(ctx, name: str, ids=None, include_proposed: bool = False) -> dict:
-    """Draw connectors between the table cards of canvas `name` for the relationships the app knows (Unity Catalog foreign
-    keys, mined joins, manual ones) and save it as an undoable agent edit. Returns {"added": [connector ids],
-    "skipped": {...}, "message": the edit report}. Raises ToolError when nothing is connected or no card pair is related."""
+def known_connector_plan(ctx, tables, include_proposed: bool = False, include_lineage: bool = False) -> tuple[list, dict]:
+    """The connectors for the relationships the app knows among `tables`: (plan, skipped).
+
+    Foreign keys, mined joins and manual edges as relationships.connector_plan draws them, and with `include_lineage`
+    lineage and view dependencies too (lineage.connector_plan: directed source to target, labeled `lineage` or `view`).
+    A pair that has a key connector is not drawn twice for its lineage; `skipped["lineage_covered"]` counts those."""
     ex = ctx.need_explorer()
+    memo: dict = {}
+
+    def relations_of(t):
+        if t not in memo:
+            memo[t] = ex.relations(t)
+        return memo[t]
+    with ctx.store() as store:
+        edges = relationships.known_edges_among(store, list(tables), relations_of, lambda t: dbx.cache_times(ex, t))
+    plan, skipped = relationships.connector_plan(edges, include_proposed)
+    skipped = {**skipped, "lineage_covered": 0}
+    if include_lineage:
+        keyed = {frozenset((p["source"].lower(), p["target"].lower())) for p in plan}
+        for p in lineage_walk.among(relations_of, tables):
+            if frozenset((p["source"].lower(), p["target"].lower())) in keyed:
+                skipped["lineage_covered"] += 1
+            else:
+                plan.append(p)
+    return plan, skipped
+
+
+def connect_known_on(ctx, name: str, ids=None, include_proposed: bool = False, include_lineage: bool = False) -> dict:
+    """Draw connectors between the table cards of canvas `name` for the relationships the app knows (Unity Catalog foreign
+    keys, mined joins, manual ones, and with `include_lineage` lineage and view dependencies) and save it as an undoable
+    agent edit. Returns {"added": [connector ids], "skipped": {...}, "message": the edit report}.
+    Raises ToolError when nothing is connected or no card pair is related."""
+    ctx.need_explorer()
     canvas = _load(name)
     cards = _table_cards(canvas, ids)
     if len(cards) < 2:
         raise ToolError("connect_known needs at least two table cards on the canvas (add them with add_nodes, type table)")
-    with ctx.store() as store:
-        edges = relationships.known_edges_among(store, [w["table"] for w in canvas["windows"] if w.get("type") == "table"
-                                                        and w["table"].lower() in cards],
-                                                lambda t: ex.relations(t), lambda t: dbx.cache_times(ex, t))
-    plan, skipped = relationships.connector_plan(edges, include_proposed)
+    names = [w["table"] for w in canvas["windows"] if w.get("type") == "table" and w["table"].lower() in cards]
+    plan, skipped = known_connector_plan(ctx, names, include_proposed, include_lineage)
     specs, existing = _known_specs(canvas, plan, cards)
     notes = [f"{existing} already connected" if existing else "", f"{skipped['rejected']} rejected" if skipped["rejected"] else "",
-             f"{skipped['proposed']} proposed (include_proposed: true draws them)" if skipped["proposed"] else ""]
+             f"{skipped['proposed']} proposed (include_proposed: true draws them)" if skipped["proposed"] else "",
+             f"{skipped['lineage_covered']} lineage pair(s) already drawn as a key connector" if skipped["lineage_covered"] else ""]
     tail = ("; skipped " + ", ".join(n for n in notes if n)) if any(notes) else ""
     if not specs:
+        hint = "" if include_lineage else " (include_lineage: true also draws lineage and view dependencies)"
         return {"added": [], "skipped": {**skipped, "existing": existing},
-                "message": f"no connectors added: no new known relationship between these {len(cards)} table cards{tail}. {_score_line(canvas)}"}
+                "message": f"no connectors added: no new known relationship between these {len(cards)} table cards{tail}{hint}. {_score_line(canvas)}"}
     made: list[str] = []
 
     def mutate(c):
@@ -458,11 +488,57 @@ def connect_known_on(ctx, name: str, ids=None, include_proposed: bool = False) -
     return {"added": made, "skipped": {**skipped, "existing": existing}, "message": _edit(name, mutate, False)}
 
 
-@tool("connect_known", "Draw connectors between the table cards on a canvas for the relationships the app already knows: Unity Catalog foreign keys, mined joins and manual ones, labeled with the join columns (order_id + line_no for a composite key). Rejected ones are skipped, proposed ones only with include_proposed, and a pair that already has a connector is left alone. ids limits it to those table cards. Needs a connected profile (it reads the cached table metadata and the relationship store). Dashed connectors are proposed.",
+@tool("connect_known", "Draw connectors between the table cards on a canvas for the relationships the app already knows: Unity Catalog foreign keys, mined joins and manual ones, labeled with the join columns (order_id + line_no for a composite key). Rejected ones are skipped, proposed ones only with include_proposed, and a pair that already has a connector is left alone. include_lineage also draws lineage and view dependencies, directed from the source table to the one built from it and labeled lineage or view. ids limits it to those table cards. Needs a connected profile (it reads the cached table metadata and the relationship store). Dashed connectors are proposed.",
       obj({"name": NAME, "ids": strings("table card ids; default every table card"), "include_proposed": {
-          **B, "description": "also draw mined joins nobody has accepted yet (default false)"}}, ("name",)), read_only=False)
+          **B, "description": "also draw mined joins nobody has accepted yet (default false)"},
+           "include_lineage": {**B, "description": "also draw lineage and view-dependency connectors between the cards (default false)"}}, ("name",)),
+      read_only=False)
 def connect_known(ctx, args):
-    return text(connect_known_on(ctx, args["name"], args.get("ids"), args.get("include_proposed", False))["message"])
+    return text(connect_known_on(ctx, args["name"], args.get("ids"), args.get("include_proposed", False),
+                                 args.get("include_lineage", False))["message"])
+
+
+@tool("add_lineage", "Add table cards for every table reached by walking lineage and view dependencies from one table (the lineage tool shows the walk first), skip cards already on the canvas, connect them with lineage and view connectors (source to the table built from it) and lay them out left to right by hop. Cards the walk reaches that were already on the canvas are laid out with the new ones. One undoable edit. Needs a connected profile; reads cached lineage and fetches what was never expanded, at most 60 tables.",
+      obj({"name": NAME, "table": {"type": "string", "minLength": 1, "description": "full name catalog.schema.table to start from"},
+           "direction": {"type": "string", "enum": ["downstream", "upstream", "both"], "description": "default downstream"},
+           "depth": integer(1, lineage_walk.MAX_DEPTH, "hops to follow, default 3")}, ("name", "table")), read_only=False)
+def add_lineage(ctx, args):
+    ex = ctx.need_explorer()
+    _load(args["name"])  # a missing canvas fails before any Databricks call
+    table = relationships.check_table(args["table"])
+    if table.startswith("ph:"):
+        raise ToolError("a placeholder has no lineage")
+    memo: dict = {}
+
+    def relations_of(t):
+        if t not in memo:
+            memo[t] = ex.relations(t)
+        return memo[t]
+    out = lineage_walk.walk(relations_of, table, args.get("direction", "downstream"), args.get("depth", 3))
+    # connectors for every pair among the tables reached, so a pair is labeled as connect_known include_lineage labels it
+    plan = lineage_walk.among(relations_of, [n["table"] for n in out["nodes"]])
+
+    def mutate(canvas):
+        have = _table_cards(canvas, None)
+        fresh = [n["table"] for n in out["nodes"] if n["table"].lower() not in have]
+        ids = add_nodes_to(canvas, [{"type": "table", "table": t} for t in fresh])
+        have = _table_cards(canvas, None)
+        specs, existing = _known_specs(canvas, plan, have)
+        made = add_connectors(canvas, specs)
+        walked = [have[n["table"].lower()] for n in out["nodes"]]
+        laid, _ = layout.arrange(canvas, walked, "layered", direction="LR")
+        canvas.clear()
+        canvas.update(laid)
+        notes = [f"{len(out['nodes']) - len(fresh)} already on the canvas" if len(fresh) < len(out["nodes"]) else "",
+                 f"{existing} connector(s) already there" if existing else "",
+                 f"stopped at {lineage_walk.NODE_CAP} tables" if out["truncated"] else "",
+                 f"errors: {'; '.join(out['errors'])}" if out["errors"] else ""]
+        tail = ("; " + ", ".join(n for n in notes if n)) if any(notes) else ""
+        if len(out["nodes"]) == 1 and not plan:
+            tail += "; no lineage or view dependencies found for it"
+        return (f"added {len(ids)} table card(s) and {len(made)} lineage connector(s) for {table} ({out['direction']}, depth "
+                f"{out['depth']}), laid out left to right by hop{tail}"), []
+    return text(_edit(args["name"], mutate, False))
 
 
 ARRANGE_OPTS = {"gap": {"type": "number", "minimum": 0}, "align": {"type": "string", "enum": ["start", "center", "end"]},

@@ -13,12 +13,12 @@ from databricks_explore.mcp_server.tooling import REGISTRY
 
 EXPECTED_TOOLS = {
     "status", "search_tables", "describe_table", "list_schemas", "list_tables",
-    "get_relationships", "add_relationship", "set_relationship_status",
+    "get_relationships", "lineage", "add_relationship", "set_relationship_status",
     "find_by_tag", "mining_suggestions", "usage", "mine_plan", "mine_run",
     "list_concepts", "get_concept", "create_concept", "update_concept", "link_concept", "unlink_concept", "find_candidates",
     "run_sql",
     "list_canvases", "get_canvas", "create_canvas", "add_nodes", "add_query_window", "update_nodes", "remove_nodes", "connect",
-    "connect_known", "arrange", "tidy", "doctor", "render_canvas", "undo_canvas",
+    "connect_known", "add_lineage", "arrange", "tidy", "doctor", "render_canvas", "undo_canvas",
 }
 
 

@@ -339,7 +339,7 @@ No connection needed, no body. Puts back the newest snapshot, the file as it was
 
 #### `POST /api/canvases/<name>/connect-known`
 
-Needs a connection. Draws connectors between the table cards of a saved canvas for the relationships the app knows (Unity Catalog foreign keys, mined joins, manual ones), the same as the MCP tool `connect_known` (`contracts/mcp.md`). Body, all optional: `{"ids": ["<card id>", ...], "include_proposed": false}`. Response: `{"added": ["c1", ...], "skipped": {"rejected": 0, "proposed": 1, "existing": 0}, "message": "<the edit report>"}`. The write is saved as an agent write (`by: "agent"`, one snapshot), so the page picks it up through the revision poll and its Undo agent change button reverts it. **400** for a bad body, an id that is not a table card, fewer than two table cards, or no connection; **404** for an unknown canvas. When no new relationship is found nothing is written and `added` is empty.
+Needs a connection. Draws connectors between the table cards of a saved canvas for the relationships the app knows (Unity Catalog foreign keys, mined joins, manual ones), the same as the MCP tool `connect_known` (`contracts/mcp.md`). Body, all optional: `{"ids": ["<card id>", ...], "include_proposed": false, "include_lineage": false}`; `include_lineage` also draws lineage and view-dependency connectors (source to target, labeled `lineage` or `view`; a pair that has a key connector is not drawn twice). Response: `{"added": ["c1", ...], "skipped": {"rejected": 0, "proposed": 1, "existing": 0}, "message": "<the edit report>"}`. The write is saved as an agent write (`by: "agent"`, one snapshot), so the page picks it up through the revision poll and its Undo agent change button reverts it. **400** for a bad body, an id that is not a table card, fewer than two table cards, or no connection; **404** for an unknown canvas. When no new relationship is found nothing is written and `added` is empty.
 
 Decisions made after T0 review (these override anything above):
 
@@ -608,6 +608,20 @@ How one table is known to join to others, for completion and for listing a pair'
 ### `POST /api/relationships/bulk`
 
 Sets one status on several stored edges, all or none. Body `{"ids": ["e_..."], "status": "accepted"}` with 1 to 1000 ids and a `status` of `proposed`, `accepted` or `rejected`. Response `{"updated": 2}`. Errors: 400 (empty, a derived id, an unknown key), 404 (an id that does not exist; nothing is changed).
+
+### `POST /api/relationships/connectors`
+
+The connectors the Graph's **Send to canvas** draws for a set of tables, planned by the same code as the MCP tool `connect_known` (`contracts/mcp.md`). Needs a connection; local reads only (the cached table metadata and lineage, and a read from Databricks for a table never expanded, as `GET /api/relationships` does), no write. Body `{"tables": ["cat.sch.t", ...], "include_proposed": false, "include_lineage": true}`: 1 to 80 table names (a `ph:` or `concept:` name is ignored); both flags optional, `include_lineage` defaulting to true. Response:
+
+```json
+{"connectors": [{"source": "demo.sales.orders", "target": "demo.sales.customers", "label": "customer_id",
+                 "directed": true, "proposed": false, "bidir": false, "kinds": ["fk"]},
+                {"source": "demo.sales.orders", "target": "demo.sales.v_daily_revenue", "label": "view",
+                 "directed": true, "proposed": false, "bidir": false, "kinds": ["view_dep", "lineage"]}],
+ "skipped": {"rejected": 0, "proposed": 1, "lineage_covered": 0}}
+```
+
+One connector per pair of the given tables, `source` to `target`: child to parent for a foreign key, the table that is read to the table built from it for lineage. `label` lists the join columns (`customer_id`, `cust = id`, `order_id + line_no`, several keys separated by commas), or is `lineage`, or `view` when the pair has a view dependency. `kinds` are the edge kinds behind it (`fk`, `join_mined`, `manual`, `sketch`, `lineage`, `view_dep`). A proposed (unreviewed mined) join is returned only with `include_proposed`, marked `proposed`; a rejected one never. A pair with a key connector gets no second connector for its lineage (`skipped.lineage_covered` counts those). `bidir` is true when lineage runs both ways. Errors: 400 for a bad body, more than 80 tables, a malformed name or no connection.
 
 ### `GET /api/relationships?table=<name>&level=column`
 
