@@ -4,7 +4,7 @@ import { useObject } from '../../api/hooks'
 import type { CanvasWindow } from '../../api/types'
 import { useCanvasStore } from '../../store/canvasStore'
 import { useUiStore } from '../../store/uiStore'
-import { WindowTitle } from './NoteWindow'
+import { WindowTitle } from './WindowTitle'
 
 export type TableFlowNode = Node<Record<string, unknown>, 'table'>
 

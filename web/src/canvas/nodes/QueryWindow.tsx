@@ -9,8 +9,9 @@ import { sql, type SQLConfig } from '@codemirror/lang-sql'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCancelQuery, useQueryStatus } from '../../api/hooks'
 import type { CanvasWindow, QueryBody, QueryStatus, StatementState } from '../../api/types'
-import { DEFAULT_EDITOR_SPLIT, queryWindowMap, titleError, useCanvasStore } from '../../store/canvasStore'
+import { DEFAULT_EDITOR_SPLIT, queryWindowMap, useCanvasStore } from '../../store/canvasStore'
 import { useUiStore } from '../../store/uiStore'
+import { WindowTitle } from './WindowTitle'
 import { ResultsGrid } from '../ResultsGrid'
 import { CopyButton } from '../grid/CopyButton'
 import { ChartTab } from '../chart/ChartTab'
@@ -18,6 +19,7 @@ import { useSqlNamespace } from '../useSqlNamespace'
 import { windowRefCompletion } from '../linking/completion'
 import { remoteNameSource } from '../linking/remoteNames'
 import { flashExtension, flashRanges } from '../editor/flash'
+import { focusFromBlank } from '../editor/focus'
 import { planRun, type RunMode } from '../editor/statements'
 import './statementChips.css'
 import { IDLE_RUN, scriptTally, submitStatement, useRunStore, type WindowRun } from '../runState'
@@ -206,7 +208,7 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
           >
             {collapsed ? '▸' : '▾'}
           </button>
-          <TitleField id={id} title={win.title} />
+          <WindowTitle id={id} title={win.title} />
           <button
             className="qw-icon nodrag"
             onClick={() => setMaximized(maximized ? null : id)}
@@ -264,8 +266,9 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
               }}
             >
               <Panel id="editor" minSize="90px">
-                <div className="qw-editor nowheel">
+                <div className="qw-editor nowheel" onMouseDown={(e) => focusFromBlank(e, viewRef.current)}>
                   <CodeMirror
+                    className="qw-cm"
                     value={sqlText}
                     extensions={extensions}
                     onChange={(v) => {
@@ -347,38 +350,6 @@ function formatElapsed(ms: number): string {
   const s = ms / 1000
   if (s < 60) return `${s.toFixed(1)} s`
   return `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, '0')}s`
-}
-
-/** Inline-editable title. Titles must be unique on the canvas and cannot contain braces. */
-function TitleField({ id, title }: { id: string; title: string }) {
-  const windows = useCanvasStore((s) => s.windows)
-  const renameWindow = useCanvasStore((s) => s.renameWindow)
-  const [draft, setDraft] = useState(title)
-
-  // Follow the store when the title changes from somewhere else (for example a canvas load).
-  useEffect(() => setDraft(title), [title])
-
-  const error = titleError(draft.trim(), windows, id)
-
-  return (
-    <div className="qw-title">
-      <input
-        className="qw-title-input nodrag"
-        value={draft}
-        aria-label="Window title"
-        aria-invalid={error !== null}
-        onChange={(e) => setDraft(e.target.value)}
-        // Commit on blur. Enter blurs, so it goes through the same path.
-        onBlur={() => renameWindow(id, draft)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') e.currentTarget.blur()
-          // Escape reverts the draft. It does not blur, so the revert is not committed.
-          if (e.key === 'Escape') setDraft(title)
-        }}
-      />
-      {error !== null && <div className="error qw-error">{error}</div>}
-    </div>
-  )
 }
 
 function Summary({ rowCount, truncated, ms }: { rowCount: number; truncated: boolean | null; ms: number | null }) {
