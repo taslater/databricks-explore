@@ -45,6 +45,16 @@ const placeholderSchema = z.object({
   linked: z.string().min(1).nullable().optional(),
 })
 
+/** A query window's saved result. At most 500 rows (the writer also keeps the JSON to about 256 KB). */
+const resultSchema = z.object({
+  columns: z.array(z.object({ name: z.string(), type: z.string().default(''), type_text: z.string().nullable().optional() })),
+  rows: z.array(z.array(z.string().nullable())).max(500),
+  row_count: z.number().int().min(0),
+  truncated: z.boolean(),
+  ran_at: z.string().min(1),
+  sql_hash: z.string().min(1),
+})
+
 const windowSchema = z
   .object({
     id: z.string().min(1),
@@ -62,6 +72,8 @@ const windowSchema = z
     table: z.string().min(1).optional(),
     collapsed: z.boolean().default(false),
     editor_split: z.number().gt(0).lt(100).optional(),
+    result: resultSchema.optional(),
+    view: z.enum(['results', 'chart']).optional(),
     label: z.string().optional(),
     shape: z.enum(['rect', 'rounded', 'ellipse', 'diamond', 'cylinder']).optional(),
     fill: z.string().optional(),
@@ -243,6 +255,8 @@ function toFileWindow(w: CanvasWindow): CanvasWindow {
   if (w.text !== undefined) out.text = w.text
   if (w.table !== undefined) out.table = w.table
   if (w.editor_split !== undefined) out.editor_split = w.editor_split
+  if (w.result !== undefined) out.result = w.result
+  if (w.view !== undefined) out.view = w.view
   if (w.locked) out.locked = true
   if (w.z !== undefined) out.z = w.z
   return out

@@ -147,6 +147,10 @@ export const runQuery = (body: QueryBody) => post<QueryResult>('/api/query', bod
 export const submitQueryAsync = (body: QueryBody) =>
   post<AsyncSubmitResponse>('/api/query/async', body)
 
+/** Hash of each statement after {{title}} expansion. `null` for one that cannot be expanded. */
+export const queryHashes = (body: { statements: string[]; windows?: Record<string, string> }) =>
+  post<{ hashes: (string | null)[] }>('/api/query/hashes', body)
+
 export const getQueryStatus = (id: string) => get<QueryStatus>(`/api/query/${enc(id)}`)
 
 export const cancelQuery = (id: string) => del<CancelResponse>(`/api/query/${enc(id)}`)

@@ -2,7 +2,7 @@
 // contracts/canvas.schema.json field for field (plain JSON, no React objects).
 // Selection lives in the sketch store (src/sketch), which also owns sketch nodes and connectors.
 import { create } from 'zustand'
-import type { CanvasPoint, CanvasWindow } from '../api/types'
+import type { CanvasPoint, CanvasWindow, ResultSnapshot } from '../api/types'
 import type { Geometry } from '../sketch/types'
 import { renameInWindows } from '../canvas/linking/refs'
 import { placeNew, revealOnCanvas } from '../canvas/placement'
@@ -53,6 +53,10 @@ interface CanvasState {
   setSql: (id: string, sql: string) => void
   /** Sets the window's chart to { vega_lite: spec }, or removes `chart` when spec is null. */
   setChartSpec: (id: string, spec: Record<string, unknown> | null) => void
+  /** Saves the result a query window just ran in the window (it goes into the canvas file). */
+  setResult: (id: string, result: ResultSnapshot) => void
+  /** Saves which tab a query window shows. */
+  setView: (id: string, view: 'results' | 'chart') => void
   setCollapsed: (id: string, collapsed: boolean) => void
   /** Saves the editor's percent of a query window's body (the splitter between editor and results). */
   setEditorSplit: (id: string, percent: number) => void
@@ -226,6 +230,15 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
         return { ...w, chart: { vega_lite: spec } }
       }),
     }),
+
+  setResult: (id, result) => set({ windows: patch(get().windows, id, { result }) }),
+
+  setView: (id, view) => {
+    // Showing the default tab writes nothing, so a window nobody switched stays as it was.
+    const win = get().windows.find((w) => w.id === id)
+    if (!win || (win.view ?? 'results') === view) return
+    set({ windows: patch(get().windows, id, { view }) })
+  },
 
   setCollapsed: (id, collapsed) => set({ windows: patch(get().windows, id, { collapsed }) }),
 

@@ -92,12 +92,24 @@ describe('run state', () => {
     expect(useRunStore.getState().runs).toEqual({})
   })
 
-  it('keeps the chosen tab and notice with the window', () => {
+  it('keeps the notice with the window', () => {
     const s = useRunStore.getState()
-    s.setTab('w1', 'chart')
+    s.begin('w1', ['x'])
     s.setNotice('w1', 'Nothing to run.')
-    expect(run('w1').tab).toBe('chart')
     expect(run('w1').notice).toBe('Nothing to run.')
+  })
+
+  it('keeps the hash of each statement the server hashed, in step with the statement ids', () => {
+    const s = useRunStore.getState()
+    const token = s.begin('w1', ['a', 'b'])
+    s.submitted('w1', token, 's1', 'h1')
+    s.settle('w1', 0, 'SUCCEEDED')
+    s.nextStatement('w1')
+    s.submitted('w1', token, 's2')
+    expect(run('w1').ids).toEqual(['s1', 's2'])
+    expect(run('w1').hashes).toEqual(['h1', null])
+    s.begin('w1', ['c'])
+    expect(run('w1').hashes).toEqual([])
   })
 
   it('cancels a deleted window\'s running statement on the warehouse, and only the unfinished ones', () => {

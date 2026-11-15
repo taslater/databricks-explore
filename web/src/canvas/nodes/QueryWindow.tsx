@@ -8,7 +8,7 @@ import { keymap, type EditorView } from '@codemirror/view'
 import { sql, type SQLConfig } from '@codemirror/lang-sql'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCancelQuery, useQueryStatus } from '../../api/hooks'
-import type { CanvasWindow, QueryBody, QueryStatus, StatementState } from '../../api/types'
+import type { CanvasWindow, QueryBody, QueryResult, QueryStatus, StatementState } from '../../api/types'
 import { DEFAULT_EDITOR_SPLIT, queryWindowMap, useCanvasStore } from '../../store/canvasStore'
 import { useUiStore } from '../../store/uiStore'
 import { WindowTitle } from './WindowTitle'
@@ -23,6 +23,8 @@ import { focusFromBlank } from '../editor/focus'
 import { planRun, type RunMode } from '../editor/statements'
 import './statementChips.css'
 import { IDLE_RUN, scriptTally, submitStatement, useRunStore, type WindowRun } from '../runState'
+import { buildSnapshot, firstSave, snapshotLine, snapshotResult } from '../snapshot'
+import { useSnapshotFreshness } from '../useSnapshotFreshness'
 
 export type QueryFlowNode = Node<Record<string, unknown>, 'query'>
 
@@ -47,6 +49,8 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
   const removeWindow = useCanvasStore((s) => s.removeWindow)
   const resizeWindow = useCanvasStore((s) => s.resizeWindow)
   const setEditorSplit = useCanvasStore((s) => s.setEditorSplit)
+  const setResult = useCanvasStore((s) => s.setResult)
+  const setView = useCanvasStore((s) => s.setView)
   const maximized = useCanvasStore((s) => s.maximizedId === win.id)
   const setMaximized = useCanvasStore((s) => s.setMaximized)
   const editorSplit = win.editor_split ?? DEFAULT_EDITOR_SPLIT
@@ -60,8 +64,9 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
   const endScript = useRunStore((s) => s.endScript)
   const setNotice = useRunStore((s) => s.setNotice)
   const setSelected = useRunStore((s) => s.setSelected)
-  const setTab = useRunStore((s) => s.setTab)
-  const tab = run.tab
+  // The tab is saved with the window, so a chart window opens on its chart.
+  const tab = win.view ?? 'results'
+  const setTab = (_id: string, next: 'results' | 'chart') => setView(id, next)
   const lastIndex = run.ids.length - 1
   const latestId = run.ids[lastIndex] ?? null
   // The statement whose result is shown: the chip picked, or the last one started.
@@ -184,6 +189,24 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
     (status.isError && status.error.message) ||
     (st?.state === 'FAILED' && (st.error ?? 'Query failed.')) ||
     null
+
+  // A successful statement that returned a result set becomes the window's saved result (once per statement).
+  useEffect(() => {
+    if (latestId === null || latestSt?.state !== 'SUCCEEDED' || latestSt.columns.length === 0) return
+    const hash = run.hashes[lastIndex]
+    if (!hash || !firstSave(latestId)) return
+    setResult(id, buildSnapshot(latestSt, hash))
+  }, [latestId, latestSt, run.hashes, lastIndex, id, setResult])
+
+  // What the results and chart tabs show: this session's run when it succeeded, else the saved result. The saved one
+  // also stays up while a new run is on its way, so a refresh does not blank the window.
+  const liveResult = st?.state === 'SUCCEEDED' && st.columns.length > 0 ? st : null
+  const saved = win.result ?? null
+  const fresh = useSnapshotFreshness(win)
+  const useSaved = saved !== null && !errorText && (st === undefined || ACTIVE_STATES.has(st.state))
+  const savedResult = useMemo(() => (useSaved && saved !== null ? snapshotResult(saved) : null), [useSaved, saved])
+  const shownResult: QueryResult | null = liveResult ?? savedResult
+  const savedNote = useSaved && saved !== null ? snapshotLine(saved, fresh) : null
 
   return (
     <>
@@ -310,11 +333,18 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
 
                   <StatementChips run={run} viewIndex={viewIndex} onPick={(i) => setSelected(id, i)} />
 
+                  {savedNote !== null && (
+                    <div className={`qw-saved-note nodrag${fresh === 'stale' ? ' stale' : ''}`} role="status">
+                      {fresh === 'stale' && <span className="qw-badge">stale</span>}
+                      <span>{running ? 'Refreshing. ' : ''}{savedNote}</span>
+                    </div>
+                  )}
+
                   <div className="qw-results nowheel">
                     {tab === 'results' ? (
-                      <ResultPane st={st} running={running} errorText={errorText} />
+                      <ResultPane st={st} shown={shownResult} running={running} errorText={errorText} />
                     ) : (
-                      <ChartTab windowId={id} result={st?.state === 'SUCCEEDED' ? st : null} />
+                      <ChartTab windowId={id} result={shownResult} />
                     )}
                   </div>
                 </div>
@@ -398,10 +428,13 @@ function StatementChips({ run, viewIndex, onPick }: { run: WindowRun; viewIndex:
 
 function ResultPane({
   st,
+  shown,
   running,
   errorText,
 }: {
   st: QueryStatus | undefined
+  /** The result to show: this session's, or the window's saved one. */
+  shown: QueryResult | null
   running: boolean
   errorText: string | null
 }): ReactNode {
@@ -415,10 +448,8 @@ function ResultPane({
   }
   if (st?.state === 'CANCELED') return <div className="hint">Canceled.</div>
   if (st?.state === 'CLOSED') return <div className="hint">Statement closed.</div>
-  if (st?.state === 'SUCCEEDED') {
-    if (st.columns.length === 0) return <div className="hint">Statement succeeded. No result set.</div>
-    return <ResultsGrid result={st} />
-  }
+  if (shown !== null) return <ResultsGrid result={shown} />
+  if (st?.state === 'SUCCEEDED') return <div className="hint">Statement succeeded. No result set.</div>
   if (running) return <div className="hint">Waiting for results...</div>
   return <div className="hint">Run the query to see results.</div>
 }

@@ -1,12 +1,11 @@
 // Run state of each query window: the statements it started, where a script has got to, and which result
 // the person is looking at. It lives in memory only, outside the component, so it survives the Canvas tab
-// being hidden (the view unmounts). It is not saved to the canvas file. canvasStore clears it when a window
+// being hidden (the view unmounts). It is not saved to the canvas file (a window's saved `result` and `view` are, see
+// snapshot.ts). canvasStore clears it when a window
 // is deleted or a different canvas is opened.
 import { create } from 'zustand'
 import * as api from '../api/client'
 import type { QueryBody, StatementState } from '../api/types'
-
-export type ResultTab = 'results' | 'chart'
 
 export interface WindowRun {
   /** Changes with every run. A late submit answer for an older run is ignored. */
@@ -29,9 +28,10 @@ export interface WindowRun {
   notice: string | null
   /** When the latest run started (ms since the epoch), so the elapsed time survives a remount. */
   startedAt: number | null
+  /** Hash of the expanded SQL of each started statement (what the result is saved against). Null when the server sent none. */
+  hashes: (string | null)[]
   /** Statement chip the person picked, or null for the last one. */
   selected: number | null
-  tab: ResultTab
 }
 
 export const IDLE_RUN: WindowRun = {
@@ -45,8 +45,8 @@ export const IDLE_RUN: WindowRun = {
   submitError: null,
   notice: null,
   startedAt: null,
+  hashes: [],
   selected: null,
-  tab: 'results',
 }
 
 interface RunStore {
@@ -54,7 +54,7 @@ interface RunStore {
   /** Starts a run of `sqls` (one or more). Returns the new token. */
   begin: (id: string, sqls: string[]) => number
   /** The submit call for the statement at `index` returned `statementId`. Ignored for a stale token. */
-  submitted: (id: string, token: number, statementId: string) => void
+  submitted: (id: string, token: number, statementId: string, sqlHash?: string | null) => void
   submitFailed: (id: string, token: number, message: string) => void
   /**
    * Records the final state of statement `index`. Returns true the first time only, so a remount does not
@@ -67,7 +67,6 @@ interface RunStore {
   endScript: (id: string, notice?: string | null) => void
   setNotice: (id: string, notice: string | null) => void
   setSelected: (id: string, index: number | null) => void
-  setTab: (id: string, tab: ResultTab) => void
   clearWindows: (ids: string[]) => void
   /** Drops the state of every window that is not in `keep`. */
   clearExcept: (keep: ReadonlySet<string>) => void
@@ -96,18 +95,20 @@ export const useRunStore = create<RunStore>()((set, get) => ({
         submitError: null,
         notice: null,
         startedAt: Date.now(),
+        hashes: [],
         selected: null,
       }),
     })
     return token
   },
 
-  submitted: (id, token, statementId) => {
+  submitted: (id, token, statementId, sqlHash = null) => {
     const run = get().runs[id]
     if (!run || run.token !== token) return
     set({
       runs: update(get().runs, id, {
         ids: [...run.ids, statementId],
+        hashes: [...run.hashes, sqlHash],
         states: [...run.states, null],
         submitting: false,
       }),
@@ -147,8 +148,6 @@ export const useRunStore = create<RunStore>()((set, get) => ({
   },
 
   setSelected: (id, selected) => set({ runs: update(get().runs, id, { selected }) }),
-
-  setTab: (id, tab) => set({ runs: update(get().runs, id, { tab }) }),
 
   clearWindows: (ids) => {
     const runs = { ...get().runs }
@@ -192,7 +191,7 @@ function cancelRunning(run: WindowRun): void {
 export function submitStatement(id: string, token: number, body: QueryBody): void {
   api
     .submitQueryAsync(body)
-    .then((res) => useRunStore.getState().submitted(id, token, res.statement_id))
+    .then((res) => useRunStore.getState().submitted(id, token, res.statement_id, res.sql_hash ?? null))
     .catch((err: unknown) =>
       useRunStore.getState().submitFailed(id, token, err instanceof Error ? err.message : 'Could not submit the query.'),
     )

@@ -404,6 +404,8 @@ export interface QueryStatus extends QueryResult {
 
 export interface AsyncSubmitResponse {
   statement_id: string
+  /** Hash of the SQL that was submitted, after {{title}} expansion. Stored with the window's result. */
+  sql_hash?: string
 }
 
 export interface CancelResponse {
@@ -435,6 +437,23 @@ export interface CanvasWindow {
   locked?: boolean
   /** Stacking order. Higher is in front. */
   z?: number
+  /** Query windows only. The result the window last ran, kept in the file so a reader sees it without pressing Run. */
+  result?: ResultSnapshot
+  /** Query windows only. The tab shown: the results grid or the chart. Absent means results. */
+  view?: 'results' | 'chart'
+}
+
+/** A window's saved result: what `result` holds in the canvas file (see contracts/canvas.schema.json). */
+export interface ResultSnapshot {
+  columns: QueryColumn[]
+  rows: (string | null)[][]
+  /** How many rows the run returned. `rows` may hold fewer (see `truncated`). */
+  row_count: number
+  truncated: boolean
+  /** When the statement finished, ISO 8601 UTC. */
+  ran_at: string
+  /** Hash of the SQL that ran, after {{title}} expansion. */
+  sql_hash: string
 }
 
 /**
