@@ -1,4 +1,4 @@
-# Databricks Explorer (v0.5)
+# Databricks Explorer (v0.7)
 
 Local Flask app plus a React UI to browse Unity Catalog, draw relationships (lineage, FKs, view deps, and stored ones such as user-drawn edges), and build query canvases. It runs on your computer and listens on 127.0.0.1 only.
 

@@ -24,7 +24,7 @@ Root: `databricks-explore` | files: 276
   - `def main() -> int`
 - `pyproject.toml` (2,164 B)
 - `README.md` (27,185 B)
-  - Databricks Explorer (v0.5)
+  - Databricks Explorer (v0.7)
 - `uv.lock` (250,459 B)
 
 ## .github/workflows/
