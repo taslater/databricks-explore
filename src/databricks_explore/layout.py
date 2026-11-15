@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import io
 import math
+import re
 from typing import Any, Callable, Iterable, Optional
 
 RULES = ("fit_labels", "frames", "overlaps", "lines", "align", "spacing", "grid", "handles", "place_labels")
@@ -1886,11 +1887,232 @@ def wrap_label(text: str, max_width: float, max_lines: int, measure: Callable[[s
     return lines[:max_lines - 1] + [last + "…"]
 
 
-def render_png(canvas: dict, width: int = 1200, highlight: Optional[Iterable[str]] = None) -> bytes:
-    """A schematic picture: boxes by type with labels wrapped inside them, connectors with arrowheads, issue nodes outlined.
+def strip_markdown(text: str) -> str:
+    """A note's Markdown as the plain text a reader takes from it: markers removed, one line per line.
 
-    A label that does not fit the box (as many lines as its height allows) ends in an ellipsis on its last line. Each
-    node's id is a small tag above its box, so it never covers the label (a frame's tag sits at its bottom edge)."""
+    Headings, emphasis, inline code, links (the link text stays), quotes and HTML tags lose their markers, list items
+    start with a dash, table rows become cells joined by a dot, and fences, rules and table separator rows go."""
+    out: list[str] = []
+    fenced = False
+    for raw in str(text).replace("\r\n", "\n").split("\n"):
+        s = raw.rstrip().replace("\t", "  ")
+        if s.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if not fenced:
+            if re.fullmatch(r"\s*[-*_]{3,}\s*", s) or re.fullmatch(r"\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*", s):
+                continue  # a rule, or the separator row of a table
+            s = re.sub(r"^\s{0,3}#{1,6}\s+", "", s)
+            s = re.sub(r"^(\s*)>\s?", r"\1", s)
+            s = re.sub(r"^(\s*)[-*+]\s+", r"\1- ", s)
+            if s.lstrip().startswith("|"):
+                s = "  ·  ".join(cell.strip() for cell in s.strip().strip("|").split("|"))
+            s = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", s)
+            s = re.sub(r"<[^>]+>", "", s)
+            s = re.sub(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1", r"\2", s)
+            s = re.sub(r"(?<![\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])", r"\1", s)
+            s = re.sub(r"(?<![\w_])_(?=\S)(.+?)(?<=\S)_(?![\w_])", r"\1", s)
+            s = re.sub(r"~~(.+?)~~", r"\1", s)
+            s = re.sub(r"`([^`]*)`", r"\1", s)
+        out.append(s)
+    while out and not out[0].strip():
+        out.pop(0)
+    lines: list[str] = []
+    for s in out:  # at most one blank line in a row
+        if s.strip() or (lines and lines[-1].strip()):
+            lines.append(s)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines)
+
+
+def sql_excerpt(sql: str, max_lines: int) -> list[str]:
+    """The first `max_lines` lines of a window's SQL as written (tabs widened, blank lines at the ends dropped). When
+    there are more, the last line ends in an ellipsis."""
+    lines = [l.rstrip().replace("\t", "  ") for l in str(sql).strip("\n").split("\n")]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    max_lines = max(int(max_lines), 1)
+    if len(lines) <= max_lines:
+        return lines
+    return lines[:max_lines - 1] + [lines[max_lines - 1] + " …"]
+
+
+def result_grid(result: dict, max_cols: int, max_rows: int, max_cell: int = 22) -> list[list[str]]:
+    """The first rows of a saved result as a small table of strings: the header row, then up to `max_rows` data rows.
+
+    NULL shows as NULL and a long cell is cut with an ellipsis. When the result has more than `max_cols` columns the
+    last cell of each row is an ellipsis."""
+    def cut(v: Any) -> str:
+        s = "NULL" if v is None else str(v).replace("\n", " ")
+        return s if len(s) <= max_cell else s[:max_cell - 1] + "…"
+    cols = [c.get("name", "") if isinstance(c, dict) else str(c) for c in result.get("columns", [])]
+    keep = max(int(max_cols), 1)
+    more = len(cols) > keep
+    rows = [[cut(n) for n in cols[:keep]] + (["…"] if more else [])]
+    for r in (result.get("rows") or [])[:max(int(max_rows), 0)]:
+        rows.append([cut(v) for v in list(r)[:keep]] + (["…"] if more else []))
+    return rows
+
+
+def chart_mark(spec: Any) -> str:
+    """The mark of a Vega-Lite spec for a label: `bar`, or `bar+rule` for a layered one. `?` when it has none."""
+    if not isinstance(spec, dict):
+        return "?"
+    def name(m):
+        return str(m.get("type")) if isinstance(m, dict) else str(m)
+    if spec.get("mark"):
+        return name(spec["mark"])
+    marks = [name(p["mark"]) for p in spec.get("layer", []) if isinstance(p, dict) and p.get("mark")]
+    return "+".join(dict.fromkeys(marks)) or "?"
+
+
+def chart_label(n: dict) -> str:
+    """What the chart tab of a query window says in the picture: `chart: bar, 12 rows` (`no saved result` without one)."""
+    spec = (n.get("chart") or {}).get("vega_lite")
+    result = n.get("result")
+    rows = f", {len(result.get('rows') or [])} rows" if isinstance(result, dict) else " (no saved result)"
+    return f"chart: {chart_mark(spec)}{rows}"
+
+
+_INK, _MUTED, _RULE = "#111827", "#6b7280", "#9ca3af"
+WINDOW_BAR_H = 36.0  # a window's title bar, in canvas px (the page's collapsed height)
+
+
+def _ellipsize(text: str, max_width: float, measure: Callable[[str], float]) -> str:
+    """`text` cut back to fit `max_width`, with an ellipsis when something was cut."""
+    if measure(text) <= max_width:
+        return text
+    while text and measure(text + "…") > max_width:
+        text = text[:-1]
+    return text.rstrip() + "…"
+
+
+def _draw_lines(d, lines: list[str], x: float, y: float, line_h: float, fill: str, font) -> None:
+    for k, t in enumerate(lines):
+        d.text((x, y + k * line_h), t, fill=fill, font=font)
+
+
+def _draw_title_bar(d, n: dict, a: tuple, c: tuple, scale: float, font) -> float:
+    """A window's title, left-aligned in its bar. Returns where the bar ends (y)."""
+    size = max(8, int(13 * scale))
+    f = font(size)
+    bar = min(WINDOW_BAR_H * scale, c[1] - a[1])
+    if n.get("collapsed") is not True and c[1] - a[1] > bar + 2:  # the body is white, as on the page
+        d.rectangle([(a[0] + 1, a[1] + bar), (c[0] - 1, c[1] - 1)], fill="white")
+    title = _ellipsize(str(n.get("title") or ""), max(c[0] - a[0] - 10, 8), lambda t: d.textlength(t, font=f))
+    d.text((a[0] + 6, a[1] + max((bar - size * 1.25) / 2, 1)), title, fill=_INK, font=f)
+    return a[1] + bar
+
+
+def _draw_result_table(d, grid: list[list[str]], a: tuple, c: tuple, size: int, total: int, font) -> None:
+    """A small table of the first rows of a result inside the box a..c: a gray header row, thin rules between rows."""
+    f = font(size)
+    line_h = size * 1.4
+    avail = c[0] - a[0] - 8
+    widths = [max(d.textlength(row[i], font=f) for row in grid) + 10 for i in range(len(grid[0]))]
+    while len(widths) > 1 and sum(widths) > avail:  # drop trailing columns that do not fit; the last cell becomes an ellipsis
+        widths.pop()
+        grid = [row[:len(widths) - 1] + ["…"] for row in grid]
+        widths = widths[:len(widths) - 1] + [max(d.textlength("…", font=f) + 10, 14)]
+    if sum(widths) > avail:
+        widths = [w * avail / sum(widths) for w in widths]
+    x0, y = a[0] + 4, a[1] + 2
+    fit = max(int((c[1] - y - 2) // line_h), 1)
+    shown = grid[:fit]
+    d.rectangle([(x0, y), (x0 + sum(widths), y + line_h)], fill="#e5e7eb")
+    for r, row in enumerate(shown):
+        x = x0
+        for w, cell in zip(widths, row):
+            d.text((x + 3, y + r * line_h + (line_h - size) / 2 - 1), _ellipsize(cell, w - 5, lambda t: d.textlength(t, font=f)),
+                   fill=_INK if r else "#374151", font=f)
+            x += w
+        if r:
+            d.line([(x0, y + r * line_h), (x0 + sum(widths), y + r * line_h)], fill="#e5e7eb", width=1)
+    if len(grid) > len(shown) or total > len(grid) - 1:  # not every row is drawn: say how many there are
+        note = f"{total} rows"
+        d.text((c[0] - 6 - d.textlength(note, font=f), c[1] - size * 1.4 - 2), note, fill=_MUTED, font=f)
+
+
+def _draw_query(d, n: dict, a: tuple, c: tuple, scale: float, font) -> None:
+    """A query window as a reader sees it: the title, the first lines of the SQL, and either the saved result as a small
+    table or the chart's description, whichever tab the window opens on."""
+    y = _draw_title_bar(d, n, a, c, scale, font)
+    if n.get("collapsed") is True or c[1] - y < 8:
+        return
+    body = c[1] - y
+    split = n.get("editor_split") if isinstance(n.get("editor_split"), (int, float)) and 0 < n["editor_split"] < 100 else 40
+    size = max(7, int(11 * scale))
+    f, line_h = font(size), size * 1.3
+    d.line([(a[0], y), (c[0], y)], fill=_RULE, width=1)
+    sql_h = body * split / 100
+    lines = sql_excerpt(n.get("sql") or "", max(int((sql_h - 4) // line_h), 1))
+    measure = lambda t: d.textlength(t, font=f)  # noqa: E731
+    _draw_lines(d, [_ellipsize(t, c[0] - a[0] - 10, measure) for t in lines], a[0] + 5, y + 3, line_h, "#1f2328", f)
+    y2 = y + sql_h
+    d.line([(a[0], y2), (c[0], y2)], fill=_RULE, width=1)
+    result, has_chart = n.get("result"), isinstance(n.get("chart"), dict)
+    if n.get("view") == "chart" and has_chart:
+        d.text((a[0] + 6, y2 + 4), _ellipsize(chart_label(n), c[0] - a[0] - 12, measure), fill="#6d28d9", font=f)
+    elif isinstance(result, dict) and result.get("columns"):
+        rows_fit = max(int((c[1] - y2 - 6) // (size * 1.4)) - 1, 1)
+        grid = result_grid(result, max(int((c[0] - a[0]) // (size * 6)), 1), rows_fit)
+        _draw_result_table(d, grid, (a[0], y2), c, size, int(result.get("row_count", len(result.get("rows") or []))), font)
+    else:
+        d.text((a[0] + 6, y2 + 4), chart_label(n) if has_chart else "no saved result", fill=_MUTED, font=f)
+
+
+def _draw_note(d, n: dict, a: tuple, c: tuple, scale: float, font) -> None:
+    """A note: its title, then its text as plain lines, as many as fit."""
+    y = _draw_title_bar(d, n, a, c, scale, font)
+    if n.get("collapsed") is True or c[1] - y < 8:
+        return
+    size = max(7, int(12 * scale))
+    f, line_h = font(size), size * 1.3
+    measure = lambda t: d.textlength(t, font=f)  # noqa: E731
+    lines = wrap_label(strip_markdown(n.get("text") or ""), max(c[0] - a[0] - 12, 8), int((c[1] - y - 6) // line_h), measure)
+    _draw_lines(d, lines, a[0] + 6, y + 4, line_h, _INK, f)
+
+
+def _draw_table_card(d, n: dict, a: tuple, c: tuple, scale: float, font) -> None:
+    """A table card: its title, then the full table name."""
+    y = _draw_title_bar(d, n, a, c, scale, font)
+    if n.get("collapsed") is True or c[1] - y < 8:
+        return
+    size = max(7, int(12 * scale))
+    f, line_h = font(size), size * 1.3
+    measure = lambda t: d.textlength(t, font=f)  # noqa: E731
+    lines = wrap_label(str(n.get("table") or ""), max(c[0] - a[0] - 12, 8), int((c[1] - y - 6) // line_h), measure)
+    _draw_lines(d, lines, a[0] + 6, y + 4, line_h, "#166534", f)
+
+
+def _draw_placeholder(d, n: dict, a: tuple, c: tuple, scale: float, font) -> None:
+    """A placeholder table: its name, then its columns (`pk id bigint`) as many as fit."""
+    ph = n.get("placeholder") or {}
+    size = max(8, int(_num(n.get("font_size"), 14.0) * scale))
+    f, line_h = font(size), size * 1.3
+    measure = lambda t: d.textlength(t, font=f)  # noqa: E731
+    d.text((a[0] + 6, a[1] + 3), _ellipsize(str(ph.get("name") or ""), c[0] - a[0] - 12, measure), fill=_INK, font=f)
+    cols = [" ".join(p for p in (col.get("key") or "", col.get("name") or "", col.get("type") or "") if p)
+            for col in ph.get("columns") or [] if isinstance(col, dict)]
+    room = int((c[1] - a[1] - size * 1.6 - 4) // line_h)
+    shown = cols[:max(room, 0)]
+    if len(cols) > len(shown) and shown:
+        shown[-1] = f"… {len(cols) - len(shown) + 1} more columns"
+    d.line([(a[0], a[1] + size * 1.5), (c[0], a[1] + size * 1.5)], fill=_RULE, width=1)
+    _draw_lines(d, [_ellipsize(t, c[0] - a[0] - 12, measure) for t in shown], a[0] + 6, a[1] + size * 1.6, line_h, "#374151", f)
+
+
+def render_png(canvas: dict, width: int = 1200, highlight: Optional[Iterable[str]] = None) -> bytes:
+    """A picture of what a reader sees: boxes by type with their text, connectors with arrowheads and labels, issue nodes outlined.
+
+    Shapes, stickies, text and frames show their label wrapped to the node's width at its `font_size` (an ellipsis on the
+    last line that fits when it does not all fit). A note shows its title and its text with the Markdown markers removed.
+    A query window shows its title, the first lines of its SQL and, below, either the first rows of its saved `result` as
+    a small table or `chart: <mark>, N rows` when it opens on its chart. A table card shows its title and table name, a
+    placeholder its columns. Each node's id is a small tag above its box, so it never covers the content (a frame's tag
+    sits at its bottom edge). Deterministic: the same canvas gives the same bytes. Text scales with the picture, so a
+    large canvas drawn small has small text; ask for a larger `width` to read it."""
     from PIL import Image, ImageDraw, ImageFont
 
     width = int(min(max(width, 200), 4000))
@@ -1910,26 +2132,29 @@ def render_png(canvas: dict, width: int = 1200, highlight: Optional[Iterable[str
     def tx(p):
         return (pad + (p[0] - x1) * scale, pad + (p[1] - y1) * scale)
 
-    def font(size):
-        try:
-            return ImageFont.load_default(size=size)
-        except TypeError:  # Pillow before 10.1 has one fixed size
-            return ImageFont.load_default()
+    fonts: dict[int, Any] = {}
+
+    def font(size):  # a scalable font where Pillow has one (10.1 or later), the one fixed size before that
+        size = max(int(round(size)), 6)
+        if size not in fonts:
+            try:
+                fonts[size] = ImageFont.load_default(size=size)
+            except TypeError:
+                fonts[size] = ImageFont.load_default()
+        return fonts[size]
     img = Image.new("RGB", (width, height), "white")
     d = ImageDraw.Draw(img)
-    # Labels scale with the boxes (the page's 14 px default), so a label the doctor says fits also fits the picture.
-    lab_size = max(9, int(14 * scale))
-    f_lab, f_id = font(lab_size), font(9)
-    line_h = lab_size * 1.25
+    f_id = font(9)
     tags: list[tuple[tuple[float, float], str]] = []
     by = {n["id"]: n for n in nodes}
     for n in sorted(nodes, key=lambda n: (_num(n.get("z"), -1 if n.get("type") == "frame" else 0), 0)):
         b = _box(n)
         a, c = tx((b[0], b[1])), tx((b[2], b[3]))
-        fill, line = _FILLS.get(n.get("type"), ("#ffffff", "#1f2328"))
+        kind = n.get("type")
+        fill, line = _FILLS.get(kind, ("#ffffff", "#1f2328"))
         fill, line = _color(n.get("fill"), fill), _color(n.get("stroke"), line)
-        shape = n.get("shape") if n.get("type") == "shape" else None
-        if n.get("type") == "text":
+        shape = n.get("shape") if kind == "shape" else None
+        if kind == "text":
             pass
         elif shape == "ellipse":
             d.ellipse([a, c], fill=fill, outline=line, width=2)
@@ -1940,24 +2165,36 @@ def render_png(canvas: dict, width: int = 1200, highlight: Optional[Iterable[str
             d.rounded_rectangle([a, c], radius=8, fill=fill, outline=line, width=2)
         else:
             d.rectangle([a, c], fill=fill, outline=line, width=2)
-        text = _text_of(n)
-        if n.get("type") == "placeholder":
-            text = str((n.get("placeholder") or {}).get("name") or "")
-        measure = lambda t: d.textlength(t, font=f_lab)  # noqa: E731
-        if n.get("type") == "frame":  # one line, in the title bar
-            lines, y0 = wrap_label(text, max(c[0] - a[0] - 12, 8), 1, measure), a[1] + 3
-            xs = [a[0] + 6] * len(lines)
-        else:
-            lines = wrap_label(text, max(c[0] - a[0] - 8, 8), int((c[1] - a[1] - 4) // line_h), measure)
-            y0 = (a[1] + c[1]) / 2 - len(lines) * line_h / 2
-            xs = [(a[0] + c[0]) / 2 - measure(t) / 2 for t in lines]
-        for k, t in enumerate(lines):
-            d.text((xs[k], y0 + k * line_h), t, fill="#111827", font=f_lab)
-        tags.append(((a[0] + 1, c[1] - 11) if n.get("type") == "frame" else (a[0] + 1, a[1] - 11), str(n["id"])))
+        if kind == "query":
+            _draw_query(d, n, a, c, scale, font)
+        elif kind == "note":
+            _draw_note(d, n, a, c, scale, font)
+        elif kind == "table":
+            _draw_table_card(d, n, a, c, scale, font)
+        elif kind == "chart":
+            y = _draw_title_bar(d, n, a, c, scale, font)
+            d.text((a[0] + 6, y + 4), chart_label(n), fill="#6d28d9", font=font(max(7, int(12 * scale))))
+        elif kind == "placeholder":
+            _draw_placeholder(d, n, a, c, scale, font)
+        else:  # shape, sticky, text and frame: the label, at the node's font size, wrapped to its width
+            lab_size = max(8, _num(n.get("font_size"), 16.0 if kind == "text" else 14.0) * scale)
+            f_lab, line_h = font(lab_size), lab_size * 1.25
+            measure = lambda t, f=f_lab: d.textlength(t, font=f)  # noqa: E731
+            text = _text_of(n)
+            if kind == "frame":  # one line, in the title bar
+                lines, y0 = wrap_label(text, max(c[0] - a[0] - 12, 8), 1, measure), a[1] + 3
+                xs = [a[0] + 6] * len(lines)
+            else:
+                lines = wrap_label(text, max(c[0] - a[0] - 8, 8), max(int((c[1] - a[1] - 4) // line_h), 1), measure)
+                y0 = (a[1] + c[1]) / 2 - len(lines) * line_h / 2
+                xs = [(a[0] + c[0]) / 2 - measure(t) / 2 for t in lines]
+            for k, t in enumerate(lines):
+                d.text((xs[k], y0 + k * line_h), t, fill=_INK, font=f_lab)
+        tags.append(((a[0] + 1, c[1] - 11) if kind == "frame" else (a[0] + 1, a[1] - 11), str(n["id"])))
         if n["id"] in hi:
             d.rectangle([(a[0] - 3, a[1] - 3), (c[0] + 3, c[1] + 3)], outline="#dc2626", width=3)
     for tag_pos, tag in tags:  # after every box, so a neighbor's fill never hides a tag
-        d.text(tag_pos, tag, fill="#6b7280", font=f_id)
+        d.text(tag_pos, tag, fill=_MUTED, font=f_id)
     by_edge = {e["id"]: e for e in _edges(canvas)}
     for e, pts in _polylines(canvas):
         col = _color(e.get("color"), "#4b5563")
@@ -1971,7 +2208,7 @@ def render_png(canvas: dict, width: int = 1200, highlight: Optional[Iterable[str
     f_edge = font(max(8, int(12 * scale)))
     for eid, (bx1, by1, bx2, by2) in edge_label_boxes(canvas).items():
         a, c = tx((bx1, by1)), tx((bx2, by2))
-        d.rectangle([a, c], fill="white", outline="#9ca3af")
+        d.rectangle([a, c], fill="white", outline=_RULE)
         d.multiline_text(((a[0] + c[0]) / 2, (a[1] + c[1]) / 2), str(by_edge[eid].get("label")), fill="#374151", font=f_edge,
                          anchor="mm", align="center")
     buf = io.BytesIO()

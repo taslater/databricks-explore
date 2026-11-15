@@ -145,13 +145,8 @@ def _results_lines(canvas: dict) -> list[str]:
             same = False
         rows = f"{len(r['rows'])} of {r['row_count']} rows" if len(r["rows"]) < r["row_count"] else f"{r['row_count']} rows"
         out.append(f"  {w['id']} {w['title']!r}: {rows}, ran {r['ran_at']}, " + ("matches its SQL" if same else "SQL differs from what ran (stale)")
-                   + (f", chart {_mark(w['chart']['vega_lite'])}" if w.get("chart") else "") + (f", opens on {w['view']}" if w.get("view") else ""))
+                   + (f", chart {layout.chart_mark(w['chart']['vega_lite'])}" if w.get("chart") else "") + (f", opens on {w['view']}" if w.get("view") else ""))
     return (["Saved results:", *out]) if out else []
-
-
-def _mark(spec: dict) -> str:
-    mark = spec.get("mark") or next((p.get("mark") for p in spec.get("layer", []) if isinstance(p, dict) and p.get("mark")), "?")
-    return str(mark.get("type") if isinstance(mark, dict) else mark)
 
 
 def _trim_results(canvas: dict) -> dict:
@@ -740,7 +735,7 @@ def run_all_windows(ctx, args):
     return text("\n".join([*ordered, tail]))
 
 
-@tool("render_canvas", "A schematic PNG of the canvas (boxes by type with ids and labels, connectors with arrows) for judging layout. highlight outlines node ids, or \"issues\".",
+@tool("render_canvas", "A PNG of the canvas as a reader sees it: shapes, stickies, text and frames with their labels (wrapped to the node, at its font_size), notes with their text (Markdown markers removed), query windows with the title, the first lines of the SQL and the first rows of the saved result as a small table (or chart: <mark>, N rows when the window opens on its chart), table cards with the table name, placeholder tables with their columns, and connectors with arrows and labels. Each node has its id as a small tag. Text scales with the picture, so use a larger width to read a big canvas. highlight outlines node ids, or \"issues\".",
       obj({"name": NAME, "width": integer(200, 2000), "highlight": {"anyOf": [strings(), S]}}, ("name",)))
 def render_canvas(ctx, args):
     canvas = _load(args["name"])
