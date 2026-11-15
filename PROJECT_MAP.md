@@ -23,7 +23,7 @@ Root: `databricks-explore` | files: 259
   - `def render() -> str`
   - `def main() -> int`
 - `pyproject.toml` (2,164 B)
-- `README.md` (24,684 B)
+- `README.md` (24,750 B)
   - Databricks Explorer (v0.5)
 - `uv.lock` (250,459 B)
 
@@ -39,7 +39,7 @@ Root: `databricks-explore` | files: 259
 - `contracts/canvas.schema.json` (15,080 B)
   - Explorer canvas
   - keys: $schema, title, description, type, required, properties, $defs, allOf
-- `contracts/mcp.md` (19,453 B)
+- `contracts/mcp.md` (21,856 B)
   - MCP server contract
 
 ## scripts/
@@ -213,7 +213,7 @@ Root: `databricks-explore` | files: 259
   - `def candidates(store, cid, metadata)`: Cached tables and columns whose name or comment mentions the concept's name or a synonym.
   - `def tag_plan(warehouse_id=None)`: The read-only SQL a tag suggestion run executes, for a confirm dialog. Nothing runs.
   - `def tag_run(store, result)`: Turn the rows of TAG_SQL into draft concepts, one per tag key and value, linked with `describes`.
-- `src/databricks_explore/dbx.py` (27,759 B)
+- `src/databricks_explore/dbx.py` (31,614 B)
   - Databricks access + local JSON cache. Every remote call is logged to calls.jsonl in the data folder's logs/.
   - `def default_data_dir(demo: bool=False) -> Path`: The per-user data folder (never inside the installed package). Demo mode gets a demo/ folder under it.
   - `def now()`
@@ -233,7 +233,7 @@ Root: `databricks-explore` | files: 259
   - `def load_diagram(name)`
   - `def api_get(explorer, path, query=None)`: GET a workspace REST path through the SDK's api_client, logged like every other call. Returns the parsed JSON.
   - `def table_metric_info(explorer, full_name)`: One tables.get call for a metric view: {"definition": the `view_definition` YAML or None, "kinds": {column:
-- `src/databricks_explore/demo.py` (35,501 B)
+- `src/databricks_explore/demo.py` (36,139 B)
   - Demo mode: a fake Databricks workspace with invented data, so every real route works offline.
   - `class DemoError(Exception)`: A statement the fake warehouse rejects (surfaces as a FAILED statement).
   - `def table_rows(full_name, n)`: n invented rows of a demo table as (columns, rows). Deterministic per table.
@@ -402,12 +402,13 @@ Root: `databricks-explore` | files: 259
   - `def doctor(ctx, args)`
   - `def render_canvas(ctx, args)`
   - `def undo_canvas(ctx, args)`
-- `src/databricks_explore/mcp_server/tools_data.py` (24,109 B)
+- `src/databricks_explore/mcp_server/tools_data.py` (29,116 B)
   - The catalog, relationship, mining, concept and SQL tools. Text by default, JSON on request, never a workspace write.
   - `def edge_line(e: dict) -> str`: One edge as one line: id, kind, status, the two ends, columns, evidence and note.
   - `def status(ctx, args)`
   - `def search_tables(ctx, args)`
   - `def describe_table(ctx, args)`
+  - `def find_by_tag(ctx, args)`
   - `def list_schemas(ctx, args)`
   - `def list_tables(ctx, args)`
   - `def get_relationships(ctx, args)`
@@ -424,7 +425,7 @@ Root: `databricks-explore` | files: 259
   - `def link_concept(ctx, args)`
   - `def unlink_concept(ctx, args)`
   - `def find_candidates(ctx, args)`
-  - `def tsv(result: dict, max_rows: int) -> str`: A result as column types, a TSV header and TSV rows, cut by row count and by size, with a closing line that says so.
+  - `def tsv(result: dict, max_rows: int, max_cell_chars: int=CELL_CHARS) -> str`: A result as column types, a TSV header and TSV rows, cut by row count and by size, with a closing line that says so.
   - `def run_sql(ctx, args)`
 
 ## tests/
@@ -917,13 +918,14 @@ Root: `databricks-explore` | files: 259
   - `def test_place_right_of_top_aligns_by_default_and_takes_align(agent)`
   - `def test_update_nodes_accepts_nodes_as_an_alias_for_updates(agent)`
   - `def test_get_canvas_format_text_is_describe(agent)`
-- `tests/test_mcp_sql.py` (5,501 B)
+- `tests/test_mcp_sql.py` (6,457 B)
   - run_sql: the read-only gate (sqlglot), the row and time caps, cancellation, and the TSV output.
   - `def test_these_are_accepted(sql)`
   - `def test_these_are_rejected(sql, why)`
   - `def test_the_statement_comes_back_without_its_trailing_semicolon()`
   - `def test_run_sql_returns_types_and_tsv(agent)`
   - `def test_run_sql_cuts_cells_and_total_size(agent, monkeypatch)`
+  - `def test_max_cell_chars_changes_the_cut_and_has_bounds(agent)`
   - `def test_run_sql_default_cap_is_100_and_the_bound_is_1000(agent)`
   - `def test_run_sql_rejects_what_the_gate_rejects_and_never_reaches_the_warehouse(agent, connected, tmp_path)`
   - `def test_a_failing_statement_reports_the_warehouse_error(agent)`
@@ -931,13 +933,20 @@ Root: `databricks-explore` | files: 259
   - `def test_run_sql_needs_a_connection(offline_agent)`
   - `def test_run_sql_needs_a_warehouse(agent, connected)`
   - `def test_describe_and_show_run(agent)`
-- `tests/test_mcp_tools.py` (8,756 B)
+- `tests/test_mcp_tools.py` (13,100 B)
   - The catalog, relationship, mining and concept tools, against the demo workspace.
   - `def test_status_when_connected(agent)`
   - `def test_status_before_connecting_says_to_connect_in_the_app(offline_agent)`
   - `def test_catalog_tools_need_the_app_connected(offline_agent)`
   - `def test_search_tables_uses_the_warehouse_by_default_and_the_cache_on_request(agent)`
   - `def test_describe_table_is_compact_and_has_json_on_request(agent)`
+  - `def test_describe_table_lists_the_tags_of_the_table_and_its_columns(agent)`
+  - `def test_describe_table_reads_tags_once_then_from_the_cache_until_refresh(agent, connected, tmp_path)`
+  - `def test_describe_table_without_a_warehouse_says_to_select_one(agent, connected)`
+  - `def test_describe_table_cuts_a_definition_and_says_so(agent)`
+  - `def test_find_by_tag_lists_tables_and_columns(agent, connected)`
+  - `def test_find_by_tag_needs_a_connection(offline_agent)`
+  - `def test_list_tables_marks_certification_from_the_cache_and_says_when_it_is_missing(agent, connected)`
   - `def test_list_schemas_and_tables(agent)`
   - `def test_get_relationships_lists_derived_edges_and_json_on_request(agent)`
   - `def test_add_relationship_and_set_its_status_and_note(agent)`
@@ -948,7 +957,7 @@ Root: `databricks-explore` | files: 259
   - `def test_usage_before_any_run(agent)`
   - `def test_concepts_create_update_link_find_and_unlink(agent)`
   - `def test_concepts_can_link_to_other_concepts(agent)`
-- `tests/test_mcp_transport.py` (8,858 B)
+- `tests/test_mcp_transport.py` (8,873 B)
   - The /mcp endpoint: authentication, local-only checks, sessions, JSON-RPC errors, and the token file.
   - `def test_no_token_is_401_and_says_how(env)`
   - `def test_a_non_local_origin_is_refused_even_with_the_token(env)`

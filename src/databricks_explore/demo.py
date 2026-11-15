@@ -275,7 +275,15 @@ def result_for(statement, params=None):
     if re.search(r"\binformation_schema\.(catalog|schema|table|column)_tags\b", low):
         cols = [{"name": k, "type": "STRING"} for k in
                 ("scope", "catalog_name", "schema_name", "table_name", "column_name", "tag_name", "tag_value")]
-        return cols, [list(t) for t in TAGS][: cap or len(TAGS)]
+        rows = [list(t) for t in TAGS]
+        asked = {k: str(v) for k, v in (params or {}).items() if k in ("sch", "tbl", "tag", "val", "cat")}
+        if asked:  # a lookup by schema and table, or by tag: only table and column tags, narrowed by what was asked
+            home = re.search(r"`?([\w-]+)`?\.information_schema\.", low)
+            if home and home.group(1) != "system":
+                asked.setdefault("cat", home.group(1))
+            index = {"cat": 1, "sch": 2, "tbl": 3, "tag": 5, "val": 6}
+            rows = [r for r in rows if r[0] in ("table", "column") and all((r[index[k]] or "").lower() == v.lower() for k, v in asked.items())]
+        return cols, rows[: cap or len(rows)]
     if "information_schema.tables" in low:
         q = str((params or {}).get("q", "")).lower()
         hits = [(f.split(".")[0], f.split(".")[1], f.split(".")[2], "VIEW" if v[0] == "VIEW" else "BASE TABLE")

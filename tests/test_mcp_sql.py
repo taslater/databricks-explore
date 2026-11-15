@@ -86,6 +86,19 @@ def test_run_sql_cuts_cells_and_total_size(agent, monkeypatch):
     assert tools_data._cell("a\tb\nc") == "a b c" and tools_data._cell(None) == "NULL"
 
 
+def test_max_cell_chars_changes_the_cut_and_has_bounds(agent):
+    assert tools_data._cell("x" * 500, 300) == "x" * 300 + "..." and tools_data._cell("x" * 500, 500) == "x" * 500
+    result = {"columns": [{"name": "blob", "type": "STRING"}], "rows": [["y" * 600]], "row_count": 1, "truncated": False, "ms": 1}
+    assert tools_data.tsv(result, 100).splitlines()[2] == "y" * 200 + "..."
+    assert tools_data.tsv(result, 100, 500).splitlines()[2] == "y" * 500 + "..."
+    assert tools_data.tsv(result, 100, 4000).splitlines()[2] == "y" * 600
+    assert "at least 50" in agent.fails("run_sql", statement="SELECT 1", max_cell_chars=49)
+    assert "at most 4000" in agent.fails("run_sql", statement="SELECT 1", max_cell_chars=4001)
+    agent.ok("run_sql", statement="SELECT 1", max_cell_chars=50)
+    tools = agent.rpc("tools/list").get_json()["result"]["tools"]
+    assert "MEASURE(`name`)" in next(t for t in tools if t["name"] == "run_sql")["description"]
+
+
 def test_run_sql_default_cap_is_100_and_the_bound_is_1000(agent):
     out = agent.ok("run_sql", statement="SELECT * FROM demo.sales.orders")
     assert "100 row(s) shown" in out
