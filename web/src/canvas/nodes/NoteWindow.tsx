@@ -1,14 +1,16 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { SideHandles } from '../../sketch/nodes/SideHandles'
 import { NodeResizer, type Node, type NodeProps } from '@xyflow/react'
 import Markdown, { type Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { CanvasWindow } from '../../api/types'
-import { titleError, useCanvasStore } from '../../store/canvasStore'
+import { useCanvasStore } from '../../store/canvasStore'
+import { WindowTitle } from './WindowTitle'
 
 export type NoteFlowNode = Node<Record<string, unknown>, 'note'>
 
 /**
- * Markdown note. Reads its window from the canvas store by id. The body renders as
+ * Markdown note (GitHub-flavored, so tables work). Reads its window from the canvas store by id. The body renders as
  * Markdown, and Edit switches it to a textarea. Raw HTML in the text is not rendered
  * (react-markdown escapes it by default).
  */
@@ -23,10 +25,29 @@ function NoteBody({ win, selected }: { win: CanvasWindow; selected: boolean }) {
   const collapsed = win.collapsed ?? false
   const text = win.text ?? ''
   const [editing, setEditing] = useState(false)
+  const editor = useRef<HTMLTextAreaElement>(null)
   const setText = useCanvasStore((s) => s.setText)
   const setCollapsed = useCanvasStore((s) => s.setCollapsed)
   const removeWindow = useCanvasStore((s) => s.removeWindow)
   const resizeWindow = useCanvasStore((s) => s.resizeWindow)
+
+  // Focus the textarea with the cursor at the end as soon as it mounts. autoFocus alone loses to the focus
+  // the node takes on click, and then the typing goes to the canvas shortcuts. Done again on the next frame,
+  // after the click that opened it has finished.
+  useEffect(() => {
+    if (!editing) return
+    function focusEnd() {
+      const el = editor.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(el.value.length, el.value.length)
+    }
+    focusEnd()
+    const raf = requestAnimationFrame(() => {
+      if (editor.current && document.activeElement !== editor.current) focusEnd()
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [editing])
 
   return (
     <>
@@ -72,11 +93,11 @@ function NoteBody({ win, selected }: { win: CanvasWindow; selected: boolean }) {
           <div className="note-body nodrag nowheel">
             {editing ? (
               <textarea
+                ref={editor}
                 className="note-editor"
                 value={text}
                 aria-label="Note text (Markdown)"
                 placeholder="Write Markdown here"
-                autoFocus
                 onChange={(e) => setText(id, e.target.value)}
               />
             ) : (
@@ -92,6 +113,9 @@ function NoteBody({ win, selected }: { win: CanvasWindow; selected: boolean }) {
   )
 }
 
+// GitHub-flavored Markdown: tables, strikethrough, task lists and bare links.
+const remarkPlugins = [remarkGfm]
+
 const markdownComponents: Components = {
   // Links open in a new tab so the canvas stays put.
   a: ({ href, children }) => (
@@ -103,38 +127,5 @@ const markdownComponents: Components = {
 
 function NotePreview({ text }: { text: string }): ReactNode {
   if (text.trim() === '') return <p className="hint">Empty note. Use Edit to write Markdown.</p>
-  return <Markdown components={markdownComponents}>{text}</Markdown>
-}
-
-/**
- * Inline-editable title for note and table windows. Same rules as the query window title:
- * unique on the canvas, no braces, committed on blur or Enter, reverted on Escape.
- */
-export function WindowTitle({ id, title }: { id: string; title: string }) {
-  const windows = useCanvasStore((s) => s.windows)
-  const renameWindow = useCanvasStore((s) => s.renameWindow)
-  const [draft, setDraft] = useState(title)
-
-  // Follow the store when the title changes from somewhere else (for example a canvas load).
-  useEffect(() => setDraft(title), [title])
-
-  const error = titleError(draft.trim(), windows, id)
-
-  return (
-    <div className="qw-title">
-      <input
-        className="qw-title-input nodrag"
-        value={draft}
-        aria-label="Window title"
-        aria-invalid={error !== null}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => renameWindow(id, draft)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') e.currentTarget.blur()
-          if (e.key === 'Escape') setDraft(title)
-        }}
-      />
-      {error !== null && <div className="error qw-error">{error}</div>}
-    </div>
-  )
+  return <Markdown remarkPlugins={remarkPlugins} components={markdownComponents}>{text}</Markdown>
 }

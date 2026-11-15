@@ -589,6 +589,12 @@ tr.stale td {
   font-weight: 600;
 }
 
+/* Until a double-click makes it editable the title is part of the drag handle. */
+.qw-title-input[readonly] {
+  cursor: grab;
+  text-overflow: ellipsis;
+}
+
 .qw-title-input:hover,
 .qw-title-input:focus {
   border-color: var(--border);
@@ -679,12 +685,25 @@ tr.stale td {
   min-height: 0;
 }
 
+/* @uiw/react-codemirror wraps the editor in a div (class qw-cm) that has no height of its own, so the editor
+   shrank to its text: one line was a 28px strip at the top of the pane, the blank space below it was not the
+   editor (a click there focused nothing), and a classic horizontal scrollbar covered half of that one line.
+   The wrapper fills the pane and the editor fills the wrapper. */
+.qw-editor .qw-cm {
+  height: 100%;
+}
+
 .qw-editor .cm-editor {
   height: 100%;
 }
 
 .qw-editor .cm-scroller {
   overflow: auto;
+}
+
+/* The text area reaches the bottom of the pane, so a click below the last line still lands in the editor. */
+.qw-editor .cm-content {
+  min-height: 100%;
 }
 
 .qw-results {

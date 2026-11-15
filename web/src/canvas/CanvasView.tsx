@@ -21,6 +21,7 @@ import { labelCenters } from '../sketch/labels'
 import { GRID, effectiveZ } from '../sketch/model'
 import { useSketchStore } from '../sketch/sketchStore'
 import { useSketchKeys } from '../sketch/useSketchKeys'
+import { isRemovableWindow } from './removable'
 import { sketchFlowProps, useSketchInteractions } from '../sketch/useSketchInteractions'
 import { EditBar } from '../sketch/panels/EditBar'
 import { Palette } from '../sketch/panels/Palette'
@@ -60,8 +61,9 @@ const canvasHost: SketchHost = {
       locked: w.locked,
       title: w.title,
       table: w.table,
-      // A table card can be fetched again, so Delete may remove it. Query windows and notes hold SQL and text.
-      removable: w.type === 'table',
+      // Delete may remove a table card (it can be fetched again) and an empty note or query window (it holds
+      // nothing). A window with text or SQL keeps its X button.
+      removable: isRemovableWindow(w),
     })),
   patch: (patches) => useCanvasStore.getState().patchGeometry(patches),
   remove: (ids) => useCanvasStore.getState().removeWindows(ids),
