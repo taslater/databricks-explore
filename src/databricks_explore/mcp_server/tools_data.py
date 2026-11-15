@@ -512,16 +512,29 @@ def tsv(result: dict, max_rows: int, max_cell_chars: int = CELL_CHARS) -> str:
            "timeout_s": integer(1, 300, "default 60"),
            "max_cell_chars": integer(50, 4000, "cut each cell after this many characters (default 200)")}, ("statement",)))
 def run_sql(ctx, args):
+    max_rows = args.get("max_rows", 100)
+    sid = submit_read_only(ctx, args["statement"], max_rows)
+    st = await_statement(ctx.need_explorer(), sid, time.time() + args.get("timeout_s", 60), args.get("timeout_s", 60))
+    return text(tsv(st, max_rows, args.get("max_cell_chars", CELL_CHARS)))
+
+
+def submit_read_only(ctx, statement: str, max_rows: int) -> str:
+    """The read-only gate (sqlguard) and the submit, shared by run_sql and the canvas tools that run a window. Returns the
+    statement id. Raises ToolError: `Rejected: ...` from the gate, not connected, or no warehouse selected."""
     e = ctx.need_explorer()
     try:
-        sql = check_read_only(args["statement"])
+        sql = check_read_only(statement)
     except NotReadOnly as err:
         raise ToolError(f"Rejected: {err}") from err
     if not e.warehouse_id:
         raise ToolError("No SQL warehouse is selected: pick one in the app first.")
-    max_rows, timeout = args.get("max_rows", 100), args.get("timeout_s", 60)
-    sid = e.query_async(sql, None, max_rows)
-    deadline = time.time() + timeout
+    return e.query_async(sql, None, max_rows)
+
+
+def await_statement(e, sid: str, deadline: float, timeout: int) -> dict:
+    """Poll a submitted statement until it finishes and return its result (the shape of GET /api/query/<id>).
+
+    A statement still running at `deadline` is cancelled. Raises ToolError for a timeout, or a statement that did not succeed."""
     while True:
         st = e.query_status(sid)
         if st["state"] not in ("PENDING", "RUNNING"):
@@ -532,4 +545,4 @@ def run_sql(ctx, args):
         time.sleep(min(POLL_SECONDS, max(0.0, deadline - time.time())))
     if st["state"] != "SUCCEEDED":
         raise ToolError(f"Statement {st['state'].lower()}" + (f": {st['error']}" if st.get("error") else ""))
-    return text(tsv(st, max_rows, args.get("max_cell_chars", CELL_CHARS)))
+    return st

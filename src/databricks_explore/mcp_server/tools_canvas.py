@@ -1,15 +1,18 @@
-"""The canvas tools: read, add and change nodes and connectors, lay them out, render. Every write is saved and undoable."""
+"""The canvas tools: read, add and change nodes and connectors, run windows, lay them out, render. Every write is saved and undoable."""
 import base64
 import copy
 import json
 import re
+import time
 import uuid
 
 from .. import canvases
 from .. import dbx
 from .. import layout
 from .. import relationships
+from .. import sqltools
 
+from . import tools_data
 from .tooling import B, FORMAT, S, ToolError, integer, obj, strings, text, tool
 
 EXCERPT_LINES = 14
@@ -22,6 +25,16 @@ SIZES = {"rect": (140, 80), "rounded": (140, 80), "ellipse": (140, 80), "diamond
 STYLE = {"shape": {"fill": "#ffffff", "stroke": "#1f2328", "font_size": 14}, "text": {"fill": "none", "stroke": "none", "font_size": 16},
          "sticky": {"fill": "#fef9c3", "stroke": "#ca8a04", "font_size": 14}, "frame": {"fill": "#e5e7eb", "stroke": "#6b7280", "font_size": 14},
          "placeholder": {"fill": "#ffffff", "stroke": "#2563eb", "font_size": 14}}
+BAR_EXAMPLE = '{"mark":"bar","encoding":{"x":{"field":"category","type":"nominal"},"y":{"field":"rate","type":"quantitative"}}}'
+RANGE_EXAMPLE = ('{"layer":[{"mark":"bar","encoding":{"x":{"field":"low","type":"quantitative"},"x2":{"field":"high"}}},'
+                 '{"mark":"rule","encoding":{"x":{"field":"best","type":"quantitative"}}}]}')
+CHART = {"type": ["object", "null"],
+         "description": ("query windows: a Vega-Lite v5 spec (an object with mark or layer; null removes the chart). Its data is the window's "
+                         "result, so field names are the result's column names; do not give data. Bar chart: " + BAR_EXAMPLE
+                         + ". A range with a best estimate (one row with low, high and best columns): " + RANGE_EXAMPLE
+                         + ", which draws the bar from low to high (x and x2) and a rule at best. Draw ranges and uncertainty this way, "
+                           "not from rectangles. The chart shows once the window has a result (run_window); view chart opens the window on it")}
+VIEW = {"type": "string", "enum": ["results", "chart"], "description": "query windows: the tab the window opens on (needs a chart for chart)"}
 AUTO_TIDY = {"type": "boolean", "description": "default true: after the edit, push apart any overlapping nodes among those just touched"}
 NAME = {"type": "string", "minLength": 1, "description": "canvas name (letters, digits, _ . -)"}
 POINT = {"type": "object", "required": ["x", "y"], "additionalProperties": False, "properties": {"x": {"type": "number"}, "y": {"type": "number"}}}
@@ -43,7 +56,7 @@ NODE = {"type": "object", "required": ["type"], "additionalProperties": False,
                        "title": {"type": "string", "description": "query, note and table windows: unique, used as {{title}} in SQL"},
                        "shape": {"type": "string", "enum": list(SHAPES)}, "sql": S,
                        "text": {"type": "string", "description": "note: the note body. shape, text, sticky and frame: an alias of label (label wins if both are given)"},
-                       "table": S,
+                       "table": S, "chart": CHART, "view": VIEW,
                        "name": {"type": "string", "description": "placeholder: the table name"}, "columns": {"type": "array", "items": COLUMN},
                        "w": {"type": "number", "exclusiveMinimum": 0, "description": "omit it and a sketch node is sized to fit its label"},
                        "h": {"type": "number", "exclusiveMinimum": 0},
@@ -73,6 +86,12 @@ def _report(canvas: dict, headline: str, revision: int) -> str:
 
 def _edit(name: str, mutate, auto_tidy: bool = True) -> str:
     """Load, mutate (returns headline and the ids it touched), tidy overlaps among those, validate, save with a snapshot."""
+    canvas, headline, rev = _commit(name, mutate, auto_tidy)
+    return _report(canvas, headline, rev)
+
+
+def _commit(name: str, mutate, auto_tidy: bool = True) -> tuple[dict, str, int]:
+    """The write behind _edit: returns the saved canvas, the headline (with what auto tidy moved) and the new revision."""
     with canvases.LOCK:
         canvas = copy.deepcopy(_load(name))
         canvas["version"] = 2  # the sketch node types and connectors need version 2; version 1 content stays valid
@@ -83,7 +102,7 @@ def _edit(name: str, mutate, auto_tidy: bool = True) -> str:
             canvas, changes = layout.tidy(canvas, ids=touched, rules=["overlaps"])
             moved = sum(1 for c in changes if c["kind"] == "node")
         _, rev = canvases.write_canvas(canvas, by="agent", snapshot=True)
-    return _report(canvas, headline + (f"; moved {moved} to clear overlaps" if moved else ""), rev)
+    return canvas, headline + (f"; moved {moved} to clear overlaps" if moved else ""), rev
 
 
 def _ids(canvas: dict) -> set:
@@ -109,14 +128,51 @@ def list_canvases(ctx, args):
     return text("\n".join(lines))
 
 
-@tool("get_canvas", "Read a canvas. describe (default) is a compact text summary: frames, a map, connectors, issues. json is the whole file.",
+RESULT_ROWS_IN_JSON = 5  # get_canvas json keeps this many rows of each saved result unless full_results is given
+
+
+def _results_lines(canvas: dict) -> list[str]:
+    """One line per query window that holds a saved result: its size, when it ran, whether the SQL still matches, its chart."""
+    windows = {w["title"]: w.get("sql", "") for w in canvas["windows"] if w.get("type") == "query"}
+    out = []
+    for w in canvas["windows"]:
+        r = w.get("result")
+        if w.get("type") != "query" or not r:
+            continue
+        try:
+            same = sqltools.sql_hash(sqltools.expand_refs(w.get("sql", ""), windows)) == r["sql_hash"]
+        except ValueError:
+            same = False
+        rows = f"{len(r['rows'])} of {r['row_count']} rows" if len(r["rows"]) < r["row_count"] else f"{r['row_count']} rows"
+        out.append(f"  {w['id']} {w['title']!r}: {rows}, ran {r['ran_at']}, " + ("matches its SQL" if same else "SQL differs from what ran (stale)")
+                   + (f", chart {_mark(w['chart']['vega_lite'])}" if w.get("chart") else "") + (f", opens on {w['view']}" if w.get("view") else ""))
+    return (["Saved results:", *out]) if out else []
+
+
+def _mark(spec: dict) -> str:
+    mark = spec.get("mark") or next((p.get("mark") for p in spec.get("layer", []) if isinstance(p, dict) and p.get("mark")), "?")
+    return str(mark.get("type") if isinstance(mark, dict) else mark)
+
+
+def _trim_results(canvas: dict) -> dict:
+    """The canvas with each saved result cut to its first rows, so reading the file does not flood the agent's context."""
+    c = copy.deepcopy(canvas)
+    for w in c["windows"]:
+        r = w.get("result")
+        if r and len(r["rows"]) > RESULT_ROWS_IN_JSON:
+            r["rows_omitted"] = len(r["rows"]) - RESULT_ROWS_IN_JSON
+            r["rows"] = r["rows"][:RESULT_ROWS_IN_JSON]
+    return c
+
+
+@tool("get_canvas", "Read a canvas. describe (default) is a compact text summary: frames, a map, connectors, issues, and each query window's saved result. json is the whole file, with each saved result cut to its first 5 rows unless full_results is true.",
       obj({"name": NAME, "format": {"type": "string", "enum": ["describe", "json", "text"], "description": "describe (default; text is an alias, as in doctor), or json"},
-           "max_lines": integer(10, 300)}, ("name",)))
+           "max_lines": integer(10, 300), "full_results": {**B, "description": "json: keep every saved row (default false)"}}, ("name",)))
 def get_canvas(ctx, args):
     c = _load(args["name"])
     if args.get("format") == "json":
-        return text(json.dumps(c, separators=(",", ":")))
-    return text(layout.describe(c, max_lines=args.get("max_lines", 60)))
+        return text(json.dumps(c if args.get("full_results") else _trim_results(c), separators=(",", ":")))
+    return text("\n".join([layout.describe(c, max_lines=args.get("max_lines", 60)), *_results_lines(c)]))
 
 
 # ---------------------------------------------------------------- writing
@@ -173,6 +229,7 @@ def build_node(canvas: dict, spec: dict) -> dict:
         if "sql" not in spec:
             raise ToolError("a query node needs sql")
         node.update(title=_title(canvas, spec.get("title") or "query"), sql=spec["sql"], collapsed=False, editor_split=30)
+        _set_chart_and_view(node, spec)
     elif kind == "note":
         node.update(title=_title(canvas, spec.get("title") or "note"), text=spec.get("text", ""), collapsed=False)
     else:  # table
@@ -180,6 +237,8 @@ def build_node(canvas: dict, spec: dict) -> dict:
             raise ToolError("a table node needs table (catalog.schema.table)")
         base = re.sub(r"[{}]", "", spec["table"].split(".")[-1]).strip() or "table"
         node.update(title=_title(canvas, spec.get("title") or base), table=spec["table"], collapsed=False)
+    if kind != "query" and ("chart" in spec or "view" in spec):
+        raise ToolError("chart and view belong to query windows")
     if kind in SKETCH and "w" not in spec:  # no width asked for: size the node to its label (wrapping past MAX_FIT_W)
         node["size"]["w"], node["size"]["h"] = layout.fit_size(node)
     return node
@@ -234,26 +293,26 @@ def add_nodes_to(canvas: dict, specs: list) -> list[str]:
 def add_nodes(ctx, args):
     def mutate(canvas):
         ids = add_nodes_to(canvas, args["nodes"])
-        return f"added {', '.join(ids)}", ids
+        return f"added {', '.join(ids)}" + _chart_notes(canvas, ids), ids
     return text(_edit(args["name"], mutate, args.get("auto_tidy", True)))
 
 
 @tool("add_query_window", "Add a SQL query window to a canvas (it is not run). Use {{title}} in another window's SQL to reference it. Prefer structural placement.",
-      obj({"name": NAME, "sql": S, "title": S, "place": PLACE, "at": POINT, "w": {"type": "number", "exclusiveMinimum": 0},
+      obj({"name": NAME, "sql": S, "title": S, "chart": CHART, "view": VIEW, "place": PLACE, "at": POINT, "w": {"type": "number", "exclusiveMinimum": 0},
            "h": {"type": "number", "exclusiveMinimum": 0}, "auto_tidy": AUTO_TIDY}, ("name", "sql")), read_only=False)
 def add_query_window(ctx, args):
     spec = {"type": "query", **{k: v for k, v in args.items() if k not in ("name", "auto_tidy")}}
     def mutate(canvas):
         ids = add_nodes_to(canvas, [spec])
-        return f"added query window {ids[0]}", ids
+        return f"added query window {ids[0]}" + _chart_notes(canvas, ids), ids
     return text(_edit(args["name"], mutate, args.get("auto_tidy", True)))
 
 
 UPDATE_FIELDS = {"label": {"type": "string", "description": "shape, text, sticky and frame: the text shown on the node"}, "title": S, "sql": S,
                  "text": {"type": "string", "description": "note: the note body. shape, text, sticky and frame: an alias of label (label wins if both are given)"},
                  "table": S, "shape": {"type": "string", "enum": list(SHAPES)},
-                 "collapsed": B, "z": {"type": "number"}, "w": {"type": "number", "exclusiveMinimum": 0},
-                 "h": {"type": "number", "exclusiveMinimum": 0}, "name": S, "columns": {"type": "array", "items": COLUMN},
+                 "collapsed": B, "z": {"type": "number"}, "chart": CHART, "view": VIEW,
+                 "w": {"type": "number", "exclusiveMinimum": 0}, "h": {"type": "number", "exclusiveMinimum": 0}, "name": S, "columns": {"type": "array", "items": COLUMN},
                  "linked": {"type": ["string", "null"]}, "place": PLACE, "at": POINT, **STYLE_PROPS}
 
 
@@ -262,7 +321,7 @@ UPDATE_ITEMS = {"type": "array", "minItems": 1, "maxItems": 100, "items": {
     "properties": {"id": {"type": "string", "minLength": 1}, **UPDATE_FIELDS}}}
 
 
-@tool("update_nodes", "Change fields of existing nodes: label, title, sql, text, colors, size, locked, collapsed, or move one with place or at. A new title rewrites {{old}} references in other windows. Locked nodes need locked: false in the same update to change. Give the changes as updates (add_nodes calls its list nodes, and nodes is accepted here as an alias).",
+@tool("update_nodes", "Change fields of existing nodes: label, title, sql, text, colors, size, locked, collapsed, chart and view (query windows), or move one with place or at. A new title rewrites {{old}} references in other windows. Locked nodes need locked: false in the same update to change. Give the changes as updates (add_nodes calls its list nodes, and nodes is accepted here as an alias).",
       obj({"name": NAME, "updates": UPDATE_ITEMS,
            "nodes": {**UPDATE_ITEMS, "description": "alias of updates, the name add_nodes uses; give one of the two"},
            "auto_tidy": AUTO_TIDY}, ("name",)),
@@ -285,11 +344,62 @@ def update_nodes(ctx, args):
                 raise ToolError(f"node {u['id']} is locked; send locked: false to change it")
             _apply(canvas, n, u)
             touched.append(n["id"])
-        return f"updated {', '.join(touched)}", touched
+        return f"updated {', '.join(touched)}" + _chart_notes(canvas, touched), touched
     return text(_edit(args["name"], mutate, args.get("auto_tidy", True)))
 
 
+def _chart_spec(chart) -> dict:
+    """The Vega-Lite spec an agent gave, checked: an object with `mark` or `layer`. Raises ToolError."""
+    if not isinstance(chart, dict) or not ("mark" in chart or "layer" in chart):
+        raise ToolError("chart must be a Vega-Lite spec: an object with mark or layer, e.g. " + BAR_EXAMPLE)
+    return chart
+
+
+def _set_chart_and_view(node: dict, spec: dict) -> None:
+    """Apply `chart` (null removes it) and `view` from a spec to a query window."""
+    if "chart" in spec:
+        if spec["chart"] is None:
+            node.pop("chart", None)
+        else:
+            node["chart"] = {"vega_lite": _chart_spec(spec["chart"])}
+    if "view" in spec:
+        node["view"] = spec["view"]
+    if node.get("view") == "chart" and "chart" not in node:
+        raise ToolError(f"view chart needs a chart on {node['id']}: give chart too")
+
+
+def _chart_fields(spec) -> set:
+    """Field names a spec reads from its data, from the encodings of the spec and of its layers."""
+    out: set = set()
+    if isinstance(spec, dict):
+        for ch in (spec.get("encoding") or {}).values():
+            if isinstance(ch, dict) and isinstance(ch.get("field"), str):
+                out.add(ch["field"].replace("\\", ""))
+        for part in spec.get("layer") or []:
+            out |= _chart_fields(part)
+    return out
+
+
+def _chart_notes(canvas: dict, ids) -> str:
+    """A note for each chart that reads a field the window's saved result does not have (nothing when it has no result
+    yet, or the spec computes fields with `transform`)."""
+    notes = []
+    for w in canvas["windows"]:
+        spec = (w.get("chart") or {}).get("vega_lite")
+        if w["id"] not in ids or not spec or not w.get("result") or "transform" in json.dumps(spec):
+            continue
+        have = {c["name"] for c in w["result"]["columns"]}
+        missing = sorted(_chart_fields(spec) - have)
+        if missing:
+            notes.append(f"{w['id']}'s chart reads {', '.join(missing)}, not a column of its saved result (columns: {', '.join(sorted(have))})")
+    return "; note: " + "; ".join(notes) if notes else ""
+
+
 def _apply(canvas: dict, n: dict, u: dict) -> None:
+    if ("chart" in u or "view" in u) and n.get("type") != "query":
+        raise ToolError(f"chart and view belong to query windows; {n['id']} is a {n.get('type')}")
+    if "chart" in u or "view" in u:
+        _set_chart_and_view(n, u)
     for key in ("label", "sql", "text", "table", "shape", "collapsed", "z", "fill", "stroke", "font_size", "locked"):
         if key in u:
             n[key] = u[key]
@@ -512,6 +622,122 @@ def doctor(ctx, args):
     if len(d["issues"]) > limit:
         lines.append(f"... {len(d['issues']) - limit} more")
     return text("\n".join(lines))
+
+
+# ---------------------------------------------------------------- running windows
+
+RUN_ROWS = 500  # default rows a window run fetches (the saved result keeps at most this many)
+RUN_FIELDS = {"max_rows": integer(1, 1000, f"default {RUN_ROWS}; a window's saved result keeps at most {canvases.MAX_RESULT_ROWS} rows"),
+              "timeout_s": integer(1, 300, "default 60, for each window")}
+
+
+def _query_window(canvas: dict, wid: str) -> dict:
+    win = next((w for w in canvas["windows"] if w["id"] == wid), None)
+    if win is None:
+        raise ToolError(f"no node with id {wid!r}; query windows: {', '.join(w['id'] for w in canvas['windows'] if w.get('type') == 'query') or 'none'}")
+    if win.get("type") != "query":
+        raise ToolError(f"{wid} is a {win.get('type')}, not a query window")
+    return win
+
+
+def _expanded(canvas: dict, win: dict) -> str:
+    """The window's SQL with {{title}} references expanded the way the app expands them before a run."""
+    titles = {w["title"]: w.get("sql", "") for w in canvas["windows"] if w.get("type") == "query"}
+    try:
+        return sqltools.expand_refs(win.get("sql", ""), titles)
+    except ValueError as e:
+        raise ToolError(f"cannot expand the {{{{title}}}} references in {win['id']}: {e}") from e
+
+
+def _store_results(name: str, results: dict[str, dict], headline: str) -> tuple[str, int]:
+    """Save snapshots into their windows as one agent write (revision bump, snapshot of the replaced file first)."""
+    def mutate(canvas):
+        by_id = {w["id"]: w for w in canvas["windows"]}
+        kept = [i for i in results if i in by_id]
+        for i in kept:
+            by_id[i]["result"] = results[i]
+        return headline, kept
+    canvas, head, rev = _commit(name, mutate, False)
+    return head, rev
+
+
+def run_levels(windows: list[dict]) -> tuple[list[list[dict]], list[tuple[dict, str]]]:
+    """Query windows with SQL grouped by dependency: each level holds windows whose {{title}} references are all in
+    earlier levels, in canvas order. Returns (levels, skipped), where skipped is (window, reason) for windows with no SQL
+    and for reference cycles (and whatever waits on one)."""
+    skipped = [(w, "no SQL") for w in windows if w.get("type") == "query" and not w.get("sql", "").strip()]
+    todo = [w for w in windows if w.get("type") == "query" and w.get("sql", "").strip()]
+    by_title = {w["title"]: w for w in todo}
+    needs = {}
+    for w in todo:
+        try:
+            needs[w["id"]] = {by_title[t]["id"] for t in sqltools.window_refs(w["sql"]) if t in by_title}
+        except ValueError:
+            needs[w["id"]] = set()  # a malformed reference: the run reports it when it expands
+    levels, done = [], set()
+    while True:
+        level = [w for w in todo if w["id"] not in done and needs[w["id"]] <= done]
+        if not level:
+            break
+        levels.append(level)
+        done |= {w["id"] for w in level}
+    skipped += [(w, "reference cycle") for w in todo if w["id"] not in done]
+    return levels, skipped
+
+
+@tool("run_window", "Run a query window's SQL on the SQL warehouse and save the result in the window, so a reader of the canvas sees it without pressing Run. {{title}} references are expanded as in the app, and the statement goes through the same read-only gate as run_sql (one SELECT, DESCRIBE, SHOW or EXPLAIN; anything else is rejected before the warehouse). The result (at most 500 rows) is stored as an agent write that undo_canvas reverts. Returns the rows like run_sql.",
+      obj({"name": NAME, "id": {"type": "string", "minLength": 1, "description": "id of a query window"}, **RUN_FIELDS}, ("name", "id")), read_only=False)
+def run_window(ctx, args):
+    canvas = _load(args["name"])
+    win = _query_window(canvas, args["id"])
+    sql = _expanded(canvas, win)
+    max_rows, timeout = args.get("max_rows", RUN_ROWS), args.get("timeout_s", 60)
+    sid = tools_data.submit_read_only(ctx, sql, max_rows)  # the gate: a non-SELECT is rejected here, nothing is written
+    st = tools_data.await_statement(ctx.need_explorer(), sid, time.time() + timeout, timeout)
+    snap = canvases.result_snapshot(st, sqltools.sql_hash(sql))
+    _, rev = _store_results(args["name"], {win["id"]: snap}, f"saved the result of {win['id']}")
+    kept = f"{len(snap['rows'])} of {snap['row_count']} rows" if len(snap["rows"]) < snap["row_count"] else f"{snap['row_count']} rows"
+    return text(tools_data.tsv(st, max_rows) + f"\nsaved in {win['id']} ({kept}). revision {rev}; undo_canvas reverts it.")
+
+
+@tool("run_all_windows", "Run every query window of a canvas on the SQL warehouse and save each result in its window. A window that references another through {{title}} runs after it (windows with no dependency between them run together). Each statement goes through the same read-only gate as run_sql. Reports one line per window; a window that fails or is rejected does not stop the others. All the results are saved in one agent write that undo_canvas reverts.",
+      obj({"name": NAME, **RUN_FIELDS}, ("name",)), read_only=False)
+def run_all_windows(ctx, args):
+    e = ctx.need_explorer()
+    if not e.warehouse_id:
+        raise ToolError("No SQL warehouse is selected: pick one in the app first.")
+    canvas = _load(args["name"])
+    levels, skipped = run_levels(canvas["windows"])
+    if not levels:
+        why = ", ".join(w["id"] + " " + reason for w, reason in skipped)
+        raise ToolError("no query window with SQL to run" + (f" ({why})" if why else ""))
+    max_rows, timeout = args.get("max_rows", RUN_ROWS), args.get("timeout_s", 60)
+    lines: dict[str, str] = {}
+    saved: dict[str, dict] = {}
+    for level in levels:
+        pending = []
+        for w in level:  # submit the whole level first, so its windows run on the warehouse together
+            try:
+                sql = _expanded(canvas, w)
+                pending.append((w, sql, tools_data.submit_read_only(ctx, sql, max_rows), time.time() + timeout))
+            except ToolError as err:
+                lines[w["id"]] = f"{w['id']} {w['title']}: not run: {err}"
+        for w, sql, sid, deadline in pending:
+            try:
+                st = tools_data.await_statement(e, sid, deadline, timeout)
+            except ToolError as err:
+                lines[w["id"]] = f"{w['id']} {w['title']}: failed: {err}"
+                continue
+            saved[w["id"]] = canvases.result_snapshot(st, sqltools.sql_hash(sql))
+            r = saved[w["id"]]
+            lines[w["id"]] = f"{w['id']} {w['title']}: ok, {r['row_count']} rows" + (f" ({len(r['rows'])} saved)" if len(r["rows"]) < r["row_count"] else "") + f", {st.get('ms')} ms"
+    ordered = [lines[w["id"]] for level in levels for w in level] + [f"{w['id']} {w['title']}: skipped ({why})" for w, why in skipped]
+    if saved:
+        _, rev = _store_results(args["name"], saved, f"saved {len(saved)} results")
+        tail = f"saved {len(saved)} of {len(lines)} results. revision {rev}; undo_canvas reverts them all."
+    else:
+        tail = "nothing saved."
+    return text("\n".join([*ordered, tail]))
 
 
 @tool("render_canvas", "A schematic PNG of the canvas (boxes by type with ids and labels, connectors with arrows) for judging layout. highlight outlines node ids, or \"issues\".",
