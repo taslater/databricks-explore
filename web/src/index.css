@@ -1066,8 +1066,190 @@ tr.stale td {
 
 .qw-colhead {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
   line-height: 1.2;
+}
+
+.qw-colhead-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The sort button: shown on hover, and kept while the column is sorted. Clicking the header selects the column. */
+.qw-sortbtn {
+  flex: none;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: -1px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.qw-grid .ag-header-cell:hover .qw-sortbtn,
+.qw-sortbtn:focus-visible,
+.qw-sortbtn.on {
+  opacity: 1;
+}
+
+.qw-sortbtn.on {
+  color: var(--accent);
+}
+
+.qw-sortbtn:hover {
+  color: var(--accent);
+}
+
+/* The grid's own sort arrows are replaced by the button above. */
+.qw-grid .ag-sort-indicator-container {
+  display: none;
+}
+
+/* ---- Results grid selection ------------------------------------------------ */
+
+.qw-grid {
+  --qw-sel-fill: rgba(9, 105, 218, 0.12);
+  --qw-sel-line: var(--accent);
+  outline: none;
+}
+
+.qw-grid .ag-cell {
+  user-select: none;
+}
+
+/* Selected cells: a light fill and a 1px outline along the outer edge of the selection. */
+.qw-grid .ag-cell.qw-sel {
+  background-color: var(--qw-sel-fill);
+  box-shadow:
+    var(--qw-t, 0 0 #0000),
+    var(--qw-b, 0 0 #0000),
+    var(--qw-l, 0 0 #0000),
+    var(--qw-r, 0 0 #0000);
+}
+
+.qw-grid .ag-cell.qw-sel-t {
+  --qw-t: inset 0 1px 0 0 var(--qw-sel-line);
+}
+
+.qw-grid .ag-cell.qw-sel-b {
+  --qw-b: inset 0 -1px 0 0 var(--qw-sel-line);
+}
+
+.qw-grid .ag-cell.qw-sel-l {
+  --qw-l: inset 1px 0 0 0 var(--qw-sel-line);
+}
+
+.qw-grid .ag-cell.qw-sel-r {
+  --qw-r: inset -1px 0 0 0 var(--qw-sel-line);
+}
+
+/* The active cell, where the next arrow key starts, stays unfilled. */
+.qw-grid .ag-cell.qw-sel.qw-active {
+  background-color: transparent;
+}
+
+/* The row-number gutter and the header of a selected column. */
+.qw-grid .ag-cell.qw-gutter {
+  padding: 0 4px;
+  background-color: var(--ag-header-background-color, #f6f8fa);
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  cursor: pointer;
+}
+
+.qw-grid .ag-cell.qw-gutter.qw-gutter-sel {
+  background-color: #cfe4fb;
+  color: #0b3d75;
+}
+
+.qw-grid .ag-header-cell.qw-gutter-head {
+  cursor: pointer;
+}
+
+.qw-grid .ag-header-cell {
+  cursor: pointer;
+}
+
+.qw-grid .ag-header-cell:has(.qw-colhead.sel) {
+  background-color: #cfe4fb;
+}
+
+/* ---- Value viewer (double-click a cell) ------------------------------------ */
+
+.qw-viewer {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+  max-width: min(640px, 90vw);
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 6px 20px rgba(31, 35, 40, 0.25);
+  font-size: 13px;
+  outline: none;
+}
+
+.qw-viewer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 4px;
+}
+
+.qw-viewer-title {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qw-viewer-copy {
+  padding: 1px 8px;
+  font-size: 12px;
+}
+
+.qw-viewer-body {
+  margin: 0;
+  max-height: min(360px, 60vh);
+  overflow: auto;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: #f6f8fa;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---- Selection summary in the grid bar ------------------------------------- */
+
+.qw-grid-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.qw-grid-stats b {
+  color: inherit;
+  font-weight: 600;
 }
 
 .qw-colname {

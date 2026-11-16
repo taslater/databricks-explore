@@ -23,10 +23,13 @@ import { focusFromBlank } from '../editor/focus'
 import { planRun, type RunMode } from '../editor/statements'
 import './statementChips.css'
 import { IDLE_RUN, scriptTally, submitStatement, useRunStore, type WindowRun } from '../runState'
-import { buildSnapshot, firstSave, snapshotLine, snapshotResult } from '../snapshot'
+import { buildSnapshot, firstSave, snapshotLine, snapshotResult, statementsOf } from '../snapshot'
 import { useSnapshotFreshness } from '../useSnapshotFreshness'
 
 export type QueryFlowNode = Node<Record<string, unknown>, 'query'>
+
+/** Gap between this window and a query window opened beside it from the results. */
+const WINDOW_GAP = 40
 
 const ACTIVE_STATES: ReadonlySet<StatementState> = new Set(['PENDING', 'RUNNING'])
 
@@ -208,6 +211,14 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
   const shownResult: QueryResult | null = liveResult ?? savedResult
   const savedNote = useSaved && saved !== null ? snapshotLine(saved, fresh) : null
 
+  // The one statement behind the shown result, for "Value counts in new query window": the statement this session
+  // ran, or (for a saved result) the window's SQL when it is a single statement. Unknown for a script's saved result.
+  const ownStatements = statementsOf(sqlText)
+  const sourceSql = liveResult !== null ? (run.sqls[viewIndex] ?? null) : ownStatements.length === 1 ? ownStatements[0] : null
+  const addQueryWindowWithSql = useCanvasStore((s) => s.addQueryWindowWithSql)
+  const openQuery = (newSql: string) =>
+    addQueryWindowWithSql({ x: win.position.x + win.size.w + WINDOW_GAP, y: win.position.y }, newSql)
+
   return (
     <>
       <div className={`qw-node${selected ? ' selected' : ''}`}>
@@ -342,7 +353,7 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
 
                   <div className="qw-results nowheel">
                     {tab === 'results' ? (
-                      <ResultPane st={st} shown={shownResult} running={running} errorText={errorText} />
+                      <ResultPane st={st} shown={shownResult} running={running} errorText={errorText} sourceSql={sourceSql} onOpenQuery={openQuery} />
                     ) : (
                       <ChartTab windowId={id} result={shownResult} />
                     )}
@@ -431,12 +442,17 @@ function ResultPane({
   shown,
   running,
   errorText,
+  sourceSql,
+  onOpenQuery,
 }: {
   st: QueryStatus | undefined
   /** The result to show: this session's, or the window's saved one. */
   shown: QueryResult | null
   running: boolean
   errorText: string | null
+  /** The statement that produced `shown`, when known. */
+  sourceSql: string | null
+  onOpenQuery: (sql: string) => void
 }): ReactNode {
   if (errorText) {
     return (
@@ -448,7 +464,7 @@ function ResultPane({
   }
   if (st?.state === 'CANCELED') return <div className="hint">Canceled.</div>
   if (st?.state === 'CLOSED') return <div className="hint">Statement closed.</div>
-  if (shown !== null) return <ResultsGrid result={shown} />
+  if (shown !== null) return <ResultsGrid result={shown} sourceSql={sourceSql} onOpenQuery={onOpenQuery} />
   if (st?.state === 'SUCCEEDED') return <div className="hint">Statement succeeded. No result set.</div>
   if (running) return <div className="hint">Waiting for results...</div>
   return <div className="hint">Run the query to see results.</div>
