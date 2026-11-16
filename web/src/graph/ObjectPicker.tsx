@@ -18,6 +18,40 @@ const MODES: { id: PickMode; label: string }[] = [
 
 const matches = (name: string, filter: string) => name.toLowerCase().includes(filter)
 
+/** Shift, Cmd or Ctrl on a click adds the object to the graph instead of starting a new one, as on the graph itself. */
+const addsToGraph = (e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => e.shiftKey || e.metaKey || e.ctrlKey
+
+/** Click opens the object as a new graph; with Shift, Cmd or Ctrl it is added to the graph on screen. */
+type OpenHandler = (fullName: string, add: boolean) => void
+
+function useOpenHandler(): OpenHandler {
+  const actions = useGraphActions()
+  return useCallback(
+    (fullName: string, add: boolean) => {
+      if (add) void actions.addObject(fullName)
+      else actions.openObject(fullName)
+    },
+    [actions],
+  )
+}
+
+/** The row's "+" button: adds the object to the graph and keeps what is there. */
+function AddButton({ fullName, onOpen }: { fullName: string; onOpen: OpenHandler }) {
+  return (
+    <button
+      className="pick-add"
+      title="Add to the graph, keeping what is there (or Shift-click the row)"
+      aria-label={`Add ${fullName} to the graph`}
+      onClick={(e) => {
+        e.stopPropagation()
+        onOpen(fullName, true)
+      }}
+    >
+      +
+    </button>
+  )
+}
+
 /** Mode dropdown, refresh, filter, then the list for the chosen mode. The mode is remembered. */
 export function ObjectPicker() {
   const mode = useUiStore((s) => s.pickMode)
@@ -120,7 +154,7 @@ function DrillDown({ filter, onNavigate }: { filter: string; onNavigate: () => v
   const setDrill = useUiStore((s) => s.setDrill)
   const profile = useUiStore((s) => s.connectedProfile)
   const focusId = useGraphStore((s) => s.nodes.find((n) => n.data.focus)?.id)
-  const actions = useGraphActions()
+  const open = useOpenHandler()
   const catalogs = useCatalogs()
   const schemas = useSchemas(drill.catalog)
   const objects = useObjects(drill.catalog, drill.schema)
@@ -142,11 +176,15 @@ function DrillDown({ filter, onNavigate }: { filter: string; onNavigate: () => v
     }))
   }
 
-  function pick(x: Item) {
-    onNavigate()
+  function pick(x: Item, add: boolean) {
     if (level === 'catalogs') setDrill({ catalog: x.name, schema: null })
     else if (level === 'schemas') setDrill({ catalog: drill.catalog, schema: x.name })
-    else if (x.fullName) actions.openObject(x.fullName)
+    else if (x.fullName) {
+      open(x.fullName, add)
+      // Adding keeps the filter, so several objects can be added from one filtered list.
+      if (add) return
+    }
+    onNavigate()
   }
 
   const f = filter.toLowerCase()
@@ -198,11 +236,12 @@ function DrillDown({ filter, onNavigate }: { filter: string; onNavigate: () => v
                 key={x.name}
                 className={`pick-item${selected ? ' sel' : ''}`}
                 title={x.fullName ?? (x.comment ? `${x.name}\n${x.comment}` : x.name)}
-                onClick={() => pick(x)}
+                onClick={(e) => pick(x, addsToGraph(e))}
                 {...(x.fullName ? tableDragProps(x.fullName) : {})}
               >
                 <span className="nm">{x.name}</span>
                 <span className="tag">{shortType(x.type)}</span>
+                {x.fullName && <AddButton fullName={x.fullName} onOpen={open} />}
               </li>
             )
           })}
@@ -247,7 +286,7 @@ function useBranchVisibility(
 
 function TreeBrowser({ filter }: { filter: string }) {
   const catalogs = useCatalogs()
-  const actions = useGraphActions()
+  const open = useOpenHandler()
   return (
     <>
       <ListStatus
@@ -257,7 +296,7 @@ function TreeBrowser({ filter }: { filter: string }) {
       />
       <ul className="tree">
         {(catalogs.data?.data ?? []).map((c) => (
-          <CatalogBranch key={c.name} name={c.name} type={c.type} filter={filter} onOpen={actions.openObject} />
+          <CatalogBranch key={c.name} name={c.name} type={c.type} filter={filter} onOpen={open} />
         ))}
       </ul>
     </>
@@ -273,7 +312,7 @@ function CatalogBranch({
   name: string
   type: string | null
   filter: string
-  onOpen: (fullName: string) => void
+  onOpen: OpenHandler
 }) {
   const [open, setOpen] = useState(false)
   const schemas = useSchemas(open ? name : null)
@@ -316,7 +355,7 @@ function SchemaBranch({
   name: string
   filter: string
   onVisible: (key: string, visible: boolean) => void
-  onOpen: (fullName: string) => void
+  onOpen: OpenHandler
 }) {
   const [open, setOpen] = useState(false)
   const objects = useObjects(open ? catalog : null, open ? name : null)
@@ -349,15 +388,21 @@ function ObjectLeaf({
   item: ObjectSummary
   filter: string
   onVisible: (key: string, visible: boolean) => void
-  onOpen: (fullName: string) => void
+  onOpen: OpenHandler
 }) {
   const { visible } = useBranchVisibility(item.name, matches(item.name, filter), filter, onVisible)
   return (
     <li className={visible ? undefined : 'hidden'}>
-      <div className="tree-row" title={item.full_name} onClick={() => onOpen(item.full_name)} {...tableDragProps(item.full_name)}>
+      <div
+        className="tree-row"
+        title={item.full_name}
+        onClick={(e) => onOpen(item.full_name, addsToGraph(e))}
+        {...tableDragProps(item.full_name)}
+      >
         <span className="tw" />
         <span className="nm">{item.name}</span>
         <span className="tag">{shortType(item.type)}</span>
+        <AddButton fullName={item.full_name} onOpen={onOpen} />
       </div>
     </li>
   )
@@ -376,7 +421,7 @@ function useDebounced<T>(value: T, ms: number): T {
 
 /** Server search after 3 characters, debounced 300 ms. The server source note says whether the search covers all catalogs. */
 function SearchBrowser({ filter }: { filter: string }) {
-  const actions = useGraphActions()
+  const open = useOpenHandler()
   const trimmed = filter.trim()
   const enough = trimmed.length >= 3
   const debounced = useDebounced(trimmed, 300)
@@ -397,9 +442,16 @@ function SearchBrowser({ filter }: { filter: string }) {
       <div className={`pick-status${error ? ' error' : ''}`}>{error ?? status}</div>
       <ul className="pick-list">
         {rows.map((o) => (
-          <li key={o.full_name} className="pick-item" title={o.full_name} onClick={() => actions.openObject(o.full_name)} {...tableDragProps(o.full_name)}>
+          <li
+            key={o.full_name}
+            className="pick-item"
+            title={o.full_name}
+            onClick={(e) => open(o.full_name, addsToGraph(e))}
+            {...tableDragProps(o.full_name)}
+          >
             <span className="nm">{o.full_name}</span>
             <span className="tag">{shortType(o.type)}</span>
+            <AddButton fullName={o.full_name} onOpen={open} />
           </li>
         ))}
       </ul>

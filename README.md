@@ -64,6 +64,7 @@ Demo mode also has an invented query history (a few hundred statements by six fa
 - **Graph** tab
   - Picker modes (remembered): **Drill-down**, **Tree**, **Search**. « collapses the picker.
   - Click node/edge for details; double-click node to expand; drag to arrange; **Reset layout** re-runs auto layout.
+  - Clicking an object in the picker starts a new graph. To add one next to what is there instead (two similar views side by side, say), use the row's **+** button, Shift-, Cmd- or Ctrl-click the row, or drag it onto the graph. It comes with its connections, edges to tables already on screen are drawn, and the edge filters never hide it. Parts of the graph with nothing between them are laid out as separate bands, top to bottom.
   - Checkboxes hide each edge kind (the legend shows how each is drawn), stale lineage (not seen in N days) and rejected edges.
   - Drag from the green dot on a hovered table node onto another node to store a **manual** edge between them.
   - **Query these tables** (details panel) writes a `SELECT` that joins the selected tables (shift-click or drag a box to select several) along known relationships, adding any tables needed in between, with short aliases and `LIMIT 100`, and opens it as a new query window on the canvas. With no chain of known relationships between them it says so and writes nothing.

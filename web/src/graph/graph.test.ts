@@ -83,6 +83,39 @@ describe('layout (legacy relayout rules)', () => {
     // Centered on its own current center (300 + 40), so top-left x is unchanged.
     expect(pos.get('C')!.x).toBe(300)
   })
+
+  const overlaps = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+
+  it('stacks unconnected parts in bands below the first, each with its own FK row, with no overlap', () => {
+    // Part 1: focus F with lineage to L and an FK parent P. Part 2: pinned E with an FK parent D. Part 3: lone X.
+    const nodes = [box('F', true), box('L'), box('P'), box('E', true), box('D'), box('X')]
+    const edges: LayoutEdge[] = [
+      { source: 'F', target: 'L', kind: 'lineage' },
+      { source: 'F', target: 'P', kind: 'fk' },
+      { source: 'E', target: 'D', kind: 'fk' },
+    ]
+    const pos = computeLayout(nodes, edges)
+    const rect = (id: string) => ({ ...pos.get(id)!, w: 100, h: 40 })
+    const ids = ['F', 'L', 'P', 'E', 'D', 'X']
+    for (const a of ids) for (const b of ids) if (a < b) expect(overlaps(rect(a), rect(b)), `${a} and ${b}`).toBe(false)
+    // Each FK parent sits under its own child.
+    expect(pos.get('P')!.x).toBe(pos.get('F')!.x)
+    expect(pos.get('D')!.x).toBe(pos.get('E')!.x)
+    // Part 2 starts below all of part 1, including its FK row, and lines up with it on the left.
+    expect(pos.get('E')!.y).toBeGreaterThanOrEqual(pos.get('P')!.y + 40 + 60)
+    expect(pos.get('E')!.x).toBe(pos.get('F')!.x)
+    expect(pos.get('X')!.y).toBeGreaterThan(pos.get('D')!.y)
+  })
+
+  it('leaves a single part where the legacy rules put it', () => {
+    const nodes = [box('F', true), box('L')]
+    const edges: LayoutEdge[] = [{ source: 'F', target: 'L', kind: 'lineage' }]
+    const alone = computeLayout(nodes, edges)
+    const withOther = computeLayout([...nodes, box('X')], edges)
+    expect(withOther.get('F')).toEqual(alone.get('F'))
+    expect(withOther.get('L')).toEqual(alone.get('L'))
+  })
 })
 
 describe('deriveFlow', () => {
@@ -141,6 +174,22 @@ describe('deriveFlow', () => {
     expect(out.edges[0].hidden).toBe(true)
     expect(out.nodes.find((n) => n.id === cust.id)!.hidden).toBe(true)
     expect(out.nodes.find((n) => n.id === F.id)!.hidden).toBe(false)
+  })
+
+  it('never hides a pinned node (added on purpose), even when the filters hide all its edges', () => {
+    const fk = flowEdge({ id: `fk:${S}.orders->${S}.customers`, source: `${S}.orders`, target: `${S}.customers`, kind: 'fk', child_columns: ['cust_id'] })
+    const cust = flowNode(`${S}.customers`, { pinned: true })
+    const out = deriveFlow({
+      nodes: [F, cust],
+      edges: [fk],
+      focusSchema: S,
+      filters: { ...ALL_ON, fk: false },
+      staleDays: 7,
+      hoverId: null,
+      now: NOW,
+    })
+    expect(out.edges[0].hidden).toBe(true)
+    expect(out.nodes.find((n) => n.id === cust.id)!.hidden).toBe(false)
   })
 
   it('labels an FK parent with the child columns (via) and marks other-schema nodes external', () => {
@@ -251,6 +300,17 @@ describe('saved diagrams', () => {
     expect(back.edges[0].data!.info.kind).toBe('lineage')
   })
 
+  it('keeps the pinned flag through a save, and leaves it off nodes that were not pinned', () => {
+    const nodes = [flowNode(`${S}.orders`, { focus: true }), flowNode(`${S}.orders_v2`, { pinned: true })]
+    const body = toDiagramBody('pin', { nodes, edges: [], focusSchema: S })
+    const saved = body.nodes as Array<{ data: { pinned?: boolean } }>
+    expect(saved[0].data.pinned).toBeUndefined()
+    expect(saved[1].data.pinned).toBe(true)
+    const back = fromDiagram({ saved_at: 'now', ...body })
+    expect(back.nodes[0].data.pinned).toBeUndefined()
+    expect(back.nodes[1].data.pinned).toBe(true)
+  })
+
   it('skips malformed entries instead of throwing', () => {
     const payload = fromDiagram({
       name: 'bad',
@@ -296,6 +356,29 @@ describe('graph store merge (legacy addGraph)', () => {
     expect(s.nodes.map((n) => n.id)).toEqual([`${S}.a`, `${S}.b`, `${S}.c`])
     expect(s.nodes.find((n) => n.id === `${S}.c`)!.data.focus).toBe(false)
     expect(s.edges.map((e) => e.id)).toEqual(['l1', 'l2'])
+    store.clear()
+  })
+  it('adds an unconnected object next to the graph, pinned, and draws its edges to nodes already there', () => {
+    const store = useGraphStore.getState()
+    store.clear()
+    store.mergeRelations({ nodes: [{ id: `${S}.v1`, label: 'v1', kind: 'view', focus: true }], edges: [], errors: [] })
+    // The added object's own response: it is the focus of that response, but not of the graph.
+    useGraphStore.getState().mergeRelations({
+      nodes: [
+        { id: `${S}.v2`, label: 'v2', kind: 'view', focus: true },
+        { id: `${S}.src`, label: 'src', kind: 'table' },
+      ],
+      edges: [{ id: 'l1', source: `${S}.src`, target: `${S}.v2`, kind: 'lineage' }],
+      errors: [],
+    })
+    useGraphStore.getState().pinNode(`${S}.v2`)
+    const s = useGraphStore.getState()
+    expect(s.nodes.map((n) => n.id)).toEqual([`${S}.v1`, `${S}.v2`, `${S}.src`])
+    const v2 = s.nodes.find((n) => n.id === `${S}.v2`)!
+    expect(v2.data.focus).toBe(false)
+    expect(v2.data.pinned).toBe(true)
+    expect(s.nodes.find((n) => n.id === `${S}.src`)!.data.pinned).toBeUndefined()
+    expect(s.edges.map((e) => e.id)).toEqual(['l1'])
     store.clear()
   })
 })

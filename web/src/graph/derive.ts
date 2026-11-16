@@ -97,7 +97,7 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
     edgeHidden.set(e.id, !edgeShown(info, filters, input.staleDays, now))
   }
 
-  // Node visibility: a node is hidden when it has edges and all of them are hidden. The focus node always shows.
+  // Node visibility: a node is hidden when it has edges and all of them are hidden. The focus node and pinned nodes always show.
   const edgesByNode = new Map<string, FlowEdge[]>()
   for (const e of input.edges) {
     for (const id of new Set([e.source, e.target])) {
@@ -135,7 +135,7 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
 
   const nodes: FlowNode[] = input.nodes.map((n) => {
     const edges = edgesByNode.get(n.id) ?? []
-    const hidden = !n.data.focus && edges.length > 0 && edges.every((e) => edgeHidden.get(e.id))
+    const hidden = !n.data.focus && !n.data.pinned && edges.length > 0 && edges.every((e) => edgeHidden.get(e.id))
     const external = n.data.schema !== focusSchema
     return {
       ...n,

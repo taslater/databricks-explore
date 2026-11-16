@@ -12,6 +12,7 @@ export interface SavedNodeData {
   label?: string
   kind?: string
   focus?: boolean
+  pinned?: boolean
   self_ref?: boolean
   self_ref_last_seen?: string
   external?: boolean
@@ -41,6 +42,7 @@ export function toDiagramBody(name: string, payload: DiagramPayload): DiagramBod
       external: n.data.schema !== payload.focusSchema,
     }
     if (n.data.focus) data.focus = true
+    if (n.data.pinned) data.pinned = true
     if (n.data.selfRef) data.self_ref = true
     if (n.data.selfRefLastSeen) data.self_ref_last_seen = n.data.selfRefLastSeen
     const v = via.get(n.id)
@@ -76,6 +78,7 @@ export function fromDiagram(d: DiagramFile): DiagramPayload {
         schema,
         kind: data.kind ?? 'table',
         focus: !!data.focus,
+        ...(data.pinned ? { pinned: true } : {}),
         selfRef: !!data.self_ref,
         selfRefLastSeen: data.self_ref_last_seen,
       },
