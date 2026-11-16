@@ -99,6 +99,25 @@ export function useGraphActions() {
       void expand(fullName)
     }
 
+    /**
+     * Adds one object to the graph without clearing it, with its connections, and selects it. Its edges to tables
+     * already on screen are drawn, so two unrelated objects can sit side by side. The node is pinned: the edge
+     * filters never hide it. On an empty graph this is the same as opening the object.
+     */
+    async function addObject(fullName: string) {
+      if (useGraphStore.getState().nodes.length === 0) {
+        openObject(fullName)
+        return
+      }
+      const had = useGraphStore.getState().nodes.some((n) => n.id === fullName)
+      await expand(fullName)
+      const g = useGraphStore.getState()
+      if (!g.nodes.some((n) => n.id === fullName)) return
+      g.pinNode(fullName)
+      g.setSelection({ kind: 'node', id: fullName })
+      if (!g.status.error) g.setStatus(had ? `${fullName} is already on the graph; loaded its connections` : `added ${fullName}`)
+    }
+
     function refreshSelected() {
       const sel = useGraphStore.getState().selection
       if (sel?.kind === 'node') void expand(sel.id, true)
@@ -319,6 +338,7 @@ export function useGraphActions() {
       queryTables,
       expand,
       openObject,
+      addObject,
       refreshSelected,
       connect,
       showColumns,

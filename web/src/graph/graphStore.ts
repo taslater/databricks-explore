@@ -70,6 +70,8 @@ interface GraphState {
   /** Stores a node's columns and shows them. */
   setColumns: (id: string, columns: ColumnInfo[]) => void
   setShowColumns: (id: string, show: boolean) => void
+  /** Marks a node as added on purpose, so the edge filters never hide it. */
+  pinNode: (id: string) => void
   setAllColumns: (id: string, all: boolean) => void
   /** Adds column edges, or replaces the ones with the same id (fresh status, note, evidence). */
   mergeColumnEdges: (edges: GraphEdge[]) => void
@@ -123,6 +125,8 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
     })),
   setShowColumns: (id, show) =>
     set((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, showColumns: show } } : n)) })),
+  pinNode: (id) =>
+    set((s) => ({ nodes: s.nodes.map((n) => (n.id === id && !n.data.pinned ? { ...n, data: { ...n.data, pinned: true } } : n)) })),
   setAllColumns: (id, all) =>
     set((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, allColumns: all } } : n)) })),
   mergeColumnEdges: (edges) =>
@@ -198,7 +202,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
             id: n.id,
             width: size.width,
             height: size.height,
-            focus: n.data.focus,
+            focus: n.data.focus || !!n.data.pinned,
             x: n.position.x,
             y: n.position.y,
           }

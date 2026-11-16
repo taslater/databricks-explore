@@ -448,6 +448,32 @@ tr.stale td {
   white-space: nowrap;
 }
 
+/* Shift-click adds to the graph; keep it from selecting text in the list. */
+.pick-item,
+.tree-row {
+  user-select: none;
+}
+
+/* "+" on an object row: add to the graph without clearing it. Shown on hover or keyboard focus. */
+.pick-add {
+  align-self: center;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #fff;
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1;
+  padding: 1px 5px;
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.pick-item:hover .pick-add,
+.tree-row:hover .pick-add,
+.pick-add:focus-visible {
+  visibility: visible;
+}
+
 .tree,
 .tree ul {
   list-style: none;

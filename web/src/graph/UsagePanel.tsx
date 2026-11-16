@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { useUsage } from '../api/hooks'
 import { useGraphActions } from './actions'
-import { useGraphStore } from './graphStore'
 import { dayOf } from './mining'
 import { shortestNames } from './names'
 
@@ -15,11 +14,7 @@ export function UsagePanel() {
     [u],
   )
 
-  function show(table: string) {
-    const g = useGraphStore.getState()
-    if (g.nodes.length === 0) actions.openObject(table)
-    else void actions.expand(table)
-  }
+  const show = (table: string) => void actions.addObject(table)
 
   if (usage.isError) return <p className="error">{usage.error.message}</p>
   if (!u) return <p className="hint">loading…</p>

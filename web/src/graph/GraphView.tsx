@@ -11,7 +11,7 @@ import {
   type NodeChange,
   type EdgeChange,
 } from '@xyflow/react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import { useCertification, useConceptsForTables } from '../api/concepts'
 import { withCertification } from '../concepts/certification'
 import { useConceptsStore } from '../concepts/conceptsStore'
@@ -28,6 +28,7 @@ import { MiningPanel } from './MiningPanel'
 import { TableNode } from './TableNode'
 import type { ConceptFlowNode, FlowEdge, FlowNode } from './types'
 import { useUiStore } from '../store/uiStore'
+import { TABLE_DRAG_MIME } from '../shared/tableDrag'
 
 // Defined at module scope so React Flow does not rebuild its node and edge types on every render.
 const NODE_TYPES = { table: TableNode, concept: ConceptNode }
@@ -47,10 +48,26 @@ export function GraphView() {
   const pickerCollapsed = useUiStore((s) => s.pickerCollapsed)
   const drawer = useGraphStore((s) => s.drawer)
   const mineDialog = useGraphStore((s) => s.mineDialog)
+  const actions = useGraphActions()
+
+  // A table dragged from the picker and dropped here is added to the graph, keeping what is there.
+  // dataTransfer values are readable only on drop, so dragover checks the type.
+  function onDragOver(e: DragEvent<HTMLDivElement>) {
+    if (!e.dataTransfer.types.includes(TABLE_DRAG_MIME)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+  function onDrop(e: DragEvent<HTMLDivElement>) {
+    const fullName = e.dataTransfer.getData(TABLE_DRAG_MIME).trim()
+    if (fullName === '') return
+    e.preventDefault()
+    void actions.addObject(fullName)
+  }
+
   return (
     <div className="graph-view">
       <GraphToolbar showPickerToggle={pickerCollapsed} />
-      <div className="graph-canvas">
+      <div className="graph-canvas" onDragOver={onDragOver} onDrop={onDrop}>
         <ReactFlowProvider>
           <GraphCanvas />
         </ReactFlowProvider>

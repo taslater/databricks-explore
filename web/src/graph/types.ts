@@ -11,6 +11,8 @@ export type TableNodeData = {
   /** Lowercased table_type from the server. */
   kind: string
   focus: boolean
+  /** Added on purpose (picker Add, Shift-click or a drop on the graph): it shows even when the filters hide all its edges, like the focus. */
+  pinned?: boolean
   selfRef: boolean
   selfRefLastSeen?: string
   /** Columns, once loaded. Shown while `showColumns` is set. */
