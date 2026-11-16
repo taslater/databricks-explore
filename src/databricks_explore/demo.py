@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import sqlglot
-from . import demo_history
+from . import demo_history, search_terms
 from databricks.sdk.service import catalog as uc
 from databricks.sdk.service import iam
 from databricks.sdk.service import sql as sqlsvc
@@ -285,9 +285,10 @@ def result_for(statement, params=None):
             rows = [r for r in rows if r[0] in ("table", "column") and all((r[index[k]] or "").lower() == v.lower() for k, v in asked.items())]
         return cols, rows[: cap or len(rows)]
     if "information_schema.tables" in low:
-        q = str((params or {}).get("q", "")).lower()
+        asked = {k: str(v) for k, v in (params or {}).items() if k in ("cat", "sch", "q")}  # LIKE patterns, see search_terms
         hits = [(f.split(".")[0], f.split(".")[1], f.split(".")[2], "VIEW" if v[0] == "VIEW" else "BASE TABLE")
-                for f, v in sorted(TABLES.items()) if q in f.split(".")[2]]
+                for f, v in sorted(TABLES.items())
+                if all(search_terms.like_matches(p, f.split(".")[{"cat": 0, "sch": 1, "q": 2}[k]]) for k, p in asked.items())]
         cols = [{"name": k, "type": "STRING"} for k in ("table_catalog", "table_schema", "table_name", "table_type")]
         return cols, [list(h) for h in hits][: cap or 300]
     if re.match(r"^(create|insert|drop|alter|use|set|optimize|vacuum|grant|merge|update|delete|truncate)\b", low):
