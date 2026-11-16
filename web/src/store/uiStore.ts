@@ -17,6 +17,14 @@ function readPickMode(): PickMode {
   }
 }
 
+function readPickRegex(): boolean {
+  try {
+    return localStorage.getItem('pickRegex') === '1'
+  } catch {
+    return false
+  }
+}
+
 /** UI-only state. Server data lives in TanStack Query (src/api/hooks.ts). */
 interface UiState {
   view: MainView
@@ -35,6 +43,8 @@ interface UiState {
   /** Set when the automatic reconnect on load fails. Cleared on the next connect. Not persisted. */
   restoreMessage: string | null
   pickMode: PickMode
+  /** Whether the picker's filter is a regular expression (the `.*` toggle). Remembered in localStorage like pickMode. */
+  pickRegex: boolean
   /** Whether the Canvas tab shows the properties panel (the Details area). Not persisted. */
   canvasDetailsOpen: boolean
   /** Drill-down position in the object picker. */
@@ -47,6 +57,7 @@ interface UiState {
   setWarehouseId: (id: string | null) => void
   setRestoreMessage: (message: string | null) => void
   setPickMode: (mode: PickMode) => void
+  setPickRegex: (on: boolean) => void
   setDrill: (drill: { catalog: string | null; schema: string | null }) => void
 }
 
@@ -61,6 +72,7 @@ export const useUiStore = create<UiState>()(
       warehouseId: null,
       restoreMessage: null,
       pickMode: readPickMode(),
+      pickRegex: readPickRegex(),
       canvasDetailsOpen: false,
       drill: { catalog: null, schema: null },
       setView: (view) => set({ view }),
@@ -83,6 +95,14 @@ export const useUiStore = create<UiState>()(
           // Storage can be unavailable. The mode still applies for this session.
         }
         set({ pickMode })
+      },
+      setPickRegex: (pickRegex) => {
+        try {
+          localStorage.setItem('pickRegex', pickRegex ? '1' : '0')
+        } catch {
+          // Storage can be unavailable. The switch still applies for this session.
+        }
+        set({ pickRegex })
       },
       setDrill: (drill) => set({ drill }),
     }),
