@@ -3,6 +3,7 @@ import { NodeResizer, type Node, type NodeProps } from '@xyflow/react'
 import { useObject } from '../../api/hooks'
 import type { CanvasWindow } from '../../api/types'
 import { useCanvasStore } from '../../store/canvasStore'
+import { columnNames, selectSql } from '../../shared/scriptAs'
 import { useUiStore } from '../../store/uiStore'
 import { WindowTitle } from './WindowTitle'
 
@@ -11,9 +12,9 @@ export type TableFlowNode = Node<Record<string, unknown>, 'table'>
 /** Gap between a card and the query window that "Query this" places beside it. */
 const QUERY_GAP = 40
 
-/** The SQL a "Query this" window starts with. */
-export function previewSql(fullName: string): string {
-  return `SELECT * FROM ${fullName} LIMIT 100`
+/** The SQL a "Query this" window starts with: the columns one per line once they are loaded, else SELECT *. */
+export function previewSql(fullName: string, columns: readonly string[] = []): string {
+  return selectSql(fullName, columns, 100)
 }
 
 /**
@@ -41,7 +42,7 @@ function TableBody({ win, selected }: { win: CanvasWindow; selected: boolean }) 
     // Placed to the right of the card, at the same height.
     addQueryWindowWithSql(
       { x: win.position.x + win.size.w + QUERY_GAP, y: win.position.y },
-      previewSql(fullName),
+      previewSql(fullName, columnNames(detail.data?.data.columns)),
     )
   }
 
@@ -124,7 +125,7 @@ function TableBody({ win, selected }: { win: CanvasWindow; selected: boolean }) 
               {tableType && <span className="tag">{tableType}</span>}
             </div>
             <div className="table-actions">
-              <button onClick={queryThis} disabled={fullName === ''} title={previewSql(fullName)}>
+              <button onClick={queryThis} disabled={fullName === ''} title={previewSql(fullName, columnNames(columns))}>
                 Query this
               </button>
             </div>

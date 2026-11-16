@@ -17,6 +17,7 @@ from . import mining
 from . import ontology
 from . import relationships
 from . import sqltools
+from . import starexpand
 from .mcp_server import tools_canvas
 from .mcp_server.tooling import Context, ToolError
 
@@ -481,6 +482,30 @@ def query():
 def query_tables():
     """Tables a query reads, after {{title}} expansion. No Databricks call; sqlglot only."""
     return jsonify({"tables": sqltools.tables_read(_query_sql(request.json))})
+
+
+@app.errorhandler(starexpand.StarError)
+def star_error(e):
+    return jsonify({"error": str(e)}), 400
+
+
+@app.post("/api/sql/expand-star")
+def expand_star():
+    """Columns for the `*` at a cursor offset in one statement: {text, start, end, count}, replacing sql[start:end].
+
+    Body: {sql, offset, catalog?, schema?}. Table columns come from the same cached details as GET /api/object.
+    """
+    body = request.json
+    e = ex()
+
+    def columns_of(name):
+        try:
+            info = e.object(name)["data"]
+        except Exception as err:  # unknown table, no access, no connection to the workspace
+            raise starexpand.StarError(f"Could not read the columns of {name}: {dbx.clean_error(err)}") from err
+        return [c["name"] for c in info.get("columns") or [] if c.get("name")]
+
+    return jsonify(starexpand.expand_star(body["sql"], int(body["offset"]), columns_of, body.get("catalog"), body.get("schema")))
 
 
 @app.post("/api/query/async")

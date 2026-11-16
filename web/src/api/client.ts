@@ -19,6 +19,7 @@ import type {
   ObjectSummary,
   ProfilesResponse,
   QueryBody,
+  StarExpansion,
   QueryResult,
   QueryStatus,
   Relationship,
@@ -144,6 +145,10 @@ export const saveDiagram = (body: DiagramBody) => post<SavedResponse>('/api/diag
 // ---- Query (A1) -----------------------------------------------------------
 
 export const runQuery = (body: QueryBody) => post<QueryResult>('/api/query', body)
+
+/** The columns for the `*` at `offset` in one statement, and the range they replace. Rejects with a message when it cannot. */
+export const expandStar = (body: { sql: string; offset: number; catalog?: string; schema?: string }) =>
+  post<StarExpansion>('/api/sql/expand-star', body)
 
 export const submitQueryAsync = (body: QueryBody) =>
   post<AsyncSubmitResponse>('/api/query/async', body)

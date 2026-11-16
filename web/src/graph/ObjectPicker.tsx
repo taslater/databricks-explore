@@ -9,6 +9,7 @@ import { messageOf, useGraphActions } from './actions'
 import { shortType } from './format'
 import { useGraphStore } from './graphStore'
 import { tableDragProps } from '../shared/tableDrag'
+import { ObjectMenuHost, useObjectContextMenu } from './objectMenu'
 
 const MODES: { id: PickMode; label: string }[] = [
   { id: 'drill', label: 'Drill-down' },
@@ -99,6 +100,7 @@ export function ObjectPicker() {
 
   return (
     <div className="object-picker">
+      <ObjectMenuHost />
       <div className="pickbar">
         <select
           value={mode}
@@ -155,6 +157,7 @@ function DrillDown({ filter, onNavigate }: { filter: string; onNavigate: () => v
   const profile = useUiStore((s) => s.connectedProfile)
   const focusId = useGraphStore((s) => s.nodes.find((n) => n.data.focus)?.id)
   const open = useOpenHandler()
+  const menu = useObjectContextMenu()
   const catalogs = useCatalogs()
   const schemas = useSchemas(drill.catalog)
   const objects = useObjects(drill.catalog, drill.schema)
@@ -238,6 +241,7 @@ function DrillDown({ filter, onNavigate }: { filter: string; onNavigate: () => v
                 title={x.fullName ?? (x.comment ? `${x.name}\n${x.comment}` : x.name)}
                 onClick={(e) => pick(x, addsToGraph(e))}
                 {...(x.fullName ? tableDragProps(x.fullName) : {})}
+                {...(x.fullName ? menu(x.fullName, x.type) : {})}
               >
                 <span className="nm">{x.name}</span>
                 <span className="tag">{shortType(x.type)}</span>
@@ -390,6 +394,7 @@ function ObjectLeaf({
   onVisible: (key: string, visible: boolean) => void
   onOpen: OpenHandler
 }) {
+  const menu = useObjectContextMenu()
   const { visible } = useBranchVisibility(item.name, matches(item.name, filter), filter, onVisible)
   return (
     <li className={visible ? undefined : 'hidden'}>
@@ -398,6 +403,7 @@ function ObjectLeaf({
         title={item.full_name}
         onClick={(e) => onOpen(item.full_name, addsToGraph(e))}
         {...tableDragProps(item.full_name)}
+        {...menu(item.full_name, item.type)}
       >
         <span className="tw" />
         <span className="nm">{item.name}</span>
@@ -422,6 +428,7 @@ function useDebounced<T>(value: T, ms: number): T {
 /** Server search after 3 characters, debounced 300 ms. The server source note says whether the search covers all catalogs. */
 function SearchBrowser({ filter }: { filter: string }) {
   const open = useOpenHandler()
+  const menu = useObjectContextMenu()
   const trimmed = filter.trim()
   const enough = trimmed.length >= 3
   const debounced = useDebounced(trimmed, 300)
@@ -448,6 +455,7 @@ function SearchBrowser({ filter }: { filter: string }) {
             title={o.full_name}
             onClick={(e) => open(o.full_name, addsToGraph(e))}
             {...tableDragProps(o.full_name)}
+            {...menu(o.full_name, o.type)}
           >
             <span className="nm">{o.full_name}</span>
             <span className="tag">{shortType(o.type)}</span>

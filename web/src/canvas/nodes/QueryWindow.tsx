@@ -21,6 +21,7 @@ import { remoteNameSource } from '../linking/remoteNames'
 import { flashExtension, flashRanges } from '../editor/flash'
 import { focusFromBlank } from '../editor/focus'
 import { planRun, type RunMode } from '../editor/statements'
+import { useEditorMenu } from '../editor/useEditorMenu'
 import './statementChips.css'
 import { IDLE_RUN, scriptTally, submitStatement, useRunStore, type WindowRun } from '../runState'
 import { buildSnapshot, firstSave, snapshotLine, snapshotResult, statementsOf } from '../snapshot'
@@ -97,6 +98,12 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
   const runners = useRef<Record<RunMode, () => void>>({ current: () => {}, all: () => {} })
   useEffect(() => {
     runners.current = { current: () => startRun('current'), all: () => startRun('all') }
+  })
+  const editorMenu = useEditorMenu({
+    viewRef,
+    run: (mode) => runners.current[mode](),
+    canRun,
+    say: (text) => setNotice(id, text),
   })
   // Mod-Enter must beat the default keymap, where it inserts a blank line.
   const runKeys = useMemo(
@@ -300,7 +307,11 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
               }}
             >
               <Panel id="editor" minSize="90px">
-                <div className="qw-editor nowheel" onMouseDown={(e) => focusFromBlank(e, viewRef.current)}>
+                <div
+                  className="qw-editor nowheel"
+                  onMouseDown={(e) => focusFromBlank(e, viewRef.current)}
+                  onContextMenu={editorMenu.onContextMenu}
+                >
                   <CodeMirror
                     className="qw-cm"
                     value={sqlText}
@@ -361,6 +372,7 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
                 </div>
               </Panel>
             </Group>
+            {editorMenu.menu}
           </div>
         )}
       </div>
