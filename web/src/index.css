@@ -1205,8 +1205,44 @@ tr.stale td {
   text-align: left;
 }
 
-.qw-menu-item:hover {
+.qw-menu-item:hover:not(:disabled),
+.qw-menu-item.active:not(:disabled),
+.qw-menu-format.active {
   background: #ddf4ff;
+}
+
+.qw-menu-item:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.qw-menu-sub {
+  position: relative;
+}
+
+.qw-menu-has-sub {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.qw-menu-arrow {
+  color: var(--muted);
+}
+
+/* A submenu sits beside its item, level with it. */
+.qw-menu-panel {
+  position: absolute;
+  top: -5px;
+  left: 100%;
+  margin-left: 2px;
+}
+
+.qw-menu-panel.flip {
+  left: auto;
+  right: 100%;
+  margin-left: 0;
+  margin-right: 2px;
 }
 
 .qw-menu-sep {

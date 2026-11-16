@@ -495,3 +495,11 @@ export interface SavedResponse {
   /** Canvas saves only: the canvas's revision after this write. */
   revision?: number
 }
+
+/** What POST /api/sql/expand-star sends back: replace `sql[start:end]` of the statement it was given with `text`. */
+export interface StarExpansion {
+  text: string
+  start: number
+  end: number
+  count: number
+}
