@@ -303,7 +303,8 @@ function DrillDown({
         return true
       }
       if (e.key === 'Tab' && !e.shiftKey && !regex) {
-        const row = showHot ? rows[hot] : undefined
+        // The highlighted row, or the top one when the arrow keys have not moved yet.
+        const row = showHot ? rows[hot] : rows[0]
         if (!row) return false
         e.preventDefault()
         setFilter(completeLast(filter, row.item.name, level !== 'objects'))
