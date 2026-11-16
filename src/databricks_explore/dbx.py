@@ -8,7 +8,7 @@ from platformdirs import user_data_path
 from databricks.sdk.service.sql import StatementParameterListItem, StatementState
 
 from . import demo
-from . import sqltools
+from . import search_terms, sqltools
 
 
 def default_data_dir(demo: bool = False) -> Path:
@@ -300,20 +300,27 @@ class Explorer:
                             lambda: self._call("tables.list", fetch, catalog=catalog, schema=schema), refresh)
 
     def search(self, q):
-        """Name search. information_schema if a warehouse is set, else whatever schemas are cached locally."""
+        """Name search. information_schema if a warehouse is set, else whatever schemas are cached locally.
+
+        `q` may be `catalog.schema.name`, `schema.name` or `catalog.`, and `*` or `?` act as wildcards (see search_terms).
+        """
+        term = search_terms.parse_term(q)
         if self.warehouse_id:
-            rows = self.sql("""
+            params = term.patterns()
+            conditions = "".join(f"\n                  AND lower({col}) LIKE :{key} ESCAPE '{search_terms.ESCAPE}'"
+                                 for key, col in (("cat", "table_catalog"), ("sch", "table_schema"), ("q", "table_name"))
+                                 if key in params)
+            rows = self.sql(f"""
                 SELECT table_catalog, table_schema, table_name, table_type
                 FROM system.information_schema.tables
-                WHERE lower(table_name) LIKE lower(concat('%', :q, '%'))
-                  AND left(table_name, 2) <> '__'  -- not NOT startswith(): on information_schema that filter drops every row
+                WHERE left(table_name, 2) <> '__'  -- not NOT startswith(): on information_schema that filter drops every row{conditions}
                 ORDER BY table_name, table_catalog, table_schema
-                LIMIT 300""", q=q)
+                LIMIT 300""", **params)
             return {"source": "information_schema", "data": [
                 {"full_name": f"{r['table_catalog']}.{r['table_schema']}.{r['table_name']}",
                  "name": r["table_name"], "type": r["table_type"]} for r in rows]}
         hits = [o for p in self.root.glob("*/*/objects.json")
-                for o in json.loads(p.read_text(encoding="utf-8"))["data"] if q.lower() in o["name"].lower()]
+                for o in json.loads(p.read_text(encoding="utf-8"))["data"] if (q.lower() in o["name"].lower() if term.simple else _path_matches(term, o["full_name"]))]
         return {"source": "cached schemas only (pick a SQL warehouse to search everything)",
                 "data": sorted(hits, key=lambda x: (x["name"], x["full_name"]))[:300]}
 
@@ -549,13 +556,22 @@ def cached_metadata(explorer):
     return sorted(tables.values(), key=lambda t: t["table"])
 
 
+def _path_matches(term, full_name):
+    """True when `catalog.schema.table` satisfies a SearchTerm that has a path or a glob."""
+    parts = full_name.split(".")
+    return len(parts) == 3 and term.matches(*parts)
+
+
 def cached_search(explorer, q, limit=300):
     """Search table names across everything in the local cache: every catalog and schema ever browsed, and every table
     whose object was ever fetched. `q` matches the table name or the full `catalog.schema.table` name, any case.
+    A term with dots or `*`/`?` is split as in `search_terms.parse_term` and each part must match.
     Returns {"source", "data": [{"full_name", "name", "type"}]}, name matches first, at most `limit`."""
     needle = q.strip().lower()
+    term = search_terms.parse_term(q)
     hits = [{"full_name": t["table"], "name": t["table"].rsplit(".", 1)[-1], "type": t["type"]}
-            for t in cached_metadata(explorer) if needle and needle in t["table"].lower()]
+            for t in cached_metadata(explorer)
+            if needle and (needle in t["table"].lower() if term.simple else _path_matches(term, t["table"]))]
     hits.sort(key=lambda h: (needle not in h["name"].lower(), h["name"], h["full_name"]))
     return {"source": "tables already browsed (pick a SQL warehouse to search everything, or type the full name)",
             "data": hits[:limit]}

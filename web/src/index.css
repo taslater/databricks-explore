@@ -382,9 +382,75 @@ tr.stale td {
   flex: 1;
 }
 
+.pick-filter-wrap {
+  position: relative;
+  margin: 4px 0;
+}
+
 .pick-filter {
   width: 100%;
-  margin: 4px 0;
+  margin: 0;
+  box-sizing: border-box;
+  padding-right: 30px;
+}
+
+.pick-filter.invalid {
+  outline: 1px solid var(--error);
+  border-color: var(--error);
+}
+
+.pick-filter-error {
+  color: var(--error);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+/* The VS Code-style ".*" switch, inside the right edge of the input. */
+.pick-regex {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  color: var(--muted);
+  font: 600 12px/1 ui-monospace, monospace;
+  cursor: pointer;
+}
+
+.pick-regex:hover {
+  background: #eef6ff;
+}
+
+.pick-regex.on {
+  border-color: var(--accent);
+  background: #ddf4ff;
+  color: var(--accent);
+}
+
+.pick-hit {
+  background: #fff1a8;
+  color: inherit;
+  border-radius: 2px;
+}
+
+.pick-item.hi {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  background: #eef6ff;
+}
+
+/* Rank 3 matches (the text is somewhere in the middle of the name), set apart by a thin rule. */
+.pick-item.dim {
+  opacity: 0.6;
+}
+
+.pick-divider {
+  height: 0;
+  margin: 3px 6px;
+  border-top: 1px solid var(--border);
 }
 
 .pick-status {

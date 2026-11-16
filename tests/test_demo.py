@@ -103,6 +103,15 @@ def test_search_uses_the_fake_information_schema(client):
     assert {h["full_name"] for h in hits} == {"demo.sales.orders", "demo.sales.order_items"}
 
 
+def test_search_through_the_demo_takes_paths_and_globs(client):
+    def found(q):
+        return {h["full_name"] for h in client.get("/api/search", query_string={"q": q}).json["data"]}
+
+    assert found("demo.sales.order") == {"demo.sales.orders", "demo.sales.order_items"}
+    assert found("sales.order*") == {"demo.sales.orders", "demo.sales.order_items"}
+    assert found("nope.order") == set()
+
+
 def _data_dir_name(tmp_path, **env):
     """dbx.DATA in a fresh interpreter. The per-user folders are redirected into tmp_path so nothing is created for real."""
     home = {k: str(tmp_path) for k in ("HOME", "USERPROFILE", "XDG_DATA_HOME", "LOCALAPPDATA", "APPDATA")}
