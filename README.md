@@ -173,6 +173,7 @@ cd web && npm ci && npm run build && cd ..    # once, and again after frontend c
 uv run databricks-explore --demo --no-browser # or without --demo, from source
 uv run pytest -q
 cd web && npm test
+cd web && npx playwright install chromium && npm run e2e   # browser scenarios on the demo app (web/e2e)
 ```
 The build writes the UI to `src/databricks_explore/web_dist/` (git-ignored), which the app serves, with `THIRD-PARTY-NOTICES.txt` for the npm packages bundled into it. For hot reload run the server with `--debug`, then in a second terminal `cd web && npm run dev` and open http://127.0.0.1:5173 (Vite proxies `/api` to the Flask server on port 8765, so use the default port).
 
