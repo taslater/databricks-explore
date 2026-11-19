@@ -8,6 +8,7 @@ import uuid
 
 from .. import canvases
 from .. import dbx
+from .. import graphs
 from .. import layout
 from .. import lineage as lineage_walk
 from .. import relationships
@@ -67,7 +68,12 @@ NODE = {"type": "object", "required": ["type"], "additionalProperties": False,
 # ---------------------------------------------------------------- reading
 
 def _load(name: str) -> dict:
-    return canvases.load_canvas(name)
+    try:
+        return canvases.load_canvas(name)
+    except canvases.CanvasNotFound as e:
+        if graphs.exists(name):  # a saved Graph diagram is a different store
+            raise canvases.CanvasNotFound(f"{e}; a saved graph has that name: use get_graph (graphs and canvases are separate)") from e
+        raise
 
 
 def _score_line(canvas: dict) -> str:
@@ -119,6 +125,8 @@ def _next_id(prefix: str, used: set) -> str:
 def list_canvases(ctx, args):
     names = canvases.list_canvases()
     lines = [f"{len(names)} canvas(es)"]
+    if not names:
+        lines.append("Graphs saved from the Graph tab are a separate store: list_graphs.")
     for n in names:
         try:
             c = _load(n)

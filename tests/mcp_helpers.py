@@ -68,6 +68,8 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(dbx, "CACHE", tmp_path / "cache")
     monkeypatch.setattr(dbx, "LOGS", tmp_path / "logs")
     (tmp_path / "logs").mkdir()
+    monkeypatch.setattr(dbx, "DIAGRAMS", tmp_path / "diagrams")
+    (tmp_path / "diagrams").mkdir()
     monkeypatch.setattr(canvases, "CANVASES", tmp_path / "canvases")
     (tmp_path / "canvases").mkdir()
     monkeypatch.setattr(demo, "NORMAL_DELAY", 0)

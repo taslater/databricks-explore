@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 from .. import dbx
 
-from . import tools_canvas, tools_data  # noqa: F401  (importing registers the tools)
+from . import tools_canvas, tools_data, tools_graph  # noqa: F401  (importing registers the tools)
 from .schema import validate
 from .tooling import REGISTRY, Context, ToolError
 
@@ -14,6 +14,7 @@ INSTRUCTIONS = (
     "Local Unity Catalog explorer. Read the catalog, relationships and concepts, run read-only SQL, and edit canvases next to the person using the browser. "
     "Start with status. Tools that need a connection say so: the person connects in the app, you cannot. "
     "No tool writes to the workspace. Canvas edits are saved at once and undoable with undo_canvas. "
+    "Graphs saved from the Graph tab are a separate store from canvases: list_graphs and get_graph read them. "
     "On canvases prefer structural placement (place: right_of/below/inside an anchor id) over absolute coordinates, and read the doctor score each edit returns.")
 
 PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS, INTERNAL_ERROR = -32700, -32600, -32601, -32602, -32603

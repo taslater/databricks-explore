@@ -165,19 +165,39 @@ Response:
 - `kind` is one of `job`, `notebook`, `pipeline`, `dashboard`, `query`, or `file`. For `file`, `id` is the string `"None"` and `url` is `null`, because `_link` has no URL mapping for files. This is an existing quirk.
 - `url` is `null` when the producer is in another workspace or has no id.
 
+### Diagrams
+
+A saved graph is `data/diagrams/<stem>.json`: `{"name", "saved_at", "focus_schema", "nodes": [{"data", "position"}], "edges": [{"data"}]}` (positions are node centers; see `web/src/graph/diagram.ts`). The stem is the name with anything but letters, digits, `_`, `.` and `-` turned into `_`. Everywhere a route or MCP tool takes a name, the name as typed (`Returns graph`) or as stored (`Returns_graph`) works. No connection needed. Agents read and change saved graphs over MCP (`contracts/mcp.md`, "Tools: saved graphs").
+
+Every saved graph has a **revision**: a counter that every write bumps, by the page or by an agent. It lives beside the file in `data/diagram_history/<stem>/meta.json`, never inside the diagram, and outlives a delete. A graph saved before revisions existed is at revision 0.
+
 ### `GET /api/diagrams`
 
 Returns a JSON array of saved diagram names (file stems of `data/diagrams/*.json`), sorted.
 
 ### `GET /api/diagrams/<name>`
 
-Returns the saved diagram file as stored: `{"name": str, "saved_at": str, ...}` plus whatever the client saved. A missing file returns a 500 error.
+Returns the saved diagram file as stored: `{"name": str, "saved_at": str, ...}` plus whatever the client saved. **404** for a missing graph.
 
 ### `POST /api/diagrams`
 
-Body: the diagram object. `name` is required. The server writes `data/diagrams/<safe(name)>.json` with `{"name", "saved_at": <now>, ...body}`. Body keys override the server defaults, so a client-supplied `saved_at` wins.
+Body: the diagram object. `name` is required, `nodes` and `edges` must be lists when given (**400** otherwise). The server writes `data/diagrams/<stem>.json` with `{...body, "name", "saved_at": <now>}`: the server's time always wins. A name that differs from an existing graph's only by case is a **400**.
 
-Response: `{"saved": "<safe(name)>"}`
+Optional request header `X-Base-Revision: <n>`, the revision the sender started from. When the graph exists and is no longer at that revision, nothing is written and the answer is **409** `{"error": "graph g was saved by agent since revision 4 (now revision 6)", "name": "g", "revision": 6, "by": "agent"}`. A bad header value is 400. With no header the save is unchecked.
+
+Response: `{"saved": "<stem>", "revision": <n>}`
+
+### `GET /api/diagrams/<name>/revision`
+
+The page polls it every 2 seconds. Response: `{"name": "g", "revision": 6, "by": "agent"}`. `by` is `ui` or `agent` (`null`, with revision 0, for a graph never saved by this version). **404** for a missing graph.
+
+### `POST /api/diagrams/<name>/rename`
+
+Body: `{"new_name": str}`. Renames the file and the `name` inside it; the new graph's revision is one past the old one's. Response: `{"renamed": "<new stem>", "revision": <n>}`. **400** for a missing or invalid `new_name`, a taken name, a rename to the same name, or one that changes only the case; **404** for a missing graph.
+
+### `DELETE /api/diagrams/<name>`
+
+Moves the file to `data/diagrams/.trash/<stem>.<time>.r<revision>.json` (a copy for restoring by hand; the list above ignores the folder). Response: `{"deleted": "<stem>", "trash": "<file name>"}`. **404** for a missing graph.
 
 ---
 

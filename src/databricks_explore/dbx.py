@@ -579,18 +579,7 @@ def cached_search(explorer, q, limit=300):
 
 # ---------- diagrams ----------
 
-def list_diagrams():
-    return sorted(p.stem for p in DIAGRAMS.glob("*.json"))
-
-
-def save_diagram(name, payload):
-    p = DIAGRAMS / f"{safe(name)}.json"
-    p.write_text(json.dumps({"name": name, "saved_at": now(), **payload}, indent=2), encoding="utf-8")
-    return p.stem
-
-
-def load_diagram(name):
-    return json.loads((DIAGRAMS / f"{safe(name)}.json").read_text(encoding="utf-8"))
+# Saved graphs (data/diagrams/) are read and written by graphs.py, which keeps their revisions.
 
 
 # ---------- read-only calls for the ontology import (ontology.py) ----------
