@@ -18,6 +18,8 @@ export interface DeriveInput {
   focusSchema: string | null
   filters: EdgeFilters
   hoverId: string | null
+  /** Nodes to leave out whatever the filters say, with the edges that touch them (collapsed groups, elided views: graph/collapse.ts). */
+  forceHidden?: ReadonlySet<string>
 }
 
 /** Edge `via` labels: for each FK parent, the child columns of the last fk edge that points at it. */
@@ -96,7 +98,8 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
 
   // Edge visibility.
   const edgeHidden = new Map<string, boolean>()
-  for (const e of input.edges) edgeHidden.set(e.id, !edgeShown(e.data!.info, filters))
+  const forced = input.forceHidden
+  for (const e of input.edges) edgeHidden.set(e.id, !edgeShown(e.data!.info, filters) || !!forced?.has(e.source) || !!forced?.has(e.target))
 
   // Node visibility: a node is hidden when it has edges and all of them are hidden. The focus node and pinned nodes always show.
   const edgesByNode = new Map<string, FlowEdge[]>()
@@ -137,7 +140,7 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
 
   const nodes: FlowNode[] = input.nodes.map((n) => {
     const edges = edgesByNode.get(n.id) ?? []
-    const hidden = !n.data.focus && !n.data.pinned && edges.length > 0 && edges.every((e) => edgeHidden.get(e.id))
+    const hidden = !!forced?.has(n.id) || (!n.data.focus && !n.data.pinned && edges.length > 0 && edges.every((e) => edgeHidden.get(e.id)))
     const external = n.data.schema !== focusSchema
     return {
       ...n,

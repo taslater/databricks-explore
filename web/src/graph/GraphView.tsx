@@ -20,6 +20,9 @@ import { conceptOverlay, isConceptEdge } from '../concepts/overlay'
 import { ConceptNode } from './ConceptNode'
 import { useGraphActions } from './actions'
 import { deriveFlow } from './derive'
+import { GroupBoxNode, groupBoxNodes, type GroupBoxFlowNode } from './CollapseMarks'
+import { isSummaryId, withMergedTransforms, BOX_PREFIX } from './collapse'
+import { useCollapseView, useGroupTags } from './useCollapse'
 import { EDGE_TYPES } from './edges'
 import { useNodeColors } from './ColorByControl'
 import { withFills } from './colorBy'
@@ -43,7 +46,7 @@ import { useUiStore } from '../store/uiStore'
 import { TABLE_DRAG_MIME } from '../shared/tableDrag'
 
 // Defined at module scope so React Flow does not rebuild its node and edge types on every render.
-const NODE_TYPES = { table: TableNode, concept: ConceptNode }
+const NODE_TYPES = { table: TableNode, concept: ConceptNode, groupbox: GroupBoxNode }
 const CONNECTION_LINE_STYLE = { stroke: EDGE_COLORS.manual, strokeWidth: 2 }
 /** Keys that add a clicked node to the selection: Shift as in most diagram tools, plus the platform modifier. */
 const MULTI_SELECT_KEYS = ['Shift', 'Meta', 'Control']
@@ -106,7 +109,6 @@ function GraphCanvas() {
   )
   const actions = useGraphActions()
   const rawNodes = useGraphStore((s) => s.nodes)
-  const rawEdges = useGraphStore((s) => s.edges)
   const columnEdges = useGraphStore((s) => s.columnEdges)
   const focusSchema = useGraphStore((s) => s.focusSchema)
   const filters = useGraphStore((s) => s.filters)
@@ -117,14 +119,19 @@ function GraphCanvas() {
   const connected = useUiStore((s) => s.connectedProfile)
 
   const trace = useActiveTrace()
+  // Collapsed groups and elided chains: the nodes and edges added to the graph, and the nodes it leaves out. A traced table is never left out.
+  const tracedNodes = useMemo(() => traceNodes(rawNodes, trace), [rawNodes, trace])
+  const view = useCollapseView(tracedNodes)
+  useGroupTags()
   const flow = useMemo(
     () =>
       traceFade(
-        deriveFlow({ nodes: traceNodes(rawNodes, trace), edges: rawEdges, columnEdges: traceColumnEdges(columnEdges, rawNodes, trace), focusSchema, filters, hoverId }),
+        deriveFlow({ nodes: view.nodes, edges: view.edges, columnEdges: traceColumnEdges(columnEdges, rawNodes, trace), focusSchema, filters, hoverId, forceHidden: view.hidden }),
         trace,
       ),
-    [rawNodes, rawEdges, columnEdges, focusSchema, filters, hoverId, trace],
+    [view, rawNodes, columnEdges, focusSchema, filters, hoverId, trace],
   )
+  const boxes = useMemo(() => groupBoxNodes(view, flow.nodes), [view, flow.nodes])
 
   // The Concepts toggle: for the tables on the graph, their linked concepts, drawn above them. Never stored or laid out.
   const tableIds = useMemo(() => rawNodes.map((n) => n.id).filter((id) => !id.startsWith('ph:')), [rawNodes])
@@ -143,14 +150,14 @@ function GraphCanvas() {
   useNeighborScan(rawNodes)
   // The fill chosen by Color by (none in type mode, where each node keeps its type color).
   const fills = useNodeColors().colors?.fills ?? null
-  const drawnNodes = useMemo<Array<FlowNode | ConceptFlowNode>>(
-    () => [...withFills(withNeighborCounts(withNodeFacts(withCertification(flow.nodes, certification.data), nodeFacts.data), neighbors, filters), fills), ...overlay.nodes],
-    [flow.nodes, overlay.nodes, certification.data, nodeFacts.data, neighbors, filters, fills],
+  const drawnNodes = useMemo<Array<FlowNode | ConceptFlowNode | GroupBoxFlowNode>>(
+    () => [...boxes, ...withFills(withNeighborCounts(withNodeFacts(withCertification(flow.nodes, certification.data), nodeFacts.data), neighbors, filters), fills), ...overlay.nodes],
+    [boxes, flow.nodes, overlay.nodes, certification.data, nodeFacts.data, neighbors, filters, fills],
   )
   const ends = useCardinality()
   const transforms = useEdgeTransforms()
   const drawnEdges = useMemo(
-    () => [...withTransforms(withCardinality(withGrainChanges(flow.edges, nodeFacts.data), ends.data), transforms.data), ...overlay.edges],
+    () => [...withMergedTransforms(withTransforms(withCardinality(withGrainChanges(flow.edges, nodeFacts.data), ends.data), transforms.data), transforms.data), ...overlay.edges],
     [flow.edges, overlay.edges, nodeFacts.data, ends.data, transforms.data],
   )
 
@@ -172,14 +179,21 @@ function GraphCanvas() {
 
   // Concept nodes and their edges are drawn, not stored: their changes (size, selection) never reach the graph store.
   const isConcept = (id: string) => id.startsWith('concept:')
-  const onNodesChange = (changes: NodeChange<FlowNode | ConceptFlowNode>[]) =>
+  // A collapsed group's node is drawn, not stored, but it can be dragged: its place is kept in the store. A group's box follows its members.
+  const idOf = (c: NodeChange<FlowNode | ConceptFlowNode | GroupBoxFlowNode>) => ('id' in c ? c.id : c.item.id)
+  const onNodesChange = (changes: NodeChange<FlowNode | ConceptFlowNode | GroupBoxFlowNode>[]) => {
+    for (const c of changes) {
+      if (c.type === 'position' && c.position && isSummaryId(c.id)) useGraphStore.getState().setGroupPosition(c.id.slice('summary:'.length), c.position)
+    }
     useGraphStore
       .getState()
-      .applyNodeChanges(changes.filter((c) => !isConcept('id' in c ? c.id : c.item.id)) as NodeChange<FlowNode>[])
+      .applyNodeChanges(changes.filter((c) => !isConcept(idOf(c)) && !isSummaryId(idOf(c)) && !idOf(c).startsWith(BOX_PREFIX)) as NodeChange<FlowNode>[])
+  }
   const onEdgesChange = (changes: EdgeChange<FlowEdge>[]) =>
     useGraphStore.getState().applyEdgeChanges(changes.filter((c) => !('id' in c && isConceptEdge(c.id))))
 
-  const onNodeClick: NodeMouseHandler<FlowNode | ConceptFlowNode> = (_, node) => {
+  const onNodeClick: NodeMouseHandler<FlowNode | ConceptFlowNode | GroupBoxFlowNode> = (_, node) => {
+    if (node.type === 'groupbox') return
     if (node.type === 'concept') {
       useConceptsStore.getState().select((node as ConceptFlowNode).data.conceptId)
       useUiStore.getState().setView('concepts')
@@ -191,11 +205,12 @@ function GraphCanvas() {
     if (!isConceptEdge(edge.id)) useGraphStore.getState().setSelection({ kind: 'edge', id: edge.id })
   }
   const onEdgeContextMenu = useEdgeContextMenu()
-  const onNodeDoubleClick: NodeMouseHandler<FlowNode | ConceptFlowNode> = (_, node) => {
-    if (node.type !== 'concept') void actions.expand(node.id)
+  const onNodeDoubleClick: NodeMouseHandler<FlowNode | ConceptFlowNode | GroupBoxFlowNode> = (_, node) => {
+    if (isSummaryId(node.id)) useGraphStore.getState().setGroupCollapsed((node as FlowNode).data.summary!.key, false)
+    else if (node.type === 'table') void actions.expand(node.id)
   }
-  const onNodeMouseEnter: NodeMouseHandler<FlowNode | ConceptFlowNode> = (_, node) => {
-    if (node.type !== 'concept') useGraphStore.getState().setHover(node.id)
+  const onNodeMouseEnter: NodeMouseHandler<FlowNode | ConceptFlowNode | GroupBoxFlowNode> = (_, node) => {
+    if (node.type === 'table') useGraphStore.getState().setHover(node.id)
   }
   const onNodeMouseLeave = () => useGraphStore.getState().setHover(null)
 
@@ -207,7 +222,7 @@ function GraphCanvas() {
   }
 
   return (
-    <ReactFlow<FlowNode | ConceptFlowNode, FlowEdge>
+    <ReactFlow<FlowNode | ConceptFlowNode | GroupBoxFlowNode, FlowEdge>
       nodes={drawnNodes}
       edges={drawnEdges}
       nodeTypes={NODE_TYPES}

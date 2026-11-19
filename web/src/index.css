@@ -3501,3 +3501,58 @@ button.app-dialog-danger {
   font-size: 12px;
   box-sizing: border-box;
 }
+
+/* A collapsed group is one node; an open group is a light box round its tables. */
+.tbl-node.group-summary {
+  box-sizing: border-box;
+  width: 176px;
+  height: 46px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: double;
+  border-width: 4px;
+  background: #eef2f6;
+  font-weight: 600;
+}
+
+.group-box {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: 1px solid #c3ccd6;
+  border-radius: 8px;
+  background: rgba(238, 242, 246, 0.45);
+  pointer-events: none;
+}
+
+.group-box-name {
+  position: absolute;
+  top: 4px;
+  left: 28px;
+  color: #5d6b7a;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.group-toggle {
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: #5d6b7a;
+  font-size: 12px;
+  line-height: 14px;
+  cursor: pointer;
+  pointer-events: all;
+}
+
+.group-box .group-toggle {
+  position: absolute;
+  top: 3px;
+  left: 8px;
+}
+
+.edge-glyph.merged {
+  white-space: nowrap;
+}

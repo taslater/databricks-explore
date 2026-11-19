@@ -12,6 +12,7 @@ from typing import Optional
 
 from . import dbx
 from .edge_families import FLOW_KINDS
+from .graph_collapse import check_grouping
 
 LOCK = threading.RLock()  # one writer at a time, so an agent's read-modify-write cannot interleave with a save
 NAME_MAX = 120
@@ -132,7 +133,7 @@ def check_color_by(value) -> str:
 
 
 def check_body(data) -> str:
-    """Validate a diagram body: an object with a name, lists for nodes and edges and a color_by when present. Returns the stored name."""
+    """Validate a diagram body: an object with a name, lists for nodes and edges, and a color_by and a grouping when present. Returns the stored name."""
     if not isinstance(data, dict):
         raise GraphInvalid("(root): a diagram must be an object")
     for key in ("nodes", "edges"):
@@ -140,6 +141,11 @@ def check_body(data) -> str:
             raise GraphInvalid(f"{key}: must be a list")
     if "color_by" in data:
         check_color_by(data["color_by"])
+    if "grouping" in data:
+        try:
+            check_grouping(data["grouping"])
+        except ValueError as e:
+            raise GraphInvalid(str(e)) from e
     return stem_of(data.get("name"))
 
 
@@ -426,4 +432,6 @@ def build_body(name: str, nodes: list[dict], edges: list[dict], previous: Option
     body = {"name": name, "focus_schema": focus_schema, "nodes": out_nodes, "edges": [{"data": e} for e in edges]}
     if color_by and check_color_by(color_by) != "type":
         body["color_by"] = color_by
+    if previous and previous.get("grouping"):  # how the graph is grouped is the person's, and stays when its tables change
+        body["grouping"] = previous["grouping"]
     return body

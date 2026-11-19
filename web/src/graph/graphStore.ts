@@ -8,6 +8,7 @@ import { computeLayout, computeScopedLayout } from './layout'
 import { layoutInput } from './layoutInput'
 import type { NeighborSet } from './neighbors'
 import type { ColorBy } from './colorBy'
+import { collapseGraph, DEFAULT_GROUPING, groupingSignature, type GroupBy, type Grouping } from './collapse'
 import type { DiagramPayload } from './diagram'
 import type { DiagramRevision } from '../api/diagrams'
 import type { EdgeFilters, FlowEdge, FlowNode, Selection } from './types'
@@ -65,6 +66,22 @@ interface GraphState {
   layoutFresh: boolean
   /** Fit the view on the next render where every visible node has been measured. */
   fitPending: boolean
+  /** How the nodes are grouped, which groups are collapsed, and whether chains of pass-through views are drawn as one edge. Saved with the graph as `grouping`. */
+  grouping: Grouping
+  /** Where each collapsed group's node sits (by group key). Never saved. */
+  groupPositions: Record<string, { x: number; y: number }>
+  /** The tag value of each table, while the graph is grouped by a tag. Read by useGroupTags, never saved. */
+  groupTags: Record<string, string>
+  setGroupBy: (by: GroupBy) => void
+  /** Collapses or expands one group (or, with undefined, goes back to the default rule), then lays the graph out again. */
+  setGroupCollapsed: (key: string, collapsed: boolean | undefined) => void
+  /** Sets every named group at once. */
+  setGroupsCollapsed: (keys: string[], collapsed: boolean) => void
+  setChains: (on: boolean) => void
+  /** Draws a chain of pass-through views in full. */
+  showChain: (id: string) => void
+  setGroupPosition: (key: string, position: { x: number; y: number }) => void
+  setGroupTags: (tags: Record<string, string>) => void
   /** Flow neighbors read for each table (neighbors.ts), for the counts at a node's sides. Never saved. */
   neighbors: Record<string, NeighborSet>
   /** The tables each expansion added, by `<table>|<up or down>`, so it can be collapsed. Never saved. */
@@ -121,6 +138,9 @@ interface GraphState {
   loadDiagram: (payload: DiagramPayload) => void
 }
 
+/** What a change to the grouping asks for: the graph laid out again from scratch, since nodes came or went. */
+const RELAYOUT = { layoutPending: true, layoutFresh: true, layoutScope: null } as const
+
 /** The nodes an earlier layout (or a saved diagram) positioned: the next layout keeps their order. */
 const placedIds = new Set<string>()
 let layoutRunning = false
@@ -146,6 +166,23 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   viewport: null,
   neighbors: {},
   expansions: {},
+  grouping: DEFAULT_GROUPING,
+  groupPositions: {},
+  groupTags: {},
+  setGroupBy: (by) => set((s) => ({ grouping: { ...s.grouping, by, overrides: {} }, ...RELAYOUT })),
+  setGroupCollapsed: (key, collapsed) =>
+    set((s) => {
+      const overrides = { ...s.grouping.overrides }
+      if (collapsed === undefined) delete overrides[key]
+      else overrides[key] = collapsed
+      return { grouping: { ...s.grouping, overrides }, ...RELAYOUT }
+    }),
+  setGroupsCollapsed: (keys, collapsed) =>
+    set((s) => ({ grouping: { ...s.grouping, overrides: { ...s.grouping.overrides, ...Object.fromEntries(keys.map((k) => [k, collapsed])) } }, ...RELAYOUT })),
+  setChains: (chains) => set((s) => ({ grouping: { ...s.grouping, chains, shownChains: [] }, ...RELAYOUT })),
+  showChain: (id) => set((s) => ({ grouping: { ...s.grouping, shownChains: [...new Set([...s.grouping.shownChains, id])] }, selection: null, ...RELAYOUT })),
+  setGroupPosition: (key, position) => set((s) => ({ groupPositions: { ...s.groupPositions, [key]: position } })),
+  setGroupTags: (groupTags) => set({ groupTags, ...(get().grouping.by.startsWith('tag:') ? RELAYOUT : {}) }),
   setNeighbors: (id, found) => set({ neighbors: { ...get().neighbors, [id]: found } }),
   recordExpansion: (key, ids) => set({ expansions: { ...get().expansions, [key]: [...new Set([...(get().expansions[key] ?? []), ...ids])] } }),
   applyNodeFacts: (fact) =>
@@ -293,6 +330,9 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       viewport: null,
       neighbors: {},
       expansions: {},
+      grouping: DEFAULT_GROUPING,
+      groupPositions: {},
+      groupTags: {},
       openDiagram: null,
       diagramChanged: null,
     })
@@ -314,7 +354,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       const s = get()
       const fresh = s.layoutFresh
       const { nodes: laid, links } = layoutInput(s, fresh ? new Set() : placedIds)
-      const ids = laid.map((n) => n.id).join('|')
+      const stamp = (g: typeof s) => g.nodes.map((n) => n.id).join('|') + '#' + groupingSignature(g.grouping) + g.grouping.shownChains.join()
       const scope = s.layoutScope
       // A level change only moves the parts of the graph it touches, and leaves the view where it is, unless they would then overlap.
       const scoped = scope ? await computeScopedLayout(laid, links, scope) : null
@@ -322,11 +362,12 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       for (const id of positions.keys()) placedIds.add(id)
       set((now) => {
         // Nodes added or a new scope requested while this ran: the positions still apply, and another layout follows.
-        const settled = now.nodes.map((n) => n.id).join('|') === ids && now.layoutScope === scope
+        const settled = stamp(now) === stamp(s) && now.layoutScope === scope
         return {
           layoutScope: settled ? null : now.layoutScope,
           fitPending: !scoped,
           layoutFresh: settled ? false : now.layoutFresh,
+          groupPositions: { ...now.groupPositions, ...Object.fromEntries([...positions].filter(([id]) => id.startsWith('summary:')).map(([id, p]) => [id.slice('summary:'.length), p])) },
           nodes: now.nodes.map((n) => {
             const p = positions.get(n.id)
             return p ? { ...n, position: p } : n
@@ -351,10 +392,15 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       expansions: {},
       focusSchema: payload.focusSchema,
       colorBy: payload.colorBy ?? 'type',
+      grouping: payload.grouping ?? DEFAULT_GROUPING,
+      groupPositions: {},
       selection: null,
       hoverId: null,
       layoutPending: false,
       fitPending: true,
     })
+    // A collapsed group has no saved place: lay the graph out so its node gets one.
+    const { grouping, nodes, edges, filters } = get()
+    if (collapseGraph({ nodes, edges, filters, grouping, groupTags: {} }).groups.some((g) => g.collapsed)) set({ layoutPending: true, layoutFresh: true })
   },
 }))

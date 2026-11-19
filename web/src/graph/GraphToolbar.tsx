@@ -7,6 +7,7 @@ import { useUiStore } from '../store/uiStore'
 import { messageOf } from './actions'
 import { toDiagramBody, fromDiagram } from './diagram'
 import { ColorByControl } from './ColorByControl'
+import { GroupControl } from './CollapseControls'
 import { GraphExportButton } from './GraphExport'
 import { useMiningWatcher } from './MiningPanel'
 import { ProfileButton } from './ProfileDialog'
@@ -94,7 +95,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
     setSaving(true)
     try {
       const res = await saveDiagramChecked(
-        toDiagramBody(name, { nodes: g.nodes, edges: g.edges, focusSchema: g.focusSchema, colorBy: g.colorBy }),
+        toDiagramBody(name, { nodes: g.nodes, edges: g.edges, focusSchema: g.focusSchema, colorBy: g.colorBy, grouping: g.grouping }),
         checked,
       )
       void qc.invalidateQueries({ queryKey: ['diagrams'] })
@@ -234,6 +235,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
       <ProfileButton />
       <CertificationControl />
       <ColorByControl />
+      <GroupControl />
       <GraphExportButton />
       <span className="spacer" />
       <span

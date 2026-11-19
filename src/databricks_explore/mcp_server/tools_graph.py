@@ -5,10 +5,12 @@ import json
 from .. import cardinality
 from .. import column_trace
 from .. import dbx
+from .. import graph_collapse
 from .. import graph_export
 from .. import graphs
 from ..edge_families import family_of
 from .. import nodefacts
+from .. import nodemeta
 from .. import relationships
 from .. import relprofile
 from .. import transforms
@@ -38,6 +40,16 @@ def _nodes_of(data: dict) -> list[dict]:
 
 def _edges_of(data: dict) -> list[dict]:
     return [e["data"] for e in data.get("edges") or [] if isinstance(e, dict) and isinstance(e.get("data"), dict)]
+
+
+def _group_tags(ctx, grouping: dict, tables: list[str]) -> dict[str, str]:
+    """The tag value of each table, for a graph grouped by a tag: from the tags the app has read, never a warehouse. Empty otherwise."""
+    by = grouping.get("by", "")
+    ex = ctx.explorer()
+    if not by.startswith("tag:") or not ex:
+        return {}
+    found = nodemeta.meta(ex, tables, fetch=False)
+    return {t: (m["tags"][by[4:]] or "(set)") for t, m in found.items() if isinstance(m.get("tags"), dict) and by[4:] in m["tags"]}
 
 
 def _card_facts(ctx, tables: list[str]) -> dict[str, dict]:
@@ -131,7 +143,7 @@ def list_graphs(ctx, args):
     return text("\n".join(lines))
 
 
-@tool("get_graph", "Read a graph saved from the Graph tab: its tables (kind, focus, and, when known, grain with its basis, rows, bytes, last_write and late from the cached size and history reads) and edges (kind, family: flow, reference or meaning, source, target, status, join columns, and for a reference edge its crow's-foot cardinality: the end at each table that is known, with its basis; for a flow edge its transform when the SQL behind it is known: the aggregate, join, union, dedupe and filters its source goes through). The name may be typed (Returns graph) or stored (Returns_graph). json gives every field, with positions.",
+@tool("get_graph", "Read a graph saved from the Graph tab: its tables (kind, focus, and, when known, grain with its basis, rows, bytes, last_write and late from the cached size and history reads) and edges (kind, family: flow, reference or meaning, source, target, status, join columns, and for a reference edge its crow's-foot cardinality: the end at each table that is known, with its basis; for a flow edge its transform when the SQL behind it is known: the aggregate, join, union, dedupe and filters its source goes through), the groups the Graph draws (by schema or tag: table count, collapsed or open) and the chains of pass-through views it draws as one edge. The name may be typed (Returns graph) or stored (Returns_graph). json gives every field, with positions.",
       obj({"name": NAME, "format": {"type": "string", "enum": ["text", "json"], "description": "text (default, compact) or json"}}, ("name",)))
 def get_graph(ctx, args):
     data = _run(graphs.load_graph, args["name"])
@@ -141,10 +153,13 @@ def get_graph(ctx, args):
     card = _card_facts(ctx, [n["id"] for n in nodes])
     ends = _cardinalities(ctx, edges)
     how = _transforms(ctx, edges)
+    grouping = graph_collapse.grouping_of(data)
+    shape = graph_collapse.plan(nodes, edges, grouping, _group_tags(ctx, grouping, [n["id"] for n in nodes]))
     if args.get("format") == "json":
         return text(json.dumps({
             "name": info["name"], "title": data.get("name"), "revision": info["revision"], "by": info["by"], "saved_at": data.get("saved_at"),
             "focus_schema": data.get("focus_schema"), "color_by": data.get("color_by") or "type",
+            "grouping": {"by": shape["by"], "chains": shape["chains_on"]}, "groups": shape["groups"], "chains": shape["chains"],
             "nodes": [{"table": n["id"], "kind": n.get("kind", "table"), **({"focus": True} if n.get("focus") else {}),
                        **({"pinned": True} if n.get("pinned") else {}), **_facts_json(card.get(n["id"], {})), "x": (pos.get(n["id"]) or {}).get("x"), "y": (pos.get(n["id"]) or {}).get("y")}
                       for n in nodes],
@@ -158,6 +173,7 @@ def get_graph(ctx, args):
     lines = [head, f"focus schema: {data.get('focus_schema') or 'none'}. Color by: {data.get('color_by') or 'type'}. Graph filters are not saved with a graph: the page's defaults apply on load.", "Tables:"]
     for n in nodes:
         lines.append(f"  {n['id']} [{n.get('kind', 'table')}]" + (" focus" if n.get("focus") else "") + (" pinned" if n.get("pinned") else "") + _facts_text(card.get(n["id"], {})))
+    lines.extend(graph_collapse.text_lines(shape))
     lines.append("Edges:" if edges else "Edges: none")
     for e in edges:
         arrow = "<->" if e.get("bidir") else ("->" if e.get("directed", True) else "--")
