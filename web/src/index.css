@@ -3401,6 +3401,87 @@ button.app-dialog-danger {
   fill: #ccc;
 }
 
+/* Column trace: the bar over the graph, the label on a hop, the traced rows and the list in Details. */
+.trace-bar {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 10px;
+  border: 1px solid #b7c4d6;
+  border-radius: 14px;
+  background: #fff;
+  font-size: 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.edge-trace-label {
+  position: absolute;
+  pointer-events: all;
+  padding: 0 5px;
+  border: 1px solid #2d3748;
+  border-radius: 8px;
+  background: #fff;
+  color: #2d3748;
+  font-size: 11px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.edge-trace-label.inline {
+  position: static;
+  display: inline-block;
+}
+
+.tbl-col.is-traced {
+  background: #e6eefb;
+  font-weight: 600;
+}
+
+.tbl-col.is-trace-start {
+  background: #cfe0fa;
+}
+
+.trace-hops {
+  margin: 4px 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.trace-hops li {
+  margin-bottom: 4px;
+}
+
+.trace-arrow {
+  color: #888;
+}
+
+.trace-expr {
+  margin-left: 2px;
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.trace-readers {
+  margin: 4px 0;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.trace-btns {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.trace-btn {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 14px;
+
 /* Graph export dialog (graph/GraphExport.tsx) */
 .graph-export {
   width: min(560px, 94vw);
