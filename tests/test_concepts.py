@@ -45,7 +45,7 @@ def test_migration_adds_the_concept_table_and_relation_column(data_dir):
     with rel.Store(path):
         pass
     db = sqlite3.connect(path)
-    assert db.execute("PRAGMA user_version").fetchone()[0] == len(rel.MIGRATIONS) == 2
+    assert db.execute("PRAGMA user_version").fetchone()[0] == len(rel.MIGRATIONS) == 3
     assert {r[1] for r in db.execute("PRAGMA table_info(concept)")} >= {"id", "name", "status", "provenance"}
     assert "relation" in {r[1] for r in db.execute("PRAGMA table_info(edge)")}
 

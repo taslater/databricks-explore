@@ -19,7 +19,7 @@ from typing import Annotated, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
-from . import dbx
+from . import dbx, sqltools
 
 DERIVED_KINDS = ("fk", "lineage", "view_dep")
 STORED_KINDS = ("join_mined", "manual", "sketch", "concept_link", "ontology")
@@ -571,8 +571,26 @@ CREATE TABLE concept (
 ALTER TABLE edge ADD COLUMN relation TEXT;
 """
 
+# The joins a view's SQL defines, between its base tables, replaced whenever the view is read. A row is one column pair
+# (a_table, a_column) = (b_table, b_column), lowercase and sorted so a pair has one spelling; pairs of one join condition
+# share a grp. Derived from the view definition, so it has no status and never enters the edge table.
+_V3 = """
+CREATE TABLE view_join (
+    view TEXT NOT NULL,
+    grp INTEGER NOT NULL,
+    a_table TEXT NOT NULL,
+    a_column TEXT NOT NULL,
+    b_table TEXT NOT NULL,
+    b_column TEXT NOT NULL,
+    read_at TEXT NOT NULL,
+    PRIMARY KEY (view, a_table, a_column, b_table, b_column)
+);
+CREATE INDEX view_join_a ON view_join (a_table);
+CREATE INDEX view_join_b ON view_join (b_table);
+"""
+
 # MIGRATIONS[i] takes the database from user_version i to i + 1. Append; never edit a shipped entry.
-MIGRATIONS = [_V1, _V2]
+MIGRATIONS = [_V1, _V2, _V3]
 
 
 def migrate(conn):
@@ -765,6 +783,46 @@ class Store:
             self.conn.executemany("UPDATE edge SET status=?, updated_at=? WHERE id=?",
                                   [(status, dbx.now(), rid) for rid in ids])
         return len(ids)
+
+    # -- joins defined by view definitions --
+    def replace_view_joins(self, view, groups, read_at=None):
+        """Record the joins a view's SQL defines, in place of what was recorded for it. Returns whether anything changed.
+
+        `groups` is what view_join_groups returns: one list of (table, column, table, column) pairs per join condition.
+        """
+        rows = {(i, *p) for i, g in enumerate(groups) for p in g}
+        old = {(r["grp"], r["a_table"], r["a_column"], r["b_table"], r["b_column"])
+               for r in self.conn.execute("SELECT * FROM view_join WHERE view=?", (view.lower(),))}
+        if rows == old:
+            return False
+        with self.conn:
+            self.conn.execute("DELETE FROM view_join WHERE view=?", (view.lower(),))
+            self.conn.executemany("INSERT INTO view_join (view, grp, a_table, a_column, b_table, b_column, read_at) "
+                                  "VALUES (?,?,?,?,?,?,?)", [(view.lower(), *r, read_at or dbx.now()) for r in sorted(rows)])
+        return True
+
+    def view_joins(self, table=None, view=None):
+        """Joins views define, as [{"view", "pairs": [(a_table, a_column, b_table, b_column)]}], one per join condition.
+
+        With `table`, only the joins that have it at an end; with `view`, only that view's. Ordered by view and condition."""
+        sql, args = "SELECT * FROM view_join", ()
+        if table:
+            sql, args = sql + " WHERE a_table=? OR b_table=?", (table.lower(), table.lower())
+        elif view:
+            sql, args = sql + " WHERE view=?", (view.lower(),)
+        groups = {}
+        for r in self.conn.execute(sql + " ORDER BY view, grp, a_table, a_column, b_table, b_column", args):
+            groups.setdefault((r["view"], r["grp"]), []).append((r["a_table"], r["a_column"], r["b_table"], r["b_column"]))
+        return [{"view": v, "pairs": ps} for (v, _), ps in groups.items()]
+
+    def views_by_pair(self):
+        """{(a_table, a_column, b_table, b_column): [views that join on that pair]}, for marking mined joins."""
+        out = {}
+        for j in self.view_joins():
+            for p in j["pairs"]:
+                if j["view"] not in out.setdefault(p, []):
+                    out[p].append(j["view"])
+        return out
 
     def all_edges(self):
         """Every stored edge, oldest first."""
@@ -1058,12 +1116,78 @@ def stored_join_keys(table, edges):
     return out
 
 
-def join_keys(store, table, info=None):
-    """How `table` is known to join to other tables: foreign keys it declares, mined joins and manual edges.
+VIEW_JOIN_ORIGIN = "view_definition"  # what a join read from a view's SQL is called wherever an origin is shown
 
-    Returns {"table", "joins": [{"table": other, "keys": [{"pairs": [{"here", "there"}], "source": "fk" | "mined" |
-    "manual", "status", "runs", "name"}]}]}. Columns are read from `table`'s side (`here`). Rejected keys are included
-    and marked: the reader decides. Nothing is ranked, and no SQL text is involved.
+
+def view_join_groups(full_name, info):
+    """The joins a view's SQL defines: one group per join condition, each a sorted list of (table, column, table,
+    column) pairs, lowercase, between the same two base tables. `info` is the view's Unity Catalog metadata.
+
+    Empty for anything but a SQL view or materialized view (a metric view's definition is YAML), for SQL that does not
+    parse, and for joins that involve a Databricks system table, a backing table or the same table twice. The tables
+    are qualified from the view's own catalog and schema, and from the tables its view_dependencies list.
+    """
+    sql = (info or {}).get("view_definition")
+    if not sql or str(info.get("table_type") or "").upper() not in sqltools.VIEW_TYPES:
+        return []
+    catalog, schema, _ = full_name.split(".", 2)
+    deps = [(d.get("table") or {}).get("table_full_name") for d in (info.get("view_dependencies") or {}).get("dependencies", [])]
+    try:
+        pairs, composites = sqltools.join_analysis(sql, catalog, schema, [d for d in deps if d])
+    except ValueError:
+        return []
+
+    def usable(p):
+        tables = (p[0], p[2])
+        return (p[0] != p[2] and all(_TABLE.match(t) and not dbx.is_internal(t) and t.split(".")[0] != "system" for t in tables))
+    keys = [tuple(p[:4]) for p in pairs if usable(p)]
+    groups = [sorted(c) for c in composites if all(usable(k) for k in c)]
+    covered = {k for g in groups for k in g}
+    return groups + [[k] for k in keys if k not in covered]
+
+
+def pair_key(edge):
+    """A column edge's (table, column, table, column) in the spelling Store.view_joins uses: lowercase, sorted."""
+    a, b = (edge.source.table.lower(), (edge.source.column or "").lower()), (edge.target.table.lower(), (edge.target.column or "").lower())
+    return (*a, *b) if a <= b else (*b, *a)
+
+
+def _pair_set(key):
+    return frozenset((p["here"].lower(), p["there"].lower()) for p in key["pairs"])
+
+
+def view_join_keys(table, joins):
+    """Join keys from `Store.view_joins(table)`: [(other table, key)], one key per join condition, read from `table`'s side.
+
+    Conditions several views share are one key listing every view in `views`. The key has no status of its own
+    ("derived") and no runs.
+    """
+    merged = {}
+    for j in joins:
+        a_table, b_table = j["pairs"][0][0], j["pairs"][0][2]
+        if table.lower() not in (a_table, b_table):
+            continue
+        here_first = a_table == table.lower()
+        pairs = [(p[1], p[3]) if here_first else (p[3], p[1]) for p in j["pairs"]]
+        key = {"pairs": [{"here": h, "there": t} for h, t in pairs], "source": "view", "status": "derived",
+               "runs": None, "name": None, "views": [j["view"]]}
+        other = b_table if here_first else a_table
+        slot = merged.setdefault((other, _pair_set(key)), key)
+        if slot is not key and j["view"] not in slot["views"]:
+            slot["views"].append(j["view"])
+    return [(o, k) for (o, _), k in merged.items()]
+
+
+def join_keys(store, table, info=None):
+    """How `table` is known to join to other tables: foreign keys it declares, joins its views' SQL defines (any
+    view read so far), mined joins and manual edges.
+
+    Returns {"table", "joins": [{"table": other, "keys": [{"pairs": [{"here", "there"}], "source": "fk" | "view" |
+    "mined" | "manual", "status", "runs", "name", "views"?}]}]}. Columns are read from `table`'s side (`here`).
+    A view-defined key has status "derived"; when a key is also defined by a view, `views` lists the views, whatever
+    its source. If `table` is a view, "view_joins" lists the joins its own SQL defines: [{"left", "right", "pairs":
+    [{"left", "right"}]}] (left table sorts first). Rejected keys are included and marked: the reader decides. Nothing
+    is ranked, and no SQL text is involved.
     """
     found = fk_join_keys(table, info) + stored_join_keys(table, store.edges_for(table))
     by_other = {}
@@ -1071,7 +1195,19 @@ def join_keys(store, table, info=None):
         keys = by_other.setdefault(other, [])
         if key not in keys:
             keys.append(key)
-    return {"table": table, "joins": [{"table": o, "keys": k} for o, k in sorted(by_other.items())]}
+    for other, key in view_join_keys(table, store.view_joins(table)):
+        keys = by_other.setdefault(other, [])
+        same = next((k for k in keys if _pair_set(k) == _pair_set(key)), None)
+        if same is None:
+            keys.append(key)
+        else:
+            same["views"] = sorted({*same.get("views", []), *key["views"]})
+    out = {"table": table, "joins": [{"table": o, "keys": k} for o, k in sorted(by_other.items())]}
+    own = store.view_joins(view=table)
+    if own:
+        out["view_joins"] = [{"left": j["pairs"][0][0], "right": j["pairs"][0][2],
+                              "pairs": [{"left": p[1], "right": p[3]} for p in j["pairs"]]} for j in own]
+    return out
 
 
 # ---------- known relationships between tables, for drawing connectors ----------

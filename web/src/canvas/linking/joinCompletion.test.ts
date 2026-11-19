@@ -69,6 +69,17 @@ describe('ranking', () => {
     expect(keyDetail(key({ pairs: [['a', 'a']], source: 'manual', status: 'accepted' }))).toBe('manual')
   })
 
+  it('ranks a join a view defines after an FK and before an accepted mined join (more runs first among them), and describes it', () => {
+    const fk = key({ pairs: [['a', 'a']], source: 'fk', status: 'derived' })
+    const view = key({ pairs: [['v', 'v']], source: 'view', status: 'derived', views: ['c.s.v_orders'] })
+    const accepted = key({ pairs: [['b', 'b']], status: 'accepted', runs: 90 })
+    const alsoView = key({ pairs: [['m', 'm']], runs: 3, views: ['c.s.v_orders', 'c.s.w'] })
+    expect(rankKeys([accepted, alsoView, view, fk]).map((k) => k.pairs[0].here)).toEqual(['a', 'm', 'v', 'b'])
+    expect([view, alsoView].map(tier)).toEqual([0, 0])
+    expect(keyDetail(view)).toBe('view: v_orders')
+    expect(keyDetail(alsoView)).toBe('mined: 3 runs, also in view v_orders, w')
+  })
+
   it('flips a key to the other table side', () => {
     expect(flipKey(key({ pairs: [['a', 'b']] })).pairs).toEqual([{ here: 'b', there: 'a' }])
   })

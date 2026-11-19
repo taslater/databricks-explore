@@ -183,7 +183,7 @@ def test_migration_sets_user_version_and_is_idempotent(data_dir):
     assert path == data_dir / "relationships" / "dev.sqlite"
     with rel.Store(path) as s:  # reopening must not rerun the migration or lose rows
         assert len(s.all_edges()) == 1
-    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone()[0] == len(rel.MIGRATIONS) == 2
+    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone()[0] == len(rel.MIGRATIONS) == 3
 
 
 def test_a_database_from_the_future_is_refused(data_dir):
