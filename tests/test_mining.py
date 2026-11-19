@@ -292,9 +292,8 @@ def test_miner_runs_and_reports(data_dir):
 def test_miner_background_run_finishes(data_dir):
     m = mining.Miner(FakeEx([stmt(1, Q_OS)]))
     m.start(30, now=NOW)
-    for _ in range(100):
-        if m.status()["state"] != "running":
-            break
+    deadline = time.monotonic() + 30  # generous: slow CI runners can take seconds to schedule the thread
+    while m.status()["state"] == "running" and time.monotonic() < deadline:
         time.sleep(0.02)
     assert m.status()["state"] == "succeeded"
 
