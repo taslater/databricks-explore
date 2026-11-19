@@ -107,27 +107,27 @@ describe('edgeSource', () => {
 describe('layout by family', () => {
   const box = (id: string, focus = false): LayoutNode => ({ id, width: 100, height: 40, focus, x: 0, y: 0 })
 
-  it('hangs a table reached only by a mined or manual join below the table it joins, not to its right', () => {
+  it('hangs a table reached only by a mined or manual join below the table it joins, not to its right', async () => {
     for (const kind of ['join_mined', 'manual', 'fk']) {
-      const pos = computeLayout([box('O', true), box('C')], [{ source: 'O', target: 'C', kind }])
+      const pos = await computeLayout([box('O', true), box('C')], [{ source: 'O', target: 'C', kind }])
       expect(pos.get('C')!.x, kind).toBe(pos.get('O')!.x)
       expect(pos.get('C')!.y, kind).toBeGreaterThan(pos.get('O')!.y + 40)
     }
   })
 
-  it('lets only flow edges set the rank: a flow chain goes left to right, a table joined to its end by a reference is not pushed right', () => {
+  it('lets only flow edges set the rank: a flow chain goes left to right, a table joined to its end by a reference is not pushed right', async () => {
     const nodes = [box('A', true), box('B', true), box('R', true)]
     const edges: LayoutEdge[] = [
       { source: 'A', target: 'B', kind: 'lineage' },
       { source: 'B', target: 'R', kind: 'join_mined' },
     ]
-    const pos = computeLayout(nodes, edges)
+    const pos = await computeLayout(nodes, edges)
     expect(pos.get('B')!.x).toBeGreaterThan(pos.get('A')!.x)
     expect(pos.get('R')!.x).toBeLessThan(pos.get('B')!.x)
   })
 
-  it('keeps two pinned tables that only a reference joins in one column', () => {
-    const pos = computeLayout([box('O', true), box('C', true)], [{ source: 'O', target: 'C', kind: 'fk' }])
+  it('keeps two pinned tables that only a reference joins in one column', async () => {
+    const pos = await computeLayout([box('O', true), box('C', true)], [{ source: 'O', target: 'C', kind: 'fk' }])
     expect(pos.get('C')!.x).toBe(pos.get('O')!.x)
   })
 })
