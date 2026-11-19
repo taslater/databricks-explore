@@ -3,13 +3,12 @@ import { useEffect, useMemo } from 'react'
 import { columnLevel } from './columns'
 import { useGraphActions } from './actions'
 import { columnsBusy } from './columnsRun'
-import { useGraphStore } from './graphStore'
+import { dropSoonLayouts, useGraphStore } from './graphStore'
+import { drawnSize, sizesAgree, untilSteady } from './measured'
 import { anyOverlap, graphRoles, isModified, LENS_HINT, LENS_LABEL, LENSES } from './lens'
 import { layoutInput } from './layoutInput'
 
 const NOWRAP = { whiteSpace: 'nowrap', flexShrink: 0 } as const
-/** How long a lens switch waits for the nodes to be measured at their new column level: the layout request after a level change waits 250 ms. */
-const SETTLE_MS = 450
 
 /** Flow, Model or All: a preset for one question. Changing an edge filter afterwards marks the lens modified, with a reset. */
 export function LensSwitch() {
@@ -30,9 +29,18 @@ export function LensSwitch() {
       const needed = keys ? tables.some((n) => columnLevel(n.data) !== 'keys') : tables.some((n) => n.data.showColumns)
       // A run for the lens before this one may still be loading columns; it ends at its next table, and this one follows it.
       if (needed || columnsBusy()) await actions.setAllColumns(keys, () => !live)
-      // Tables the lens shows again were measured at the level they had when they were last drawn; give them the time to be measured as they are now.
-      if (live) await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
+      // Tables the lens shows again were measured at the level they had when they were last drawn: wait until React Flow has measured them as they are now.
+      await untilSteady(
+        () => {
+          const g = useGraphStore.getState()
+          const shown = new Set(layoutInput(g, new Set()).nodes.filter((n) => !n.hidden).map((n) => n.id))
+          return sizesAgree(g.nodes, shown, drawnSize)
+        },
+        () => !live,
+      )
       if (!live) return
+      // The positions that came back stay: what the column change queued would only move them.
+      if (useGraphStore.getState().lensHold) dropSoonLayouts()
       useGraphStore.getState().finishLensColumns()
       // Positions that came back were made for the sizes the nodes had then. When they no longer fit, lay the graph out again.
       const g = useGraphStore.getState()

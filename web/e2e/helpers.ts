@@ -5,6 +5,12 @@ export const LAKE = 'demo_lake'
 
 /** Loads the app and connects to the demo profile with its running warehouse (the server remembers a connection, so this always connects again). */
 export async function start(page: Page) {
+  // E2E_CPU_THROTTLE=4 runs the page on a CPU four times slower, like a busy CI runner.
+  const rate = Number(process.env.E2E_CPU_THROTTLE ?? 1)
+  if (rate > 1) await (await page.context().newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate })
+  // E2E_API_DELAY=400 holds every API answer back that many milliseconds, like a slow server.
+  const delay = Number(process.env.E2E_API_DELAY ?? 0)
+  if (delay > 0) await page.route('**/api/**', async (route) => (await new Promise((r) => setTimeout(r, delay)), route.continue()))
   await page.goto('/')
   await page.getByLabel('Profile').selectOption('demo')
   await page.getByRole('button', { name: 'Connect', exact: true }).click()
