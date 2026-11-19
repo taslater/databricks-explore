@@ -63,6 +63,7 @@ Demo mode also has an invented query history (a few hundred statements by six fa
 - Top bar: pick a profile and **Connect** (browser login if needed). Pick a SQL warehouse to enable queries on the canvas and search across all catalogs.
 - **Graph** tab
   - Picker modes (remembered): **Drill-down**, **Tree**, **Search**. « collapses the picker.
+  - In Drill-down the box holds the path (`dev.hr.emp`). Clicking a catalog or schema writes its path and leaves the cursor in the box, so you can keep typing the next part without clicking back in.
   - Click node/edge for details; double-click node to expand; drag to arrange; **Reset layout** re-runs auto layout.
   - Clicking an object in the picker starts a new graph. To add one next to what is there instead (two similar views side by side, say), use the row's **+** button, Shift-, Cmd- or Ctrl-click the row, or drag it onto the graph. It comes with its connections, edges to tables already on screen are drawn, and the edge filters never hide it. Parts of the graph with nothing between them are laid out as separate bands, top to bottom.
   - Checkboxes hide each edge kind (the legend shows how each is drawn), stale lineage (not seen in N days) and rejected edges.

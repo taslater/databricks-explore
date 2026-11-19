@@ -1,6 +1,6 @@
 // Object picker: Drill-down, Tree, and Search. Port of the three legacy modes in static/app.js.
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type RefObject } from 'react'
 import * as api from '../api/client'
 import { useCatalogs, useObjects, useSchemas, useSearch } from '../api/hooks'
 import type { ObjectSummary } from '../api/types'
@@ -10,6 +10,7 @@ import { shortType } from './format'
 import { useGraphStore } from './graphStore'
 import { tableDragProps } from '../shared/tableDrag'
 import { Highlighted, PickerFilter } from './PickerFilter'
+import { focusAtEnd, keepInputFocus } from './pickerFocus'
 import { compileFilter, matchName, rankItems, regexError, type Compiled, type Ranked } from './pickerMatch'
 import { completeLast, pathPrefix, resolvePath, splitPath } from './pickerPath'
 import { ObjectMenuHost, useObjectContextMenu } from './objectMenu'
@@ -75,6 +76,7 @@ export function ObjectPicker() {
   // In Drill-down the filter text is the path to where the list is, so it starts as the current position.
   const [filter, setFilter] = useState(() => (mode === 'drill' && !regex ? pathPrefix(drill) : ''))
   const navRef: KeyNav = useRef(null)
+  const inputRef = useRef<HTMLInputElement>(null)
   const [refreshError, setRefreshError] = useState<string | null>(null)
 
   /** Re-reads the list the user is looking at, bypassing the server-side cache (`refresh=1`). */
@@ -136,6 +138,7 @@ export function ObjectPicker() {
         </button>
       </div>
       <PickerFilter
+        inputRef={inputRef}
         value={filter}
         onChange={setFilter}
         onKeyDown={(e) => {
@@ -161,7 +164,7 @@ export function ObjectPicker() {
       {!profile ? (
         <p className="hint">Connect to browse.</p>
       ) : mode === 'drill' ? (
-        <DrillDown filter={filter} setFilter={setFilter} regex={regex} navRef={navRef} />
+        <DrillDown filter={filter} setFilter={setFilter} regex={regex} navRef={navRef} inputRef={inputRef} />
       ) : mode === 'tree' ? (
         <TreeBrowser filter={filter} regex={regex} />
       ) : (
@@ -190,11 +193,13 @@ function DrillDown({
   setFilter,
   regex,
   navRef,
+  inputRef,
 }: {
   filter: string
   setFilter: (text: string) => void
   regex: boolean
   navRef: KeyNav
+  inputRef: RefObject<HTMLInputElement | null>
 }) {
   const drill = useUiStore((s) => s.drill)
   const setDrill = useUiStore((s) => s.setDrill)
@@ -278,9 +283,15 @@ function DrillDown({
     if (navigated) listRef.current?.querySelector<HTMLElement>(`[data-idx="${hot}"]`)?.scrollIntoView?.({ block: 'nearest' })
   }, [hot, navigated])
 
+  /** After a click moved the path, the box keeps the focus with the caret at the end, so typing goes on to the next level. */
+  function goAndRefocus(next: { catalog: string | null; schema: string | null }) {
+    go(next)
+    setTimeout(() => focusAtEnd(inputRef.current), 0) // after React has written the new path into the box
+  }
+
   function pick(x: Item, add: boolean) {
-    if (level === 'catalogs') go({ catalog: x.name, schema: null })
-    else if (level === 'schemas') go({ catalog: drill.catalog, schema: x.name })
+    if (level === 'catalogs') goAndRefocus({ catalog: x.name, schema: null })
+    else if (level === 'schemas') goAndRefocus({ catalog: drill.catalog, schema: x.name })
     else if (x.fullName) {
       open(x.fullName, add)
       // Adding keeps the filter, so several objects can be added from one filtered list.
@@ -337,6 +348,7 @@ function DrillDown({
         data-idx={idx}
         className={`pick-item${selected ? ' sel' : ''}${showHot && idx === hot ? ' hi' : ''}${dim ? ' dim' : ''}`}
         title={x.fullName ?? (x.comment ? `${x.name}\n${x.comment}` : x.name)}
+        onMouseDown={x.fullName ? undefined : keepInputFocus} // catalogs and schemas: the box keeps focus while the path is typed
         onClick={(e) => pick(x, addsToGraph(e))}
         {...(x.fullName ? tableDragProps(x.fullName) : {})}
         {...(x.fullName ? menu(x.fullName, x.type) : {})}
@@ -354,13 +366,13 @@ function DrillDown({
   return (
     <>
       <div className="crumbs">
-        <button className="crumb" onClick={() => go({ catalog: null, schema: null })}>
+        <button className="crumb" onMouseDown={keepInputFocus} onClick={() => goAndRefocus({ catalog: null, schema: null })}>
           catalogs
         </button>
         {drill.catalog && (
           <>
             {' › '}
-            <button className="crumb" onClick={() => go({ catalog: drill.catalog, schema: null })}>
+            <button className="crumb" onMouseDown={keepInputFocus} onClick={() => goAndRefocus({ catalog: drill.catalog, schema: null })}>
               {drill.catalog}
             </button>
           </>
