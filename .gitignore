@@ -9,6 +9,8 @@ web/node_modules
 # Build output: the web UI built into the package, wheels and sdists.
 src/databricks_explore/web_dist/
 web/dist/
+web/test-results/
+web/playwright-report/
 dist/
 build/
 *.egg-info/

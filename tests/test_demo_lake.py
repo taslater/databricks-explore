@@ -122,10 +122,15 @@ def test_lineage_has_every_kind_of_writer_and_file_upstreams(client):
     assert not any(e.get("superseded") for e in found)
 
 
-def test_no_lake_edge_is_superseded(client):
+def test_one_lake_edge_is_superseded_and_one_neighbor_is_dropped(client):
+    superseded, missing = set(), {}
     for t in demo_lake.TABLES:
-        edges = client.get("/api/relations", query_string={"name": t}).json["edges"]
-        assert not [e["id"] for e in edges if e.get("superseded")], t
+        got = client.get("/api/relations", query_string={"name": t}).json
+        superseded |= {e["id"] for e in got["edges"] if e.get("superseded")}
+        missing.update({n["id"]: n["missing_reason"] for n in got["nodes"] if n.get("missing")})
+        assert got["errors"] == [], t
+    assert superseded == {f"lineage:{LAKE}.silver.orders<->{LAKE}.silver.v_orders_current"}
+    assert missing == {f"{LAKE}.silver.sessions_v1": f"table `{LAKE}.silver.sessions_v1` does not exist"}
 
 
 def test_table_lineage_rows_carry_statement_ids_and_text(client):
