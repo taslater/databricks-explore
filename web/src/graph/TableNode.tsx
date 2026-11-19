@@ -1,12 +1,13 @@
-import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
+import { useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { useEffect } from 'react'
 import { CertBadge } from '../concepts/CertBadge'
 import { useGraphActions } from './actions'
-import { columnHandleId, visibleColumns } from './columns'
+import { visibleColumns } from './columns'
 import { isPlaceholder, nodeFill } from './format'
 import { useGraphStore } from './graphStore'
 import { FilesMark } from './FilesMark'
 import { GrainLine, LateDot, SizeBadge } from './NodeFacts'
+import { ColumnHandles, TableHandles } from './TableHandles'
 import type { FlowNode } from './types'
 
 /** Table, view, or streaming node. Same look as the legacy Cytoscape style. It can list its columns, each with its own handles. */
@@ -29,23 +30,20 @@ export function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
   const hiddenCount = data.showColumns && data.columns ? data.columns.length - rows.length : 0
   const shown = rows.map((c) => c.name).join('\u0000')
 
-  // Column rows add and remove handles, so React Flow has to read the node's handles again.
+  // The sides that carry edges both ways anchor them at different points (graph/anchors.ts), so the handles move.
+  const split = new Set(data.anchorSplit)
+  const splitKey = [...split].join('|')
+
+  // Column rows add and remove handles, and a split moves them, so React Flow has to read the node's handles again.
   useEffect(() => {
     updateInternals(id)
-  }, [id, shown, updateInternals])
+  }, [id, shown, splitKey, updateInternals])
 
   // Four handles per side. The edge picks the pair that matches its direction (see handlesFor in derive.ts).
   return (
     <div className={classes} style={{ background: data.missing ? 'transparent' : nodeFill(data.kind) }}
       title={data.missing ? `Does not exist${data.missingReason ? `: ${data.missingReason}` : ''}` : undefined}>
-      <Handle type="target" position={Position.Left} id="tgt-l" className="tbl-handle" />
-      <Handle type="target" position={Position.Right} id="tgt-r" className="tbl-handle" />
-      <Handle type="target" position={Position.Top} id="tgt-t" className="tbl-handle" />
-      <Handle type="target" position={Position.Bottom} id="tgt-b" className="tbl-handle" />
-      <Handle type="source" position={Position.Left} id="src-l" className="tbl-handle" />
-      <Handle type="source" position={Position.Right} id="src-r" className="tbl-handle" />
-      <Handle type="source" position={Position.Top} id="src-t" className="tbl-handle" />
-      <Handle type="source" position={Position.Bottom} id="src-b" className="tbl-handle" />
+      <TableHandles split={split} />
       <div className="tbl-name">
         <LateDot facts={data.facts} />
         {data.selfRef && '↻ '}
@@ -75,10 +73,7 @@ export function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
         <div className="tbl-cols">
           {rows.map((c) => (
             <div className="tbl-col" key={c.name} title={`${c.name} ${c.type}`}>
-              <Handle type="target" position={Position.Left} id={columnHandleId('t', 'l', c.name)} className="tbl-col-handle" />
-              <Handle type="source" position={Position.Left} id={columnHandleId('s', 'l', c.name)} className="tbl-col-handle" />
-              <Handle type="target" position={Position.Right} id={columnHandleId('t', 'r', c.name)} className="tbl-col-handle" />
-              <Handle type="source" position={Position.Right} id={columnHandleId('s', 'r', c.name)} className="tbl-col-handle" />
+              <ColumnHandles column={c.name} split={split} />
               <span className="tbl-col-name">{c.name}</span>
               <span className="tbl-col-type">{c.type}</span>
             </div>

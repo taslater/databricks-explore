@@ -2078,6 +2078,17 @@ textarea.sk-editor {
   transition: opacity 0.1s;
 }
 
+/* The in and out anchors of a side (sketch/anchors.ts): where edges attach, never drawn or grabbed. */
+.sk-anchor.react-flow__handle {
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .react-flow__node:hover .sk-handle,
 .react-flow__node.selected .sk-handle,
 .canvas-root.tool-connect .sk-handle {

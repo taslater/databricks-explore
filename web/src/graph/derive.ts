@@ -4,6 +4,7 @@ import { MarkerType } from '@xyflow/react'
 import type { GraphEdge } from '../api/types'
 import { columnHandles, findColumn, visibleColumns } from './columns'
 import { EDGE_COLORS } from './format'
+import { graphSplits } from './anchors'
 import { estimateSize } from './layout'
 import { nameLine } from './nodeMarks'
 import type { EdgeFilters, FlowEdge, FlowNode } from './types'
@@ -216,5 +217,8 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
     }
   })
 
-  return { nodes, edges: [...edges, ...columnEdges] }
+  // A side with edges both in and out anchors them apart. Hidden edges do not count.
+  const all = [...edges, ...columnEdges]
+  const splits = graphSplits(all)
+  return { nodes: nodes.map((n) => (splits.has(n.id) ? { ...n, data: { ...n.data, anchorSplit: splits.get(n.id) } } : n)), edges: all }
 }

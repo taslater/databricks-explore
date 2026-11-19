@@ -34,6 +34,8 @@ export type TableNodeData = {
   showSchema?: boolean
   external?: boolean
   via?: string
+  /** Side keys (`r`, or `r:column` on a row) that carry edges in and out, so they anchor apart (graph/anchors.ts). */
+  anchorSplit?: string[]
   faded?: boolean
   /** The table's `system.certification_status` tag, added at draw time (concepts/certification.ts) and never saved. */
   certification?: 'certified' | 'deprecated'
