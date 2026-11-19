@@ -9,7 +9,7 @@ from platformdirs import user_data_path
 from databricks.sdk.service.sql import StatementParameterListItem, StatementState
 
 from . import demo
-from . import neighbors, search_terms, sqltools
+from . import neighbors, search_terms, sqltools, tablestats
 
 
 def default_data_dir(demo: bool = False) -> Path:
@@ -349,6 +349,25 @@ class Explorer:
         return self._cached(f"{self._dir(full_name)}/obj/{safe(full_name)}.json",
                             lambda: self._call("tables.get", lambda: self.w.tables.get(full_name=full_name).as_dict(),
                                                full_name=full_name), refresh)
+
+    def cached_object(self, full_name):
+        """The cached tables.get payload ({"fetched_at", "data"}), or None when it was never fetched. Never calls the workspace."""
+        return self._peek(f"{self._dir(full_name)}/obj/{safe(full_name)}.json")
+
+    def table_stats(self, full_name, refresh=False):
+        """DESCRIBE DETAIL and DESCRIBE HISTORY of a Delta table, read through the warehouse and cached: {"fetched_at", "data"} (see tablestats.read)."""
+        return self._cached(f"{self._dir(full_name)}/stats/{safe(full_name)}.json",
+                            lambda: tablestats.read(self.sql, full_name), refresh)
+
+    def cached_table_stats(self, full_name):
+        """The cached table_stats payload, or None when it was never read. Never queries."""
+        return self._peek(f"{self._dir(full_name)}/stats/{safe(full_name)}.json")
+
+    def _peek(self, rel):
+        try:
+            return json.loads((self.root / rel).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
 
     def lineage(self, full_name, refresh=False):
         def fetch():

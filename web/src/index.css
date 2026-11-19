@@ -3190,3 +3190,58 @@ button.app-dialog-danger {
   opacity: 0.55;
   text-decoration: line-through;
 }
+
+/* Card facts: the grain line, size badge and late dot on a card, the Σ on an edge that changes grain, the write strip in Details. */
+.tbl-grain {
+  color: #666;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.size-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.07);
+  color: #555;
+  font-size: 10px;
+  font-weight: 400;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+
+.late-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #d69e2e;
+  vertical-align: 1px;
+}
+
+.edge-glyph {
+  position: absolute;
+  pointer-events: all;
+  padding: 0 4px;
+  border: 1px solid #b7a6dc;
+  border-radius: 8px;
+  background: #fff;
+  color: #6b46c1;
+  font-size: 11px;
+  line-height: 14px;
+  cursor: pointer;
+}
+
+.late-text {
+  color: #975a16;
+}
+
+.write-strip rect {
+  fill: #7a8ca6;
+}
+
+.write-strip rect.unknown {
+  fill: #ccc;
+}
