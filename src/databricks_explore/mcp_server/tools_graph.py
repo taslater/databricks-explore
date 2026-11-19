@@ -1,9 +1,11 @@
 """The graph tools: read, create, change, rename and delete the diagrams saved from the Graph tab. They never touch the workspace."""
+import base64
 import json
 
 from .. import cardinality
 from .. import column_trace
 from .. import dbx
+from .. import graph_export
 from .. import graphs
 from ..edge_families import family_of
 from .. import nodefacts
@@ -357,3 +359,40 @@ def delete_graph(ctx, args):
     stem = _run(graphs.resolve, args["name"])
     kept = _run(graphs.delete_graph, args["name"])
     return text(f"deleted graph {stem}. A copy is in diagrams/.trash/{kept}.")
+
+
+# ---------------------------------------------------------------- export
+
+@tool("export_graph", "Export a saved graph for a pull request, wiki or README. format mermaid returns text GitHub renders: lens flow (default) is a flowchart of the data flows (reference edges as plain lines), lens model an erDiagram of the key references with crow's-foot ends where known and key columns. format png returns a picture with the title, a legend of only what is drawn, and the date the facts were read (oldest cached read, else today). Uses the cache only; never reads the workspace. The name may be typed or stored.",
+      obj({"name": NAME, "format": {"type": "string", "enum": ["mermaid", "png"], "description": "mermaid (default) or png"},
+           "lens": {"type": "string", "enum": list(graph_export.LENSES), "description": "flow (default) or model"},
+           "title": {"type": "string", "description": "png title (default: the graph's name)"}, "caption": {"type": "string", "description": "png: one line under the title"},
+           "width": integer(400, 4000, "png: the widest the picture may be, in pixels (default 1200); a smaller picture is not stretched")}, ("name",)))
+def export_graph(ctx, args):
+    data = _run(graphs.load_graph, args["name"])
+    info = _run(graphs.revision_info, args["name"])
+    lens = args.get("lens") or "flow"
+    if lens not in graph_export.LENSES:
+        raise ToolError("lens: expected flow or model")
+    fmt = args.get("format") or "mermaid"
+    if fmt not in ("mermaid", "png"):
+        raise ToolError("format: expected mermaid or png")
+    pos = {n["data"]["id"]: n.get("position") or {} for n in data.get("nodes") or [] if isinstance(n, dict) and isinstance(n.get("data"), dict) and n["data"].get("id")}
+    nodes = [{"id": n["id"], "kind": n.get("kind"), "x": pos[n["id"]].get("x", 0), "y": pos[n["id"]].get("y", 0)} for n in _nodes_of(data)]
+    edges = _edges_of(data)
+    ex = ctx.explorer()
+
+    def object_of(t):
+        return (ex.cached_object(t) or {}).get("data") if ex else None
+    if ex:
+        with ctx.store() as store:
+            read = graph_export.inputs([n["id"] for n in nodes], edges, object_of, lambda t: relationships.join_keys(store, t, object_of(t)))
+    else:  # not connected: only what the saved edges carry
+        read = graph_export.inputs([n["id"] for n in nodes], edges, lambda t: None, lambda t: None)
+    if fmt == "mermaid":
+        return text(graph_export.mermaid(lens, nodes, edges, read["keys"], read["cards"]))
+    stats = [((ex.cached_table_stats(n["id"]) if ex else None) or {}).get("fetched_at") for n in nodes]
+    when = graph_export.facts_read(graph_export._drawn(lens, edges), stats)
+    png = graph_export.render_png(lens, nodes, edges, read["keys"], read["cards"], args.get("title") or info["name"], args.get("caption") or "", when, args.get("width", 1200))
+    return [{"type": "image", "data": base64.b64encode(png).decode("ascii"), "mimeType": "image/png"},
+            {"type": "text", "text": f"{info['name']}: {len(nodes)} tables, {len(graph_export._drawn(lens, edges))} edges drawn, lens {lens}. Facts read {when or 'not dated; the picture says the export date'}."}]

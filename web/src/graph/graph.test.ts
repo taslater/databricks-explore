@@ -36,13 +36,13 @@ const S = 'main.sales'
 describe('layout (legacy relayout rules)', () => {
   const box = (id: string, focus = false, w = 100, h = 40): LayoutNode => ({ id, width: w, height: h, focus, x: 0, y: 0 })
 
-  it('places an FK-only parent in a row under its child, centered', () => {
+  it('places an FK-only parent in a row under its child, centered', async () => {
     const nodes = [box('F', true), box('L'), box('P', false, 80)]
     const edges: LayoutEdge[] = [
       { source: 'F', target: 'L', kind: 'lineage' },
       { source: 'F', target: 'P', kind: 'fk' },
     ]
-    const pos = computeLayout(nodes, edges)
+    const pos = await computeLayout(nodes, edges)
     const F = pos.get('F')!
     const L = pos.get('L')!
     const P = pos.get('P')!
@@ -54,13 +54,13 @@ describe('layout (legacy relayout rules)', () => {
     expect(L.x).toBeGreaterThan(F.x)
   })
 
-  it('spaces several FK-only parents under one child with a 24px gap', () => {
+  it('spaces several FK-only parents under one child with a 24px gap', async () => {
     const nodes = [box('F', true), box('P1', false, 80), box('P2', false, 60)]
     const edges: LayoutEdge[] = [
       { source: 'F', target: 'P1', kind: 'fk' },
       { source: 'F', target: 'P2', kind: 'fk' },
     ]
-    const pos = computeLayout(nodes, edges)
+    const pos = await computeLayout(nodes, edges)
     const F = pos.get('F')!
     const P1 = pos.get('P1')!
     const P2 = pos.get('P2')!
@@ -69,17 +69,17 @@ describe('layout (legacy relayout rules)', () => {
     expect((P1.x + P2.x + 60) / 2).toBeCloseTo(F.x + 50)
   })
 
-  it('never treats the focus node as FK-only, even if all its edges are FK', () => {
+  it('never treats the focus node as FK-only, even if all its edges are FK', async () => {
     const nodes = [box('F', true), box('P')]
-    const pos = computeLayout(nodes, [{ source: 'F', target: 'P', kind: 'fk' }])
+    const pos = await computeLayout(nodes, [{ source: 'F', target: 'P', kind: 'fk' }])
     // F is in the main layout (dagre), so its y comes from rank placement at the top, not the FK row.
     expect(pos.get('F')!.y).toBeLessThan(pos.get('P')!.y)
   })
 
-  it('keeps an incoming-FK-only node at its current x (legacy child = source quirk)', () => {
+  it('keeps an incoming-FK-only node at its current x (legacy child = source quirk)', async () => {
     // C references the focus table F, so the first edge's source (the child) is C itself.
     const nodes: LayoutNode[] = [box('F', true), { ...box('C', false, 80), x: 300, y: 0 }]
-    const pos = computeLayout(nodes, [{ source: 'C', target: 'F', kind: 'fk' }])
+    const pos = await computeLayout(nodes, [{ source: 'C', target: 'F', kind: 'fk' }])
     // Centered on its own current center (300 + 40), so top-left x is unchanged.
     expect(pos.get('C')!.x).toBe(300)
   })
@@ -87,7 +87,7 @@ describe('layout (legacy relayout rules)', () => {
   const overlaps = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
     a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 
-  it('stacks unconnected parts in bands below the first, each with its own FK row, with no overlap', () => {
+  it('stacks unconnected parts in bands below the first, each with its own FK row, with no overlap', async () => {
     // Part 1: focus F with lineage to L and an FK parent P. Part 2: pinned E with an FK parent D. Part 3: lone X.
     const nodes = [box('F', true), box('L'), box('P'), box('E', true), box('D'), box('X')]
     const edges: LayoutEdge[] = [
@@ -95,7 +95,7 @@ describe('layout (legacy relayout rules)', () => {
       { source: 'F', target: 'P', kind: 'fk' },
       { source: 'E', target: 'D', kind: 'fk' },
     ]
-    const pos = computeLayout(nodes, edges)
+    const pos = await computeLayout(nodes, edges)
     const rect = (id: string) => ({ ...pos.get(id)!, w: 100, h: 40 })
     const ids = ['F', 'L', 'P', 'E', 'D', 'X']
     for (const a of ids) for (const b of ids) if (a < b) expect(overlaps(rect(a), rect(b)), `${a} and ${b}`).toBe(false)
@@ -108,11 +108,11 @@ describe('layout (legacy relayout rules)', () => {
     expect(pos.get('X')!.y).toBeGreaterThan(pos.get('D')!.y)
   })
 
-  it('leaves a single part where the legacy rules put it', () => {
+  it('leaves a single part where the legacy rules put it', async () => {
     const nodes = [box('F', true), box('L')]
     const edges: LayoutEdge[] = [{ source: 'F', target: 'L', kind: 'lineage' }]
-    const alone = computeLayout(nodes, edges)
-    const withOther = computeLayout([...nodes, box('X')], edges)
+    const alone = await computeLayout(nodes, edges)
+    const withOther = await computeLayout([...nodes, box('X')], edges)
     expect(withOther.get('F')).toEqual(alone.get('F'))
     expect(withOther.get('L')).toEqual(alone.get('L'))
   })
