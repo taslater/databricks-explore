@@ -1715,6 +1715,23 @@ table.cols td {
   white-space: nowrap;
 }
 
+.tbl-col-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  min-width: 12px;
+  margin-right: 3px;
+  vertical-align: -1px;
+}
+
+.tbl-key-pk {
+  color: #8a6d00;
+}
+
+.tbl-key-fk {
+  color: #3b6ea8;
+}
+
 .tbl-col-type {
   color: #666;
   overflow: hidden;

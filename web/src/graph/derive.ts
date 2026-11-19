@@ -2,7 +2,7 @@
 // Pure: the same inputs always give the same output, so it can be unit tested.
 import { MarkerType } from '@xyflow/react'
 import type { GraphEdge } from '../api/types'
-import { columnHandles, findColumn, visibleColumns } from './columns'
+import { baseType, columnHandles, findColumn, rowsOf } from './columns'
 import { EDGE_COLORS } from './format'
 import { graphSplits } from './anchors'
 import { estimateSize } from './layout'
@@ -34,8 +34,9 @@ function nodeLines(n: FlowNode, showSchema: boolean, via: string | undefined): s
   if (showSchema) lines.push(n.data.schema)
   if (via) lines.push(`via ${via}`)
   if (n.data.showColumns && n.data.columns) {
-    const shown = visibleColumns(n.data.columns, n.data.involved ?? [], !!n.data.allColumns)
-    lines.push(...shown.map((c) => `${c.name}  ${c.type}`))
+    const shown = rowsOf(n.data)
+    lines.push(...shown.map((c) => `  ${c.name}  ${baseType(c.type)}`))
+    if (shown.length < n.data.columns.length || n.data.allColumns) lines.push('+0 more')
   }
   return lines
 }
@@ -118,10 +119,11 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
   const sizeById = new Map<string, { width: number; height: number }>()
   for (const n of input.nodes) sizeById.set(n.id, nodeSize(n, focusSchema, via.get(n.id)))
 
-  // Columns that have a column edge, per node: they always show, even on a wide table.
+  // Columns that have a visible column edge, per node: they show beside the keys. An edge counts when its kind is on and both its nodes list columns.
   const involved = new Map<string, Set<string>>()
   for (const e of input.columnEdges ?? []) {
     const info = e.data!.info
+    if (!edgeShown(info, filters) || !nodeById.get(e.source)?.data.showColumns || !nodeById.get(e.target)?.data.showColumns) continue
     for (const [id, col] of [
       [e.source, info.source_column],
       [e.target, info.target_column],
@@ -160,10 +162,7 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
     const src = outNode.get(e.source)
     const tgt = outNode.get(e.target)
     if (!src || !tgt) continue
-    const row = (n: FlowNode, name: string | undefined) =>
-      n.data.showColumns && n.data.columns
-        ? findColumn(visibleColumns(n.data.columns, n.data.involved ?? [], !!n.data.allColumns), name)
-        : undefined
+    const row = (n: FlowNode, name: string | undefined) => findColumn(rowsOf(n.data), name)
     const from = row(src, info.source_column)
     const to = row(tgt, info.target_column)
     const superseded = isSuperseded(info)

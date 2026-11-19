@@ -31,6 +31,8 @@ const NODE_SEP = 20
 const KID_GAP = 24
 /** Distance below the lowest main node for the reference-only row (center to center, as in the legacy code). */
 const FK_ROW_OFFSET = 90
+/** The least space between the lowest main node and the reference-only row, so a tall node (one listing columns) never overlaps it. */
+const FK_ROW_MIN_GAP = 40
 /** Vertical gap between the bands of unconnected parts of the graph. */
 const COMPONENT_GAP = 60
 
@@ -71,6 +73,52 @@ export function computeLayout(nodes: LayoutNode[], edges: LayoutEdge[]): Map<str
       bottom = Math.max(bottom, p.y + dy + n.height)
     }
     nextTop = bottom + COMPONENT_GAP
+  }
+  return out
+}
+
+/** Space kept between a part that was laid out again and the parts beside it. */
+const PART_MARGIN = 16
+
+/**
+ * The positions of the parts of the graph (see computeLayout) that hold any of `scope`, laid out again with each part's
+ * top-left corner kept where it is. Everything else stays put. Null when a part would then overlap another one: the
+ * caller lays the whole graph out instead.
+ */
+export function computeScopedLayout(nodes: LayoutNode[], edges: LayoutEdge[], scope: readonly string[]): Map<string, Point> | null {
+  const ids = new Set(nodes.map((n) => n.id))
+  const liveEdges = edges.filter((e) => ids.has(e.source) && ids.has(e.target))
+  const wanted = new Set(scope)
+  type Box = { left: number; top: number; right: number; bottom: number }
+  const boxOf = (part: LayoutNode[], at: (n: LayoutNode) => Point): Box => ({
+    left: Math.min(...part.map((n) => at(n).x)),
+    top: Math.min(...part.map((n) => at(n).y)),
+    right: Math.max(...part.map((n) => at(n).x + n.width)),
+    bottom: Math.max(...part.map((n) => at(n).y + n.height)),
+  })
+  const out = new Map<string, Point>()
+  const boxes: Box[] = []
+  for (const part of components(nodes, liveEdges)) {
+    const here = boxOf(part, (n) => ({ x: n.x, y: n.y }))
+    if (!part.some((n) => wanted.has(n.id))) {
+      for (const n of part) out.set(n.id, { x: n.x, y: n.y })
+      boxes.push(here)
+      continue
+    }
+    const members = new Set(part.map((n) => n.id))
+    const pos = layoutPart(part, liveEdges.filter((e) => members.has(e.source)))
+    const fresh = boxOf(part, (n) => pos.get(n.id)!)
+    const dx = here.left - fresh.left
+    const dy = here.top - fresh.top
+    for (const n of part) out.set(n.id, { x: pos.get(n.id)!.x + dx, y: pos.get(n.id)!.y + dy })
+    boxes.push({ left: fresh.left + dx, top: fresh.top + dy, right: fresh.right + dx, bottom: fresh.bottom + dy })
+  }
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]
+      const b = boxes[j]
+      if (a.left < b.right + PART_MARGIN && b.left < a.right + PART_MARGIN && a.top < b.bottom + PART_MARGIN && b.top < a.bottom + PART_MARGIN) return null
+    }
   }
   return out
 }
@@ -155,7 +203,7 @@ function layoutPart(nodes: LayoutNode[], liveEdges: LayoutEdge[]): Map<string, P
     const totalWidth = kids.reduce((sum, k) => sum + k.width, 0) + KID_GAP * (kids.length - 1)
     let x = centerX - totalWidth / 2
     for (const k of kids) {
-      out.set(k.id, { x, y: bottom + FK_ROW_OFFSET - k.height / 2 })
+      out.set(k.id, { x, y: bottom + Math.max(FK_ROW_OFFSET - k.height / 2, FK_ROW_MIN_GAP) })
       x += k.width + KID_GAP
     }
   }

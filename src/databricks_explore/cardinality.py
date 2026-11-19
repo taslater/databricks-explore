@@ -89,6 +89,9 @@ def sentence(source: str, target: str, src: Optional[dict], tgt: Optional[dict])
 def for_edges(edges: list[dict], object_of, joins_of) -> dict[str, Optional[dict]]:
     """{edge id: cardinality or None} for graph edges ({id, kind, source, target}); other kinds are left out.
 
+    An edge between two columns (source_column and target_column too) reads only the key sets that hold that pair, so each
+    pair of a composite key shows the ends of its key and a mined pair is not blurred by other mined keys.
+
     `object_of(table)` is the table's `tables.get` data or None; `joins_of(table)` is `relationships.join_keys` for it
     (or None)."""
     infos: dict[str, Optional[dict]] = {}
@@ -110,5 +113,8 @@ def for_edges(edges: list[dict], object_of, joins_of) -> dict[str, Optional[dict
             continue
         found = next((j for j in (join(s) or {}).get("joins") or [] if j["table"].lower() == t.lower()), None)
         keys = [k for k in (found or {}).get("keys") or [] if k["source"] == _KEY_SOURCE[kind] and k["status"] != "rejected" and k["pairs"]]
+        sc, tc = e.get("source_column"), e.get("target_column")
+        if isinstance(sc, str) and isinstance(tc, str):
+            keys = [k for k in keys if any(p["here"].lower() == sc.lower() and p["there"].lower() == tc.lower() for p in k["pairs"])]
         out[e["id"]] = edge_cardinality(kind, s, t, [[(p["here"], p["there"]) for p in k["pairs"]] for k in keys], info(s), info(t))
     return out
