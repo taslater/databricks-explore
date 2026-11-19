@@ -25,7 +25,7 @@ describe("crow's-foot ends", () => {
     expect([Position.Right, Position.Left, Position.Bottom, Position.Top].map(rotationFor)).toEqual([0, 180, 90, -90])
   })
 
-  it('asks about table-level reference edges only', () => {
+  it('asks about reference edges, table-level and column-level, with the column pair of the latter', () => {
     const edges = [
       edge({ id: 'fk', kind: 'fk' }),
       edge({ id: 'mined', kind: 'join_mined' }),
@@ -33,7 +33,10 @@ describe("crow's-foot ends", () => {
       edge({ id: 'col', kind: 'join_mined', source_column: 'x', target_column: 'y' }),
       edge({ id: 'ph', kind: 'manual', target: 'ph:1234' }),
     ]
-    expect(endCandidates(edges).map((e) => e.id)).toEqual(['fk', 'mined'])
+    const got = endCandidates(edges)
+    expect(got.map((e) => e.id)).toEqual(['fk', 'mined', 'col'])
+    expect(got[0]).not.toHaveProperty('source_column')
+    expect(got[2]).toMatchObject({ source_column: 'x', target_column: 'y' })
   })
 
   it('puts the answer on the edge, falling back to what an agent saved, and leaves unknown edges plain', () => {
