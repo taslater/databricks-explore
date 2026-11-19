@@ -4,11 +4,13 @@ import { toCanvas } from 'html-to-image'
 import type { Cardinality, GraphEdge } from '../api/types'
 import type { FactsByTable } from '../api/nodeFacts'
 import { typeLegend, type NodeColors } from './colorBy'
-import { edgeShown } from './derive'
+import { collapseGraph, type Grouping } from './collapse'
+import { deriveFlow, edgeShown } from './derive'
 import { legendOf } from './EdgeFamilies'
 import { edgeStyle, familyOf, FAMILY_LABEL } from './edgeStyles'
 import { hasEnds } from './EdgeEnds'
-import type { EdgeFilters, FlowNode } from './types'
+import { traceColumnEdges, traceNodes, type ActiveTrace } from './traceDraw'
+import type { EdgeFilters, FlowEdge, FlowNode } from './types'
 
 /** One line of the picture's legend: a line sample, a color square, or text alone. */
 export type LegendItem =
@@ -44,12 +46,42 @@ export function pictureLegend(input: LegendInput): LegendItem[] {
   const columns = input.nodes.filter((n) => !n.hidden && n.data.showColumns).flatMap((n) => n.data.columns ?? [])
   if (columns.some((c) => c.pk)) out.push({ kind: 'text', text: 'key icon: primary key' })
   if (columns.some((c) => c.fk)) out.push({ kind: 'text', text: 'arrow icon: foreign key' })
-  const shown = input.nodes.filter((n) => !n.hidden)
+  const shown = input.nodes.filter((n) => !n.hidden && !n.data.summary) // a collapsed group's node has a look of its own
   if (shown.length > 0) {
     const entries = input.colorBy === 'type' ? typeLegend(shown.map((n) => n.data.kind)) : (input.colors?.legend.entries ?? [])
     for (const e of entries) out.push({ kind: 'swatch', text: input.colorBy === 'type' ? e.value : `${input.colorBy}: ${e.value}`, fill: e.fill })
   }
   return out
+}
+
+export interface SceneInput {
+  nodes: FlowNode[]
+  edges: FlowEdge[]
+  columnEdges: FlowEdge[]
+  focusSchema: string | null
+  filters: EdgeFilters
+  grouping: Grouping
+  groupTags: Record<string, string>
+  trace: ActiveTrace | null
+}
+
+/**
+ * What the canvas draws, as the export reads it: the visible nodes (a collapsed group is one node, with its `summary`) and the table-level
+ * edges (a chain of pass-through views is one edge; a column trace adds its tables but its hops sit between rows, so they are not edges here).
+ */
+export function exportScene(input: SceneInput): { nodes: FlowNode[]; edges: GraphEdge[] } {
+  const traced = traceNodes(input.nodes, input.trace)
+  const view = collapseGraph({ nodes: traced, edges: input.edges, filters: input.filters, grouping: input.grouping, groupTags: input.groupTags })
+  const flow = deriveFlow({
+    nodes: view.nodes,
+    edges: view.edges,
+    columnEdges: traceColumnEdges(input.columnEdges, input.nodes, input.trace),
+    focusSchema: input.focusSchema,
+    filters: input.filters,
+    hoverId: null,
+    forceHidden: view.hidden,
+  })
+  return { nodes: flow.nodes.filter((n) => !n.hidden), edges: flow.edges.filter((e) => !e.hidden && !e.data!.info.source_column).map((e) => e.data!.info) }
 }
 
 /** The date, YYYY-MM-DD, of the oldest read among the evidence shown: the edges' provenance and the cached size reads. Null when none is dated. */

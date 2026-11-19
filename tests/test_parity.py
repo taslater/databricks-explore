@@ -74,19 +74,24 @@ def run_collapse(case):
             "chains": [{k: c[k] for k in ("id", "source", "target", "views", "edges")} for c in p["chains"]]}
 
 
+def run_export_scene(case):
+    nodes, edges = graph_collapse.scene(case["nodes"], case["edges"], graph_collapse.plan(case["nodes"], case["edges"], case["grouping"], case.get("tags")))
+    return {"nodes": sorted([{"id": n["id"], "label": n.get("label")} for n in nodes], key=lambda n: n["id"]),
+            "edges": sorted([{"id": e["id"], "source": e["source"], "target": e["target"]} for e in edges], key=lambda e: e["id"])}
+
+
 def run_flow_layout(case):
     sizes = {i: tuple(s) for i, s in case["sizes"].items()}
     return broken_rules(graphs.layout_positions(sizes, [(e["source"], e["target"], e["kind"]) for e in case["edges"]], case.get("focus")), sizes, case.get("expected") or {})
 
 
 RUNNERS = {"graph_edges": run_graph_edges, "edge_families": run_edge_families, "roles": run_roles, "model_layout": run_model_layout,
-           "estimate_size": run_estimate_size, "legend": run_legend, "collapse": run_collapse, "flow_layout": run_flow_layout}
+           "estimate_size": run_estimate_size, "legend": run_legend, "collapse": run_collapse, "export_scene": run_export_scene, "flow_layout": run_flow_layout}
 
 
 def all_cases():
-    for path in sorted(FIXTURES.glob("*.json")):
-        for n, case in enumerate(json.loads(path.read_text(encoding="utf-8"))["cases"]):
-            yield pytest.param(path.stem, n, id=f"{path.stem}: {case['name']}")
+    return [pytest.param(path.stem, n, id=f"{path.stem}: {case['name']}")
+            for path in sorted(FIXTURES.glob("*.json")) for n, case in enumerate(json.loads(path.read_text(encoding="utf-8"))["cases"])]
 
 
 def test_every_fixture_has_a_python_runner():

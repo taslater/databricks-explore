@@ -2,10 +2,10 @@
 // The Python side is named in the comment above each runner; a fixture's `expected` is what both sides must give.
 import { describe, expect, it } from 'vitest'
 import type { GraphEdge, Relationship } from './api/types'
-import { collapseGraph, parseGrouping } from './graph/collapse'
+import { collapseGraph, countText, parseGrouping } from './graph/collapse'
 import { DEFAULT_FILTERS } from './graph/graphStore'
 import { FAMILY_OF, familyOf } from './graph/edgeStyles'
-import { pictureLegend } from './graph/exportPicture'
+import { exportScene, pictureLegend } from './graph/exportPicture'
 import { estimateSize, layoutGraph, type LayoutEdge, type LayoutNode } from './graph/layout'
 import { presetFilters, rolesOf } from './graph/lens'
 import { toGraphEdges } from './graph/relationships'
@@ -113,6 +113,27 @@ describe('parity with the Python twins', () => {
       clean({
         groups: view.groups.map((g) => ({ key: g.key, label: g.label, tables: g.members, collapsed: g.collapsed, default_collapsed: g.defaultCollapsed })),
         chains: view.chains.filter((c) => c.elided).map((c) => ({ id: c.id, source: c.source, target: c.target, views: c.views, edges: c.edges })),
+      }),
+    ).toEqual(expected)
+  })
+
+  // graph_collapse.scene
+  it.each(fixture('export_scene'))('export scene: $name', ({ input, expected }) => {
+    const nodes = (input.nodes as Array<{ id: string; kind: string; focus?: boolean; pinned?: boolean }>).map((n) => node(n.id, { kind: n.kind, focus: !!n.focus, ...(n.pinned ? { pinned: true } : {}) }))
+    const scene = exportScene({
+      nodes,
+      edges: (input.edges as GraphEdge[]).map(flowEdge),
+      columnEdges: [],
+      focusSchema: null,
+      filters: DEFAULT_FILTERS,
+      grouping: parseGrouping(input.grouping),
+      groupTags: input.tags ?? {},
+      trace: null,
+    })
+    expect(
+      clean({
+        nodes: scene.nodes.map((n) => ({ id: n.id, label: n.data.summary ? `${n.data.summary.label} (${countText(n.data.summary.count, n.data.summary.noun)})` : null })).sort((a, b) => (a.id < b.id ? -1 : 1)),
+        edges: scene.edges.map((e) => ({ id: e.id, source: e.source, target: e.target })).sort((a, b) => (a.id < b.id ? -1 : 1)),
       }),
     ).toEqual(expected)
   })

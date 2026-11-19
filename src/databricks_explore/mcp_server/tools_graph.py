@@ -145,7 +145,7 @@ def list_graphs(ctx, args):
     return text("\n".join(lines))
 
 
-@tool("get_graph", "Read a graph saved from the Graph tab: its tables (kind, focus, and, when known, grain with its basis, rows, bytes, last_write and late from the cached size and history reads) and edges (kind, family: flow, reference or meaning, source, target, status, join columns, and for a reference edge its crow's-foot cardinality: the end at each table that is known, with its basis; for a flow edge its transform when the SQL behind it is known: the aggregate, join, union, dedupe and filters its source goes through), the groups the Graph draws (by schema or tag: table count, collapsed or open) and the chains of pass-through views it draws as one edge. Also the graph's lens (all, flow or model) and each table's inferred role (fact or dimension, with the reason in json). The name may be typed (Returns graph) or stored (Returns_graph). json gives every field, with positions.",
+@tool("get_graph", "Read a graph saved from the Graph tab: its tables (kind, focus, and, when known, grain with its basis, rows, bytes, last_write and late from the cached size and history reads) and edges (kind, family: flow, reference or meaning, source, target, status, join columns, and for a reference edge its crow's-foot cardinality: the end at each table that is known, with its basis; for a flow edge its transform when the SQL behind it is known: the aggregate, join, union, dedupe and filters its source goes through), the groups the Graph draws (by schema or tag: table count, collapsed or open) and the chains of pass-through views it draws as one edge. Also the graph's lens (all, flow or model) and each table's inferred role (fact or dimension, with the reason in json). The name may be typed (Returns graph) or stored (Returns_graph). json gives every field, with positions (and, for a graph that was shown in more than one lens, the positions each other lens keeps: lens_positions).",
       obj({"name": NAME, "format": {"type": "string", "enum": ["text", "json"], "description": "text (default, compact) or json"}}, ("name",)))
 def get_graph(ctx, args):
     data = _run(graphs.load_graph, args["name"])
@@ -162,7 +162,7 @@ def get_graph(ctx, args):
     if args.get("format") == "json":
         return text(json.dumps({
             "name": info["name"], "title": data.get("name"), "revision": info["revision"], "by": info["by"], "saved_at": data.get("saved_at"),
-            "focus_schema": data.get("focus_schema"), "color_by": data.get("color_by") or "type", "lens": lens,
+            "focus_schema": data.get("focus_schema"), "color_by": data.get("color_by") or "type", "lens": lens, **({"lens_positions": data["lens_positions"]} if data.get("lens_positions") else {}),
             "grouping": {"by": shape["by"], "chains": shape["chains_on"]}, "groups": shape["groups"], "chains": shape["chains"],
             "nodes": [{"table": n["id"], "kind": n.get("kind", "table"), **({"focus": True} if n.get("focus") else {}),
                        **({"pinned": True} if n.get("pinned") else {}), **({"role": {"role": role[n["id"]]["role"], "reason": role[n["id"]]["reason"]}} if n["id"] in role else {}), **_facts_json(card.get(n["id"], {})), "x": (pos.get(n["id"]) or {}).get("x"), "y": (pos.get(n["id"]) or {}).get("y")}
@@ -379,11 +379,12 @@ def delete_graph(ctx, args):
 
 # ---------------------------------------------------------------- export
 
-@tool("export_graph", "Export a saved graph for a pull request, wiki or README. format mermaid returns text GitHub renders: lens flow (default; model for a graph saved with the model lens) is a flowchart of the data flows (reference edges as plain lines), lens model an erDiagram of the key references with crow's-foot ends where known and key columns. format png returns a picture with the title, a legend of only what is drawn, and the date the facts were read (oldest cached read, else today). Uses the cache only; never reads the workspace. The name may be typed or stored.",
+@tool("export_graph", "Export a saved graph for a pull request, wiki or README. format mermaid returns text GitHub renders: lens flow (default; model for a graph saved with the model lens) is a flowchart of the data flows (reference edges as plain lines), lens model an erDiagram of the key references with crow's-foot ends where known and key columns. format png returns a picture with the title, a legend of only what is drawn, and the date the facts were read (oldest cached read, else today). Draws the graph as the Graph tab does: a collapsed group is one node and a chain of pass-through views one edge, unless expand_groups is true. Uses the cache only; never reads the workspace. The name may be typed or stored.",
       obj({"name": NAME, "format": {"type": "string", "enum": ["mermaid", "png"], "description": "mermaid (default) or png"},
            "lens": {"type": "string", "enum": list(graph_export.LENSES), "description": "flow or model; default the graph's own lens (model for a model graph, else flow)"},
            "title": {"type": "string", "description": "png title (default: the graph's name)"}, "caption": {"type": "string", "description": "png: one line under the title"},
-           "width": integer(400, 4000, "png: the widest the picture may be, in pixels (default 1200); a smaller picture is not stretched")}, ("name",)))
+           "width": integer(400, 4000, "png: the widest the picture may be, in pixels (default 1200); a smaller picture is not stretched"),
+           "expand_groups": {**B, "description": "draw every table, even those in collapsed groups and the views of chains (default false: the picture shows the graph as the Graph tab draws it, a collapsed group as one node and a chain of pass-through views as one edge)"}}, ("name",)))
 def export_graph(ctx, args):
     data = _run(graphs.load_graph, args["name"])
     info = _run(graphs.revision_info, args["name"])
@@ -397,12 +398,16 @@ def export_graph(ctx, args):
     pos = {n["data"]["id"]: n.get("position") or {} for n in data.get("nodes") or [] if isinstance(n, dict) and isinstance(n.get("data"), dict) and n["data"].get("id")}
     if lens != saved and isinstance(data.get("lens_positions"), dict):  # a lens that was shown before keeps its own positions
         pos.update({i: p for i, p in (data["lens_positions"].get(lens) or {}).items() if i in pos})
-    nodes = [{"id": n["id"], "kind": n.get("kind"), "x": pos[n["id"]].get("x", 0), "y": pos[n["id"]].get("y", 0)} for n in _nodes_of(data)]
+    nodes = [{"id": n["id"], "kind": n.get("kind"), "x": pos[n["id"]].get("x", 0), "y": pos[n["id"]].get("y", 0), "focus": n.get("focus"), "pinned": n.get("pinned")} for n in _nodes_of(data)]
     edges = _edges_of(data)
     ex = ctx.explorer()
+    if not args.get("expand_groups"):  # as the Graph tab draws it: collapsed groups and chains of pass-through views
+        grouping = graph_collapse.grouping_of(data)
+        shape = graph_collapse.plan(_nodes_of(data), edges, grouping, _group_tags(ctx, grouping, [n["id"] for n in nodes]))
+        nodes, edges = graph_collapse.scene(nodes, edges, shape)
 
     def object_of(t):
-        return (ex.cached_object(t) or {}).get("data") if ex else None
+        return (ex.cached_object(t) or {}).get("data") if ex and not t.startswith("summary:") else None
     if ex:
         with ctx.store() as store:
             read = graph_export.inputs([n["id"] for n in nodes], edges, object_of, lambda t: relationships.join_keys(store, t, object_of(t)))
@@ -410,8 +415,8 @@ def export_graph(ctx, args):
         read = graph_export.inputs([n["id"] for n in nodes], edges, lambda t: None, lambda t: None)
     if fmt == "mermaid":
         return text(graph_export.mermaid(lens, nodes, edges, read["keys"], read["cards"]))
-    stats = [((ex.cached_table_stats(n["id"]) if ex else None) or {}).get("fetched_at") for n in nodes]
+    stats = [((ex.cached_table_stats(n["id"]) if ex and n.get("kind") != "group" else None) or {}).get("fetched_at") for n in nodes]
     when = graph_export.facts_read(graph_export._drawn(lens, edges), stats)
     png = graph_export.render_png(lens, nodes, edges, read["keys"], read["cards"], args.get("title") or info["name"], args.get("caption") or "", when, args.get("width", 1200))
     return [{"type": "image", "data": base64.b64encode(png).decode("ascii"), "mimeType": "image/png"},
-            {"type": "text", "text": f"{info['name']}: {len(nodes)} tables, {len(graph_export._drawn(lens, edges))} edges drawn, lens {lens}. Facts read {when or 'not dated; the picture says the export date'}."}]
+            {"type": "text", "text": f"{info['name']}: {len(nodes)} {'nodes' if any(n.get('kind') == 'group' for n in nodes) else 'tables'}, {len(graph_export._drawn(lens, edges))} edges drawn, lens {lens}. Facts read {when or 'not dated; the picture says the export date'}."}]

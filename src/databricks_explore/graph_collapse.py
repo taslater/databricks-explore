@@ -115,6 +115,54 @@ def plan(nodes: list[dict], edges: list[dict], grouping: Optional[dict] = None, 
     return {"by": by, "chains_on": bool(g["chains"]), "groups": groups, "chains": chains}
 
 
+def _noun(kinds: list[str]) -> str:
+    return "table" if all(k in ("table", "managed", "external", "foreign", None) for k in kinds) else "object"
+
+
+def scene(nodes: list[dict], edges: list[dict], p: dict) -> tuple[list[dict], list[dict]]:
+    """The nodes and edges to draw for a plan: a collapsed group is one node (kind group, with a label such as `bronze (12 tables)`, at the mean of its tables' x and y), a chain of
+    pass-through views is one edge, and the edges of a collapsed group's tables are merged per family, as web/src/graph/exportPicture.ts exportScene draws them.
+
+    `nodes` carry x and y when they have a place, and focus or pinned when saved so. Edges the Graph's filters hide are dropped; an edge nothing touches is returned as it came."""
+    by_id = {n["id"]: n for n in nodes}
+    collapsed = {t: g for g in p["groups"] if g["collapsed"] for t in g["tables"]}
+    views = {v for c in p["chains"] for v in c["views"]}
+    in_chain = {i for c in p["chains"] for i in c["edges"]}
+    rep = lambda i: "summary:" + collapsed[i]["key"] if i in collapsed else i  # noqa: E731
+    by_edge = {e.get("id"): e for e in edges}
+    logical = [(e, e["source"], e["target"], None) for e in edges if _shown(e) and e.get("source") in by_id and e.get("target") in by_id and e.get("id") not in in_chain]
+    logical += [(by_edge[c["edges"][0]], c["source"], c["target"], c) for c in p["chains"] if c["edges"][0] in by_edge]
+    merged: dict[tuple, list] = {}
+    for e, s, t, chain in logical:
+        source, target = rep(s), rep(t)
+        remapped = (source, target) != (s, t)
+        if remapped and source == target:
+            continue  # inside one collapsed group
+        merged.setdefault((source, target, family_of(e.get("kind"))), []).append((e, chain, remapped))
+    out_edges = []
+    for (source, target, family), items in merged.items():
+        first, chain, remapped = items[0]
+        if len(items) == 1 and not remapped and not chain:
+            out_edges.append(first)
+            continue
+        same_status = len({i[0].get("status") for i in items}) == 1
+        out_edges.append({"id": chain["id"] if len(items) == 1 and chain else f"merged:{source}|{target}|{family}", "source": source, "target": target, "kind": first.get("kind"),
+                          **({"status": first["status"]} if same_status and first.get("status") else {}),
+                          **({"directed": False} if first.get("directed") is False else {}), **({"bidir": True} if len(items) == 1 and first.get("bidir") else {})})
+    touched = {i for e in edges for i in (e.get("source"), e.get("target"))}
+    drawn = {i for e in edges if _shown(e) and e.get("source") in by_id and e.get("target") in by_id for i in (e["source"], e["target"])}
+    out_nodes = [n for n in nodes if n["id"] not in collapsed and n["id"] not in views and (n.get("focus") or n.get("pinned") or n["id"] not in touched or n["id"] in drawn)]  # the Graph leaves out a table whose edges are all hidden
+    for g in p["groups"]:
+        if not g["collapsed"]:
+            continue
+        members = [by_id[t] for t in g["tables"]]
+        xs, ys = [m["x"] for m in members if isinstance(m.get("x"), (int, float))], [m["y"] for m in members if isinstance(m.get("y"), (int, float))]
+        n = len(members)
+        out_nodes.append({"id": "summary:" + g["key"], "kind": "group", "label": f"{g['label']} ({n} {_noun([m.get('kind') for m in members])}{'s' if n != 1 else ''})",
+                          "x": sum(xs) / len(xs) if xs else 0, "y": sum(ys) / len(ys) if ys else 0})
+    return out_nodes, out_edges
+
+
 def text_lines(p: dict) -> list[str]:
     """The groups and chains as the lines get_graph prints."""
     lines = [f"Groups (by {p['by']})" + (": none" if not p["groups"] else ":")]
