@@ -302,6 +302,16 @@ class Explorer:
         return self._cached(f"{safe(catalog)}/{safe(schema)}/objects.json",
                             lambda: self._call("tables.list", fetch, catalog=catalog, schema=schema), refresh)
 
+    def functions(self, catalog, schema, refresh=False):
+        """The user-defined functions in a schema, cached like objects(). Rows look like objects, with `type` "FUNCTION"."""
+        def fetch():
+            return sorted([{"name": f.name, "full_name": f.full_name, "type": "FUNCTION", "comment": f.comment}
+                           for f in self.w.functions.list(catalog_name=catalog, schema_name=schema)
+                           if not is_internal(f.name)],
+                          key=lambda x: x["name"])
+        return self._cached(f"{safe(catalog)}/{safe(schema)}/functions.json",
+                            lambda: self._call("functions.list", fetch, catalog=catalog, schema=schema), refresh)
+
     def search(self, q):
         """Name search. information_schema if a warehouse is set, else whatever schemas are cached locally.
 
@@ -310,19 +320,24 @@ class Explorer:
         term = search_terms.parse_term(q)
         if self.warehouse_id:
             params = term.patterns()
-            conditions = "".join(f"\n                  AND lower({col}) LIKE :{key} ESCAPE '{search_terms.ESCAPE}'"
-                                 for key, col in (("cat", "table_catalog"), ("sch", "table_schema"), ("q", "table_name"))
-                                 if key in params)
+            def conditions(cat, sch, name):
+                return "".join(f"\n                  AND lower({col}) LIKE :{key} ESCAPE '{search_terms.ESCAPE}'"
+                               for key, col in (("cat", cat), ("sch", sch), ("q", name)) if key in params)
+            # Functions come from information_schema.routines, in the same statement, so one warehouse round trip serves both.
             rows = self.sql(f"""
                 SELECT table_catalog, table_schema, table_name, table_type
                 FROM system.information_schema.tables
-                WHERE left(table_name, 2) <> '__'  -- not NOT startswith(): on information_schema that filter drops every row{conditions}
+                WHERE left(table_name, 2) <> '__'  -- not NOT startswith(): on information_schema that filter drops every row{conditions("table_catalog", "table_schema", "table_name")}
+                UNION ALL
+                SELECT routine_catalog, routine_schema, routine_name, 'FUNCTION'
+                FROM system.information_schema.routines
+                WHERE left(routine_name, 2) <> '__'{conditions("routine_catalog", "routine_schema", "routine_name")}
                 ORDER BY table_name, table_catalog, table_schema
                 LIMIT 300""", **params)
             return {"source": "information_schema", "data": [
                 {"full_name": f"{r['table_catalog']}.{r['table_schema']}.{r['table_name']}",
                  "name": r["table_name"], "type": r["table_type"]} for r in rows]}
-        hits = [o for p in self.root.glob("*/*/objects.json")
+        hits = [o for p in (*self.root.glob("*/*/objects.json"), *self.root.glob("*/*/functions.json"))
                 for o in json.loads(p.read_text(encoding="utf-8"))["data"] if (q.lower() in o["name"].lower() if term.simple else _path_matches(term, o["full_name"]))]
         return {"source": "cached schemas only (pick a SQL warehouse to search everything)",
                 "data": sorted(hits, key=lambda x: (x["name"], x["full_name"]))[:300]}
@@ -658,6 +673,17 @@ def _path_matches(term, full_name):
     return len(parts) == 3 and term.matches(*parts)
 
 
+def _cached_functions(explorer):
+    """Every function row in the local cache (data/cache/<profile>/<catalog>/<schema>/functions.json)."""
+    out = []
+    for p in explorer.root.glob("*/*/functions.json"):
+        try:
+            out += [o for o in json.loads(p.read_text(encoding="utf-8")).get("data") or [] if o.get("full_name")]
+        except (OSError, ValueError):
+            continue
+    return out
+
+
 def cached_search(explorer, q, limit=300):
     """Search table names across everything in the local cache: every catalog and schema ever browsed, and every table
     whose object was ever fetched. `q` matches the table name or the full `catalog.schema.table` name, any case.
@@ -668,6 +694,9 @@ def cached_search(explorer, q, limit=300):
     hits = [{"full_name": t["table"], "name": t["table"].rsplit(".", 1)[-1], "type": t["type"]}
             for t in cached_metadata(explorer)
             if needle and (needle in t["table"].lower() if term.simple else _path_matches(term, t["table"]))]
+    hits += [{"full_name": o["full_name"], "name": o["name"], "type": "FUNCTION"}
+             for o in _cached_functions(explorer)
+             if needle and (needle in o["full_name"].lower() if term.simple else _path_matches(term, o["full_name"]))]
     hits.sort(key=lambda h: (needle not in h["name"].lower(), h["name"], h["full_name"]))
     return {"source": "tables already browsed (pick a SQL warehouse to search everything, or type the full name)",
             "data": hits[:limit]}

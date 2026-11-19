@@ -32,6 +32,18 @@ function run(item: MenuItem) {
   item.run()
 }
 
+describe('objectMenuItems for a function', () => {
+  it('offers DESCRIBE FUNCTION (not run) and Copy, and nothing that needs columns or the graph', () => {
+    const d = deps()
+    const items = objectMenuItems('dev.hr.full_name', 'FUNCTION', d)
+    expect(items.map((i) => ('label' in i ? i.label : i.kind))).toEqual(['DESCRIBE FUNCTION in new query window', 'Copy full name'])
+    run(items[0])
+    expect(d.openSql).toHaveBeenCalledWith('DESCRIBE FUNCTION EXTENDED dev.hr.full_name')
+    run(items[1])
+    expect(d.copy).toHaveBeenCalledWith('dev.hr.full_name')
+  })
+})
+
 describe('objectMenuItems', () => {
   it('opens a SELECT with explicit columns without running anything', async () => {
     const d = deps()
