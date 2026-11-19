@@ -1,7 +1,7 @@
-// Layout ported from relayout() in static/app.js. Pure: no React Flow, no DOM.
-import dagre from '@dagrejs/dagre'
+// Layout of the Graph: ELK's layered algorithm (column rows as ports, schemas as boxes), dagre as the fallback. Pure: no React Flow, no DOM.
 import type { GraphEdgeKind } from '../api/types'
 import { familyOf } from './edgeStyles'
+import { elkLayout, type ElkGroupBox } from './elkLayout'
 
 export interface LayoutNode {
   id: string
@@ -12,12 +12,23 @@ export interface LayoutNode {
   /** Current top-left position. Used only when a node has no dagre position. */
   x: number
   y: number
+  /** The column rows the node draws, top to bottom. Each one a flow edge ends at is a port on the node's side. */
+  rows?: string[]
+  /** The row that changes the column level sits under the last column row. */
+  moreRow?: boolean
+  /** An earlier layout placed it: its order among its neighbours is kept. A node that was just added is not placed. */
+  placed?: boolean
+  /** The box (a schema, say) the node is laid out inside, with the others that name it. Only nodes in the flow take part. */
+  group?: string
 }
 
 export interface LayoutEdge {
   source: string
   target: string
   kind: string
+  /** A column edge: the rows it joins. The table edge of the same pair then gives way to it. */
+  sourceColumn?: string
+  targetColumn?: string
 }
 
 export interface Point {
@@ -36,6 +47,22 @@ const FK_ROW_MIN_GAP = 40
 /** Vertical gap between the bands of unconnected parts of the graph. */
 const COMPONENT_GAP = 60
 
+export type LayoutEngine = 'elk' | 'dagre'
+
+export interface LayoutOptions {
+  /** ELK unless a test wants the old layout to compare against. ELK that cannot load falls back to dagre. */
+  engine?: LayoutEngine
+}
+
+/** A group's box, from the nodes laid out inside it. */
+export type GroupBox = ElkGroupBox
+
+export interface GraphLayout {
+  positions: Map<string, Point>
+  /** One box per group (see LayoutNode.group) that holds at least one node in the flow. */
+  groups: Map<string, GroupBox>
+}
+
 /**
  * Returns the top-left position of every node.
  *
@@ -43,24 +70,33 @@ const COMPONENT_GAP = 60
  * - Only flow edges (lineage, view dependencies) set the left-to-right rank.
  * - A reference-only node is not the focus and has at least one edge, none of them flow (foreign keys, joins and
  *   meaning links all count).
- * - Everything else goes through dagre (rankdir LR, nodesep 20, ranksep 110). Hidden nodes are included,
- *   so showing them again does not move the layout. A node with no flow edge takes the first rank, so a reference
- *   between two main nodes never moves one right of the other.
+ * - Everything else goes through ELK's layered algorithm (direction RIGHT, nodesep 20, layer spacing 110). Hidden nodes
+ *   are included, so showing them again does not move the layout. A node with no flow edge takes the first layer, so a
+ *   reference between two main nodes never moves one right of the other. A column row that a flow edge ends at is a
+ *   port on the node's side, so the nodes are ordered to cross as few column edges as the row order allows. A node
+ *   that an earlier layout placed keeps its order among its neighbours.
  * - Each reference-only node sits in a row, centered under its child. The child is the source of the node's first edge.
  * - Parts of the graph with no edge between them (an object added next to the graph) are laid out one by one and
  *   stacked top to bottom, in the order of their first node, so one part's reference row never lands on another part.
  *   The first part keeps the position the rules above give it.
  */
-export function computeLayout(nodes: LayoutNode[], edges: LayoutEdge[]): Map<string, Point> {
+export async function computeLayout(nodes: LayoutNode[], edges: LayoutEdge[], opts: LayoutOptions = {}): Promise<Map<string, Point>> {
+  return (await layoutGraph(nodes, edges, opts)).positions
+}
+
+/** computeLayout, and the box of each group. */
+export async function layoutGraph(nodes: LayoutNode[], edges: LayoutEdge[], opts: LayoutOptions = {}): Promise<GraphLayout> {
   const ids = new Set(nodes.map((n) => n.id))
   const liveEdges = edges.filter((e) => ids.has(e.source) && ids.has(e.target))
   const out = new Map<string, Point>()
+  const groups = new Map<string, GroupBox>()
   // Left edge of the first part, and the top for the next one. Later parts are moved to line up under it.
   let left = 0
   let nextTop: number | null = null
   for (const part of components(nodes, liveEdges)) {
     const members = new Set(part.map((n) => n.id))
-    const pos = layoutPart(part, liveEdges.filter((e) => members.has(e.source)))
+    const laid = await layoutPart(part, liveEdges.filter((e) => members.has(e.source)), opts)
+    const pos = laid.positions
     const partLeft = Math.min(...part.map((n) => pos.get(n.id)!.x))
     const partTop = Math.min(...part.map((n) => pos.get(n.id)!.y))
     if (nextTop === null) left = partLeft
@@ -72,9 +108,10 @@ export function computeLayout(nodes: LayoutNode[], edges: LayoutEdge[]): Map<str
       out.set(n.id, { x: p.x + dx, y: p.y + dy })
       bottom = Math.max(bottom, p.y + dy + n.height)
     }
+    for (const [id, b] of laid.groups) groups.set(id, { ...b, x: b.x + dx, y: b.y + dy })
     nextTop = bottom + COMPONENT_GAP
   }
-  return out
+  return { positions: out, groups }
 }
 
 /** Space kept between a part that was laid out again and the parts beside it. */
@@ -85,7 +122,12 @@ const PART_MARGIN = 16
  * top-left corner kept where it is. Everything else stays put. Null when a part would then overlap another one: the
  * caller lays the whole graph out instead.
  */
-export function computeScopedLayout(nodes: LayoutNode[], edges: LayoutEdge[], scope: readonly string[]): Map<string, Point> | null {
+export async function computeScopedLayout(
+  nodes: LayoutNode[],
+  edges: LayoutEdge[],
+  scope: readonly string[],
+  opts: LayoutOptions = {},
+): Promise<Map<string, Point> | null> {
   const ids = new Set(nodes.map((n) => n.id))
   const liveEdges = edges.filter((e) => ids.has(e.source) && ids.has(e.target))
   const wanted = new Set(scope)
@@ -106,7 +148,7 @@ export function computeScopedLayout(nodes: LayoutNode[], edges: LayoutEdge[], sc
       continue
     }
     const members = new Set(part.map((n) => n.id))
-    const pos = layoutPart(part, liveEdges.filter((e) => members.has(e.source)))
+    const pos = (await layoutPart(part, liveEdges.filter((e) => members.has(e.source)), opts)).positions
     const fresh = boxOf(part, (n) => pos.get(n.id)!)
     const dx = here.left - fresh.left
     const dy = here.top - fresh.top
@@ -145,8 +187,8 @@ function components(nodes: LayoutNode[], edges: LayoutEdge[]): LayoutNode[][] {
   return [...groups.values()]
 }
 
-/** The legacy rules for one connected part. Every node in the result has a position. */
-function layoutPart(nodes: LayoutNode[], liveEdges: LayoutEdge[]): Map<string, Point> {
+/** The rules for one connected part. Every node in the result has a position. */
+async function layoutPart(nodes: LayoutNode[], liveEdges: LayoutEdge[], opts: LayoutOptions): Promise<GraphLayout> {
   const byId = new Map(nodes.map((n) => [n.id, n]))
 
   const kindsByNode = new Map<string, string[]>()
@@ -167,22 +209,11 @@ function layoutPart(nodes: LayoutNode[], liveEdges: LayoutEdge[]): Map<string, P
   if (fkOnly.size === nodes.length) fkOnly.clear()
 
   const main = nodes.filter((n) => !fkOnly.has(n.id))
-  const g = new dagre.graphlib.Graph()
-  g.setGraph({ rankdir: 'LR', nodesep: NODE_SEP, ranksep: RANK_SEP })
-  g.setDefaultEdgeLabel(() => ({}))
-  for (const n of main) g.setNode(n.id, { width: n.width, height: n.height })
-  for (const e of liveEdges) {
-    if (isFlow(e.kind) && !fkOnly.has(e.source) && !fkOnly.has(e.target)) g.setEdge(e.source, e.target)
-  }
-  dagre.layout(g)
-
-  const out = new Map<string, Point>()
+  const flowEdges = liveEdges.filter((e) => isFlow(e.kind) && !fkOnly.has(e.source) && !fkOnly.has(e.target))
+  const placed = await layoutMain(main, flowEdges, opts)
+  const out = placed.positions
   let bottom = 0
-  for (const n of main) {
-    const p = g.node(n.id) as { x: number; y: number }
-    out.set(n.id, { x: p.x - n.width / 2, y: p.y - n.height / 2 })
-    bottom = Math.max(bottom, p.y + n.height / 2)
-  }
+  for (const n of main) bottom = Math.max(bottom, out.get(n.id)!.y + n.height)
 
   // Group reference-only nodes by child. Insertion order is kept, as in the legacy code.
   const groups = new Map<string, LayoutNode[]>()
@@ -210,6 +241,35 @@ function layoutPart(nodes: LayoutNode[], liveEdges: LayoutEdge[]): Map<string, P
 
   // A reference-only node whose child is not laid out (or is itself reference-only, with no position) keeps its place.
   for (const n of nodes) if (!out.has(n.id)) out.set(n.id, { x: n.x, y: n.y })
+  return { positions: out, groups: placed.groups }
+}
+
+/** The flow part of a layout: ELK, or dagre when asked to or when ELK cannot load. */
+async function layoutMain(main: LayoutNode[], flowEdges: LayoutEdge[], opts: LayoutOptions): Promise<GraphLayout> {
+  if (opts.engine !== 'dagre') {
+    try {
+      return await elkLayout(main, flowEdges, { nodeSep: NODE_SEP, layerSep: RANK_SEP })
+    } catch (e) {
+      console.warn('ELK could not lay out the graph, using dagre', e)
+    }
+  }
+  return { positions: await dagreLayout(main, flowEdges), groups: new Map() }
+}
+
+/** The old layout: dagre knows nodes and flow edges, not where on a node an edge attaches. */
+async function dagreLayout(main: LayoutNode[], flowEdges: LayoutEdge[]): Promise<Map<string, Point>> {
+  const { default: dagre } = await import('@dagrejs/dagre')
+  const g = new dagre.graphlib.Graph()
+  g.setGraph({ rankdir: 'LR', nodesep: NODE_SEP, ranksep: RANK_SEP })
+  g.setDefaultEdgeLabel(() => ({}))
+  for (const n of main) g.setNode(n.id, { width: n.width, height: n.height })
+  for (const e of flowEdges) g.setEdge(e.source, e.target)
+  dagre.layout(g)
+  const out = new Map<string, Point>()
+  for (const n of main) {
+    const p = g.node(n.id) as { x: number; y: number }
+    out.set(n.id, { x: p.x - n.width / 2, y: p.y - n.height / 2 })
+  }
   return out
 }
 

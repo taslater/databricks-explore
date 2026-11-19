@@ -79,7 +79,7 @@ describe('readNeighbors', () => {
       errors: [],
     }))
     useGraphStore.getState().mergeRelations({ nodes: [{ id: T('a'), label: 'a', kind: 'table', focus: true }], edges: [], errors: [] })
-    useGraphStore.getState().runLayout()
+    await useGraphStore.getState().runLayout()
     await ex.readNeighbors(T('a'))
     const n = useGraphStore.getState().nodes[0]
     expect(n.data.files?.[0].path).toBe('s3://b/')
