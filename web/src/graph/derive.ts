@@ -3,7 +3,7 @@
 import { MarkerType } from '@xyflow/react'
 import type { GraphEdge } from '../api/types'
 import { columnHandles, findColumn, visibleColumns } from './columns'
-import { ageDays, EDGE_COLORS } from './format'
+import { EDGE_COLORS } from './format'
 import { estimateSize } from './layout'
 import type { EdgeFilters, FlowEdge, FlowNode } from './types'
 
@@ -14,9 +14,7 @@ export interface DeriveInput {
   columnEdges?: FlowEdge[]
   focusSchema: string | null
   filters: EdgeFilters
-  staleDays: number
   hoverId: string | null
-  now?: number
 }
 
 /** Edge `via` labels: for each FK parent, the child columns of the last fk edge that points at it. */
@@ -72,30 +70,25 @@ export function handlesFor(
     : { sourceHandle: 'src-t', targetHandle: 'tgt-b' }
 }
 
-/** Lineage whose last_seen is older than `staleDays`. */
-export function isStale(info: GraphEdge, staleDays: number, now: number): boolean {
-  return info.kind === 'lineage' && (ageDays(info.last_seen, now) ?? -1) > staleDays
-}
+/** The server says the edge no longer holds (a view's source it stopped reading, a table recreated since). Age alone never does. */
+export const isSuperseded = (info: GraphEdge): boolean => info.status === 'superseded'
 
-/** Whether the filters let an edge show: its kind is on, and it is neither stale nor rejected unless those are on too. */
-export function edgeShown(info: GraphEdge, filters: EdgeFilters, staleDays: number, now: number): boolean {
-  const stale = isStale(info, staleDays, now)
-  return (filters[info.kind] ?? false) && !(stale && !filters.showStale) && !(info.status === 'rejected' && !filters.showRejected)
+/** Whether the filters let an edge show: its kind is on, and it is neither superseded nor rejected unless those are on too. */
+export function edgeShown(info: GraphEdge, filters: EdgeFilters): boolean {
+  return (
+    (filters[info.kind] ?? false) &&
+    !(isSuperseded(info) && !filters.showSuperseded) &&
+    !(info.status === 'rejected' && !filters.showRejected)
+  )
 }
 
 export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: FlowEdge[] } {
-  const now = input.now ?? Date.now()
   const { filters, focusSchema, hoverId } = input
   const via = viaMap(input.edges)
 
-  // Edge visibility and stale flags. Stale means lineage whose last_seen is older than staleDays.
+  // Edge visibility.
   const edgeHidden = new Map<string, boolean>()
-  const edgeStale = new Map<string, boolean>()
-  for (const e of input.edges) {
-    const info = e.data!.info
-    edgeStale.set(e.id, isStale(info, input.staleDays, now))
-    edgeHidden.set(e.id, !edgeShown(info, filters, input.staleDays, now))
-  }
+  for (const e of input.edges) edgeHidden.set(e.id, !edgeShown(e.data!.info, filters))
 
   // Node visibility: a node is hidden when it has edges and all of them are hidden. The focus node and pinned nodes always show.
   const edgesByNode = new Map<string, FlowEdge[]>()
@@ -166,14 +159,11 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
         : undefined
     const from = row(src, info.source_column)
     const to = row(tgt, info.target_column)
-    const stale = info.kind === 'lineage' && (ageDays(info.last_seen, now) ?? -1) > input.staleDays
-    const filtered =
-      !(filters[info.kind] ?? false) ||
-      (stale && !filters.showStale) ||
-      (info.status === 'rejected' && !filters.showRejected)
+    const superseded = isSuperseded(info)
+    const filtered = !edgeShown(info, filters)
     const hidden = !from || !to || filtered || !!src.hidden || !!tgt.hidden
     if (!hidden) covered.add([info.kind, ...[e.source, e.target].sort()].join('|'))
-    const color = stale ? EDGE_COLORS.stale : (EDGE_COLORS[info.kind] ?? '#999')
+    const color = superseded ? EDGE_COLORS.superseded : (EDGE_COLORS[info.kind] ?? '#999')
     const srcSize = sizeById.get(e.source) ?? { width: 0, height: 0 }
     const tgtSize = sizeById.get(e.target) ?? { width: 0, height: 0 }
     const handles = columnHandles(
@@ -185,19 +175,19 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
     )
     columnEdges.push({
       ...e,
-      type: stale ? 'stale' : info.kind,
+      type: superseded ? 'superseded' : info.kind,
       hidden,
       sourceHandle: handles.sourceHandle,
       targetHandle: handles.targetHandle,
       markerEnd: info.directed === false ? undefined : { type: MarkerType.ArrowClosed, color },
-      data: { ...e.data!, stale, faded: hoverId !== null && e.source !== hoverId && e.target !== hoverId },
+      data: { ...e.data!, superseded, faded: hoverId !== null && e.source !== hoverId && e.target !== hoverId },
     })
   }
 
   const edges: FlowEdge[] = input.edges.map((e) => {
     const info = e.data!.info
-    const stale = edgeStale.get(e.id) === true
-    const color = stale ? EDGE_COLORS.stale : (EDGE_COLORS[info.kind] ?? '#999')
+    const superseded = isSuperseded(info)
+    const color = superseded ? EDGE_COLORS.superseded : (EDGE_COLORS[info.kind] ?? '#999')
     const src = nodeById.get(e.source)
     const tgt = nodeById.get(e.target)
     const srcSize = sizeById.get(e.source) ?? { width: 0, height: 0 }
@@ -210,7 +200,7 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
     const drawnInColumns = covered.has([info.kind, ...[e.source, e.target].sort()].join('|'))
     return {
       ...e,
-      type: stale ? 'stale' : info.kind,
+      type: superseded ? 'superseded' : info.kind,
       hidden: edgeHidden.get(e.id) === true || drawnInColumns,
       sourceHandle: handles.sourceHandle,
       targetHandle: handles.targetHandle,
@@ -219,7 +209,7 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
       markerStart: info.bidir ? { type: MarkerType.ArrowClosed, color } : undefined,
       data: {
         ...e.data!,
-        stale,
+        superseded,
         faded: hoverId !== null && e.source !== hoverId && e.target !== hoverId,
       },
     }

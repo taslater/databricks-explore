@@ -9,7 +9,7 @@ export const EDGE_INTERACTION_WIDTH = 32
 /** Rejected edges are barely there, proposed ones are lighter than accepted or derived ones. */
 const STATUS_OPACITY = { rejected: 0.3, proposed: 0.65 } as const
 
-function makeEdge(kind: GraphEdgeKind | 'stale') {
+function makeEdge(kind: GraphEdgeKind | 'superseded') {
   const kindStyle = KIND_STYLE[kind]
   function Edge({
     sourceX,
@@ -44,7 +44,7 @@ function makeEdge(kind: GraphEdgeKind | 'stale') {
   return Edge
 }
 
-/** Edge type per kind. Keys match the server's edge kind, plus `stale`, which the view picks for lineage older than the stale-days setting. */
+/** Edge type per kind. Keys match the server's edge kind, plus `superseded`, which the view picks for an edge that no longer holds. */
 export const EDGE_TYPES = {
   lineage: makeEdge('lineage'),
   fk: makeEdge('fk'),
@@ -54,5 +54,5 @@ export const EDGE_TYPES = {
   sketch: makeEdge('sketch'),
   concept_link: makeEdge('concept_link'),
   ontology: makeEdge('ontology'),
-  stale: makeEdge('stale'),
+  superseded: makeEdge('superseded'),
 }

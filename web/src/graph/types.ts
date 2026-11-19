@@ -15,6 +15,10 @@ export type TableNodeData = {
   pinned?: boolean
   selfRef: boolean
   selfRefLastSeen?: string
+  /** The object does not exist. Drawn dashed with no fill, never expanded. */
+  missing?: boolean
+  missingReason?: string
+  renamedTo?: string
   /** Columns, once loaded. Shown while `showColumns` is set. */
   columns?: ColumnInfo[]
   showColumns?: boolean
@@ -49,7 +53,8 @@ export type ConceptFlowNode = Node<ConceptNodeData, 'concept'>
 export type EdgeData = {
   info: GraphEdge
   // derived
-  stale?: boolean
+  /** The edge no longer holds (status `superseded`). */
+  superseded?: boolean
   faded?: boolean
 }
 
@@ -57,8 +62,8 @@ export type FlowEdge = Edge<EdgeData>
 
 export type Selection = { kind: 'node' | 'edge'; id: string } | null
 
-/** One checkbox per edge kind, plus stale lineage and rejected edges (hidden unless asked for). */
+/** One checkbox per edge kind, plus superseded and rejected edges (hidden unless asked for). */
 export type EdgeFilters = Record<GraphEdgeKind, boolean> & {
-  showStale: boolean
+  showSuperseded: boolean
   showRejected: boolean
 }

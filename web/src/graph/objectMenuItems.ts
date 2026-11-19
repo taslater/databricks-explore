@@ -1,8 +1,10 @@
 // The items of the object right-click menu, built from the object's name and kind and a few actions. No React, no fetch.
 import type { MenuItem } from '../shared/ContextMenu'
+import { isFunction } from './objectTypes'
 import {
   columnList,
   countSql,
+  describeFunctionSql,
   describeDetailSql,
   describeHistorySql,
   hasDeltaLog,
@@ -27,8 +29,17 @@ export interface ObjectMenuDeps {
 
 const NOT_FOR_VIEWS = 'Views have no Delta log'
 
+/** The menu for a function: its description in a new query window, and its name. There is nothing to graph or SELECT. */
+function functionMenuItems(fullName: string, deps: ObjectMenuDeps): MenuItem[] {
+  return [
+    { kind: 'action', label: 'DESCRIBE FUNCTION in new query window', run: () => deps.openSql(describeFunctionSql(fullName)) },
+    { kind: 'action', label: 'Copy full name', run: () => deps.copy(fullName) },
+  ]
+}
+
 /** The menu for one object: SELECT, "Script as", "Copy", and the graph and canvas actions. `type` is the object's table type. */
 export function objectMenuItems(fullName: string, type: string | null | undefined, deps: ObjectMenuDeps): MenuItem[] {
+  if (isFunction(type)) return functionMenuItems(fullName, deps)
   const kind = objectKind(type)
   const delta = hasDeltaLog(kind)
 

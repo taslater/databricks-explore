@@ -53,7 +53,11 @@ def test_primary_keys(client):
 
 def test_relations_include_fk_and_lineage(client):
     rel = client.get("/api/relations?name=demo.sales.orders").json
-    assert sorted(e["kind"] for e in rel["edges"]) == ["fk", "lineage"]
+    # the view's lineage and its dependency are one edge, the dependency
+    assert sorted(e["kind"] for e in rel["edges"]) == ["fk", "view_dep"]
+    view = next(e for e in rel["edges"] if e["kind"] == "view_dep")
+    assert view["last_read"] == "2026-11-10T08:00:00.000Z" and not view.get("superseded")
+    assert {n["id"]: n["kind"] for n in rel["nodes"]}["demo.sales.v_daily_revenue"] == "view"
     assert rel["errors"] == []
 
 
@@ -101,6 +105,15 @@ def test_async_query_succeeds_with_chunked_rows(client):
 def test_search_uses_the_fake_information_schema(client):
     hits = client.get("/api/search?q=order").json["data"]
     assert {h["full_name"] for h in hits} == {"demo.sales.orders", "demo.sales.order_items"}
+
+
+def test_functions_are_listed_per_schema_and_found_by_search(client):
+    got = client.get("/api/functions?catalog=demo&schema=sales").json["data"]
+    assert [f["name"] for f in got] == ["days_since", "net_price"]
+    assert got[1] == {"name": "net_price", "full_name": "demo.sales.net_price", "type": "FUNCTION", "comment": "Price after discount"}
+    assert client.get("/api/functions?catalog=demo&schema=metrics").json["data"] == []
+    hits = client.get("/api/search?q=net_price").json["data"]
+    assert [(h["full_name"], h["type"]) for h in hits] == [("demo.sales.net_price", "FUNCTION")]
 
 
 def test_search_through_the_demo_takes_paths_and_globs(client):

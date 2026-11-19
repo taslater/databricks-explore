@@ -101,12 +101,18 @@ Response: `{"fetched_at": str, "data": [{"name": str, "comment": str|null}]}`, s
 
 Response: `{"fetched_at": str, "data": [{"name": str, "full_name": "cat.sch.name", "type": str|null, "comment": str|null}]}`, sorted by `name`. Names starting with `__` (materialized-view and streaming-table backing tables) are excluded.
 
+### `GET /api/functions?catalog=<cat>&schema=<sch>`
+
+*Needs connection.* *Cached* per schema (Unity Catalog `functions.list`). Supports `?refresh=1`.
+
+Response: `{"fetched_at": str, "data": [{"name": str, "full_name": "cat.sch.name", "type": "FUNCTION", "comment": str|null}]}`, sorted by `name`. Same shape as `/api/objects`, so the picker lists both together and tells them apart by `type`.
+
 ### `GET /api/search?q=<text>`
 
 *Needs connection.* Case-insensitive substring match on the table name. No cache. Returns at most 300 results.
 
-- If a warehouse is selected, queries `system.information_schema.tables` (excluding `__`-prefixed names) and returns `"source": "information_schema"`.
-- Otherwise searches everything in the local cache, across all catalogs: every `objects.json` (schemas browsed before) and every fetched `obj/*.json` (tables opened before). The term matches the table name or the full `catalog.schema.table` name; name matches come first. It returns `"source": "tables already browsed (pick a SQL warehouse to search everything, or type the full name)"`. A table that was never browsed is not found this way; `GET /api/object?name=<catalog.schema.table>` (one `tables.get`, then cached) reads it by its full name.
+- If a warehouse is selected, queries `system.information_schema.tables` and `system.information_schema.routines` in one statement (excluding `__`-prefixed names) and returns `"source": "information_schema"`. Functions come back with `"type": "FUNCTION"`.
+- Otherwise searches everything in the local cache, across all catalogs: every `objects.json` and `functions.json` (schemas browsed before) and every fetched `obj/*.json` (tables opened before). The term matches the table name or the full `catalog.schema.table` name; name matches come first. It returns `"source": "tables already browsed (pick a SQL warehouse to search everything, or type the full name)"`. A table that was never browsed is not found this way; `GET /api/object?name=<catalog.schema.table>` (one `tables.get`, then cached) reads it by its full name.
 
 Response:
 
@@ -126,7 +132,7 @@ Response: `{"fetched_at": str, "data": <Databricks TableInfo as_dict()>}`. `data
 
 ### `GET /api/relations?name=<cat.sch.obj>`
 
-*Needs connection.* Builds the graph for one object from its cached `object` (constraints, view deps) and `lineage` (`/api/2.0/lineage-tracking/table-lineage`). Supports `?refresh=1`. Partial failures are reported in `errors` with status 200.
+*Needs connection.* Builds the graph for one object from its cached `object` (constraints, view deps) and `lineage` (`/api/2.0/lineage-tracking/table-lineage`). Supports `?refresh=1`. Partial failures are reported in `errors` with status 200. Every neighbor is looked up too, from the cache first and otherwise with one `tables.get` (at most 40 per call; a not-found answer is remembered until `?refresh=1`), and a lookup that fails is not an error.
 
 Response:
 
@@ -139,11 +145,11 @@ Response:
 
 ```
 
-- **Node:** `{id, label, kind, focus?, self_ref?, self_ref_last_seen?}`. `kind` is the lowercased `table_type` (default `"table"`). `focus` is `true` only on the requested object. `self_ref` is set when lineage shows the object feeding itself.
+- **Node:** `{id, label, kind, focus?, self_ref?, self_ref_last_seen?, missing?, missing_reason?, renamed_to?}`. `kind` is the object's own lowercased `table_type` (`PERSISTED_VIEW` is `view`); when it could not be read, the lineage API's type normalized the same way (`table`, `view`, `materialized_view`, `streaming_table`, `metric_view`), default `"table"`. `focus` is `true` only on the requested object. `self_ref` is set when lineage shows the object feeding itself. `missing` is `true` for a neighbor that does not exist (renamed or dropped: `tables.get` says not found); `missing_reason` names the catalog, schema or table that is gone, and `renamed_to` is a table of the same schema and name in another catalog, when the cached object lists have one.
 - **Edge kinds:**
   - `fk`: `id = "fk:<child>-><parent>"`, plus `constraint`, `child_columns`, `parent_columns`, `label`.
-  - `view_dep`: `id = "view_dep:<source>-><target>"`. Source is the dependency and target is the view.
-  - `lineage`: `id = "lineage:<a><-><b>"` with the names sorted. Fields: `bidir` (both directions seen), `last_seen`, `last_seen_by_dir` (map of `"src->dst"` to timestamp).
+  - `view_dep`: `id = "view_dep:<source>-><target>"`. Source is the dependency and target is the view. Read from the view's current definition, also when the object asked for is the dependency and the view a downstream neighbor. `last_read` is the lineage API's time for the same pair, when it has one: a pair with both is this one edge, never two.
+  - `lineage`: `id = "lineage:<a><-><b>"` with the names sorted. Fields: `bidir` (both directions seen), `last_seen`, `last_seen_by_dir` (map of `"src->dst"` to timestamp), and `superseded: true` when it no longer holds. A lineage edge into a view is superseded when the view's `view_dependencies` do not name the source; into any other object (or a view with none listed), when every event is older than the target's `created_at`. Age alone never makes an edge superseded.
 - **`errors`:** strings such as `"tables.get: ..."` or `"lineage: ..."`.
 
 ### `GET /api/edge?src=<name>&tgt=<name>`
@@ -453,10 +459,10 @@ One model for every relationship between tables or columns, with provenance. Imp
 
 - **Endpoint** `{table, column?}`. `table` is a 3-part name `catalog.schema.table`, `ph:<uuid>` for a placeholder that does not exist yet, or `concept:<uuid>` for a concept (section 6; never with a column). `column` is omitted (or `null`) for a table-level end.
 - **`kind`:** `fk`, `lineage`, `view_dep` (derived) or `join_mined`, `manual`, `sketch`, `concept_link`, `ontology` (stored).
-- **`status`:** `derived` (only on derived edges), `proposed`, `accepted`, `rejected`.
+- **`status`:** `derived` and `superseded` (a derived edge that no longer holds; see `GET /api/relations`) are only on derived edges, then `proposed`, `accepted`, `rejected`.
 - **`evidence.together`** (optional, default `[]`, only on mined edges) lists the composite keys a column pair belongs to: `[{"columns": [["l_partkey", "ps_partkey"], ["l_suppkey", "ps_suppkey"]], "runs": 4}]`. Each entry is every column pair (source column, target column, in the edge's orientation) joined in one condition between the same two tables, with the number of statements that did so. At most 5 entries, most runs first; across runs the counts are added by column set. Declared foreign-key pairs are not edges but still appear in `columns`. A pair's own `runs` counts every statement, so `runs` above the sum of its `together` runs means it also appeared alone.
 - **`relation`:** `null`, except on a `concept_link` edge, where it says what the link means (section 6). Concept links are never returned by `GET /api/relationships`, and `POST /api/relationships` refuses concept endpoints.
-- **`evidence`** is `null` unless the edge was mined from activity. For derived lineage it holds only `last_seen`. `provenance.origin` on derived edges is `unity_catalog:table_constraints`, `unity_catalog:view_dependencies` or `unity_catalog:table_lineage`, and `fetched_at` is when the cached metadata behind it was read.
+- **`evidence`** is `null` unless the edge was mined from activity. For derived lineage it holds only `last_seen`, and for a `view_dep` edge `last_seen` (when the lineage API last saw the view read) if it has one. `provenance.origin` on derived edges is `unity_catalog:table_constraints`, `unity_catalog:view_dependencies` or `unity_catalog:table_lineage`, and `fetched_at` is when the cached metadata behind it was read.
 - **Derived kinds are never stored.** They are normalized from `GET /api/relations` data at read time. An FK becomes one edge per column pair. Lineage seen in both directions becomes two directed edges. A user note on a derived edge is kept in an overlay keyed by its natural key.
 - **Natural key:** `(kind, source table, source column, target table, target column)`. Writes upsert on it. An undirected edge (`directed: false`) is the same edge in either direction.
 - **Derived ids** are `kind:table[#column]->table[#column]`, for example `fk:main.sales.orders#cust_id->main.sales.customers#id`. Stored ids are `e_<hex>`. Percent-encode ids in URLs (`#` and `>` in particular).
@@ -470,7 +476,7 @@ One model for every relationship between tables or columns, with provenance. Imp
 - `columns`: the member column pairs `[{"source": "cust_id", "target": "id"}]`.
 - `members`: the ids of the edges it was rolled from.
 - `id`: the member's own id when the group is a single table-level edge, otherwise the derived-style table-level id.
-- `status`: the strongest member's (`accepted`, then `proposed`, `derived`, `rejected`). `note` for a derived group is the overlay note on its table-level id.
+- `status`: the strongest member's (`accepted`, then `proposed`, `derived`, `superseded`, `rejected`). `note` for a derived group is the overlay note on its table-level id.
 - `evidence`: runs summed, users the maximum, first and last seen the earliest and latest.
 
 Undirected groups are oriented by sorted table name.

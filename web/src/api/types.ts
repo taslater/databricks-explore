@@ -84,7 +84,7 @@ export interface TableInfo {
 
 // ---- Relationship graph ---------------------------------------------------
 
-export type GraphNodeKind = string // lowercased table_type, default "table"
+export type GraphNodeKind = string // the object's lowercased table_type; "view" for PERSISTED_VIEW; default "table"
 
 export interface GraphNode {
   id: string
@@ -93,6 +93,10 @@ export interface GraphNode {
   focus?: boolean
   self_ref?: boolean
   self_ref_last_seen?: string
+  /** The object does not exist (renamed or dropped). `missing_reason` says why, `renamed_to` is a table of the same schema and name elsewhere. */
+  missing?: boolean
+  missing_reason?: string
+  renamed_to?: string
 }
 
 /** Derived from Unity Catalog at read time: `fk`, `lineage`, `view_dep`. The rest are stored. */
@@ -108,7 +112,8 @@ export type RelationshipKind =
 
 export type GraphEdgeKind = RelationshipKind
 
-export type RelationshipStatus = 'derived' | 'proposed' | 'accepted' | 'rejected'
+/** `derived` and `superseded` (a derived edge that no longer holds) are only ever on edges read from Unity Catalog. */
+export type RelationshipStatus = 'derived' | 'superseded' | 'proposed' | 'accepted' | 'rejected'
 
 /** What the graph draws and saves for one edge. The first group is the legacy shape, the second comes from /api/relationships. */
 export interface GraphEdge {
@@ -259,7 +264,7 @@ export interface RelationshipCreate {
 }
 
 export interface RelationshipPatch {
-  status?: Exclude<RelationshipStatus, 'derived'>
+  status?: StoredStatus
   note?: string
 }
 
@@ -356,7 +361,7 @@ export interface UsageSummary {
   pairs: UsagePair[]
 }
 
-export type StoredStatus = Exclude<RelationshipStatus, 'derived'>
+export type StoredStatus = Exclude<RelationshipStatus, 'derived' | 'superseded'>
 
 export interface SuggestionsResponse {
   edges: Relationship[]

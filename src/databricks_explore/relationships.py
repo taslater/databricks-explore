@@ -32,7 +32,7 @@ TABLE_RELATIONS = ("defines", "measures", "identifies", "describes")
 CONCEPT_RELATIONS = ("is_a", "part_of", "related_to")
 
 Kind = Literal["fk", "lineage", "view_dep", "join_mined", "manual", "sketch", "concept_link", "ontology"]
-Status = Literal["derived", "proposed", "accepted", "rejected"]
+Status = Literal["derived", "superseded", "proposed", "accepted", "rejected"]  # superseded: a derived edge that no longer holds
 
 _TABLE = re.compile(r"^[^.\s]+\.[^.\s]+\.[^.\s]+$")
 _PLACEHOLDER = "ph:"
@@ -392,19 +392,21 @@ def derive_edges(relations, times=None):
     """Normalize an Explorer.relations() response into Edge objects with status 'derived'.
 
     FK edges become one column-level edge per column pair (table-level when the columns are unknown).
-    A lineage edge seen in both directions becomes two directed edges, one per direction.
+    A lineage edge seen in both directions becomes two directed edges, one per direction. An edge marked `superseded`
+    (no longer holds) gets that status, and a view dependency's `last_read` becomes its evidence's `last_seen`.
     `times` maps "object" and "lineage" to the fetch time of the cached data behind them.
     """
     times = times or {}
     out = []
 
-    def add(kind, source, target, prov, evidence=None):
+    def add(kind, source, target, prov, evidence=None, status="derived"):
         stamp = prov.fetched_at or dbx.now()
         out.append(Edge(id=derived_id(kind, source, target), kind=kind, source=source, target=target,
-                        provenance=prov, evidence=evidence, status="derived", created_at=stamp, updated_at=stamp))
+                        provenance=prov, evidence=evidence, status=status, created_at=stamp, updated_at=stamp))
 
     for e in relations.get("edges", []):
         s, t = e["source"], e["target"]
+        status = "superseded" if e.get("superseded") else "derived"
         if e["kind"] == "fk":
             prov = Provenance(origin="unity_catalog:table_constraints", source_ref=e.get("constraint"),
                               fetched_at=times.get("object"))
@@ -414,13 +416,14 @@ def derive_edges(relations, times=None):
                 add("fk", Endpoint(table=s, column=c), Endpoint(table=t, column=p), prov)
         elif e["kind"] == "view_dep":
             add("view_dep", Endpoint(table=s), Endpoint(table=t),
-                Provenance(origin="unity_catalog:view_dependencies", fetched_at=times.get("object")))
+                Provenance(origin="unity_catalog:view_dependencies", fetched_at=times.get("object")),
+                Evidence(last_seen=e["last_read"]) if e.get("last_read") else None)  # when the view was last read
         elif e["kind"] == "lineage":
             seen = e.get("last_seen_by_dir") or {f"{s}->{t}": e.get("last_seen")}
             prov = Provenance(origin="unity_catalog:table_lineage", fetched_at=times.get("lineage"))
             for direction, ts in seen.items():
                 a, _, b = direction.partition("->")
-                add("lineage", Endpoint(table=a), Endpoint(table=b), prov, Evidence(last_seen=ts))
+                add("lineage", Endpoint(table=a), Endpoint(table=b), prov, Evidence(last_seen=ts), status)
     return out
 
 
@@ -452,7 +455,7 @@ def derive_column_lineage(rows, fetched_at=None):
 
 # ---------- rollup ----------
 
-_PRIORITY = ("accepted", "proposed", "derived", "rejected")
+_PRIORITY = ("accepted", "proposed", "derived", "superseded", "rejected")
 
 
 def _merge_evidence(items):
@@ -485,7 +488,7 @@ def rollup(edges, notes=None):
 
     A column edge implies its table edge. `columns` lists the column pairs of the members, `members` their ids.
     A group of one table-level edge keeps that edge's id. Any other group gets the table-level derived id.
-    The status is the strongest member's (accepted, proposed, derived, rejected). `notes` maps natural keys to
+    The status is the strongest member's (accepted, proposed, derived, superseded, rejected). `notes` maps natural keys to
     overlay notes and wins for derived edges.
     """
     notes = notes or {}

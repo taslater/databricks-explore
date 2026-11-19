@@ -1,4 +1,6 @@
-"""Table lineage and view dependencies: a bounded multi-hop walk over the derived edges, and the connectors it draws on a canvas."""
+"""Table lineage and view dependencies: a bounded multi-hop walk over the derived edges, and the connectors it draws on a canvas.
+
+Edges that no longer hold (`superseded`) are left out of both."""
 from typing import Callable, Optional
 
 LINEAGE_KINDS = ("lineage", "view_dep")  # the derived edge kinds that say where data comes from
@@ -11,6 +13,11 @@ _RANK = {"view_dep": 0, "lineage": 1}  # a pair with both is drawn as a view dep
 
 def _edge_id(kind: str, source: str, target: str) -> str:
     return f"{kind}:{source}->{target}"  # the id relationships.derived_id gives a table-level edge
+
+
+def _live(edge: dict) -> bool:
+    """Whether a lineage or view-dependency edge still holds (relations() marks the ones that do not `superseded`)."""
+    return edge.get("kind") in LINEAGE_KINDS and not edge.get("superseded")
 
 
 def _steps(edge: dict, table: str, side: str):
@@ -69,7 +76,7 @@ def walk(relations_of: Callable[[str], Optional[dict]], table: str, direction: s
             for t in frontier:
                 rel = relations(t)
                 kinds = {n.get("id"): n.get("kind") for n in rel.get("nodes") or []}
-                for e in sorted((x for x in rel.get("edges") or [] if x.get("kind") in LINEAGE_KINDS),
+                for e in sorted((x for x in rel.get("edges") or [] if _live(x)),
                                 key=lambda x: (x["kind"], x["source"], x["target"])):
                     for src, tgt, other in _steps(e, t, side):
                         if other == t:
@@ -93,7 +100,7 @@ def walk(relations_of: Callable[[str], Optional[dict]], table: str, direction: s
     # table it was reached from, a link back along a cycle). They cost no read, so they are listed too.
     for rel in memo.values():
         for e in rel.get("edges") or []:
-            if e.get("kind") not in LINEAGE_KINDS:
+            if not _live(e):
                 continue
             for src, tgt in ((e["source"], e["target"]), *(((e["target"], e["source"]),) if e.get("bidir") else ())):
                 if src != tgt and src in nodes and tgt in nodes and (e["kind"], src, tgt) not in edges:
@@ -137,7 +144,7 @@ def among(relations_of: Callable[[str], Optional[dict]], tables) -> list[dict]:
     for t in sorted(set(tables)):
         rel = relations_of(t) or {}
         for e in rel.get("edges") or []:
-            if e.get("kind") in LINEAGE_KINDS and e["source"].lower() in wanted and e["target"].lower() in wanted:
+            if _live(e) and e["source"].lower() in wanted and e["target"].lower() in wanted:
                 found.setdefault((e["kind"], e["source"], e["target"]), e)
                 if e.get("bidir"):
                     found.setdefault((e["kind"], e["target"], e["source"]), {**e, "source": e["target"], "target": e["source"]})

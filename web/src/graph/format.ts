@@ -9,7 +9,7 @@ export const EDGE_COLORS: Record<string, string> = {
   sketch: '#b83280',
   concept_link: '#b7791f',
   ontology: '#4a5568',
-  stale: '#bbb',
+  superseded: '#bbb',
 }
 
 const NODE_FILL: Record<string, string> = {
