@@ -47,6 +47,24 @@ export type TableNodeData = {
   facts?: NodeFacts
   /** The fill chosen by "Color by", added at draw time (graph/colorBy.ts) and never saved. Absent in type mode. */
   fill?: string
+  /** Set on the node that stands for a collapsed group (graph/collapse.ts); never saved. */
+  summary?: GroupSummaryData
+}
+
+/** A collapsed group's node: its name, how many tables it holds, and what they are. */
+export type GroupSummaryData = { key: string; label: string; count: number; noun: string }
+
+/** What an edge stands for when it merges others (a group's edges, or a chain of pass-through views); added at draw time, never saved. */
+export type MergedEdge = {
+  /** The edges it stands for. */
+  parts: string[]
+  /** How many separate links it merges. */
+  count: number
+  /** The pass-through views left out of it. */
+  views: number
+  /** The chain it draws, and the views in it. */
+  chain?: string
+  viaNodes?: string[]
 }
 
 export type FlowNode = Node<TableNodeData, 'table'>
@@ -76,6 +94,8 @@ export type EdgeData = {
   cardinality?: Cardinality
   /** What the SQL behind a flow edge does with its source (aggregate, join, union, dedupe, filter), added at draw time and never saved. */
   transform?: EdgeTransform
+  /** Set on an edge that stands for others: its group's edges, or a chain of pass-through views (graph/collapse.ts). */
+  merged?: MergedEdge
 }
 
 export type FlowEdge = Edge<EdgeData>

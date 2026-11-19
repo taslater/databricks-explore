@@ -5,6 +5,7 @@ import { EdgeGrainGlyph } from './NodeFacts'
 import { OrphanTick } from './OrphanTick'
 import { hasOrphans } from './relProfile'
 import { EdgeTransformGlyphs } from './EdgeTransforms'
+import { MergedEdgeLabel } from './CollapseMarks'
 import type { FlowEdge } from './types'
 
 /** Width in pixels of the invisible path that takes clicks and hovers, so a thin line is easy to hit. React Flow's default is 20. */
@@ -54,6 +55,7 @@ function makeEdge(family: EdgeFamily, superseded = false) {
         {family === 'reference' && hasOrphans(data?.cardinality) && (
           <OrphanTick x={targetX} y={targetY} side={targetPosition} profile={data!.cardinality!.profile!} faded={data?.faded} />
         )}
+        {data?.merged && <MergedEdgeLabel id={id} merged={data.merged} x={labelX} y={labelY} faded={data.faded} />}
         <EdgeGrainGlyph id={id} change={data?.transform?.glyphs.includes('aggregate') ? undefined : data?.grainChange} x={labelX} y={labelY} faded={data?.faded} />
         <EdgeTransformGlyphs id={id} transform={data?.transform} x={targetX} y={targetY} side={targetPosition} faded={data?.faded} />
       </>

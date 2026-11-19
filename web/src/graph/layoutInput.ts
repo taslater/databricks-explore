@@ -1,5 +1,6 @@
 // What the layout reads from the Graph's state: node sizes, the column rows each node draws, and the visible edges. Pure.
 import { rowsOf } from './columns'
+import { collapseGraph, NO_GROUPING, type Grouping } from './collapse'
 import { deriveFlow, nodeSize, viaMap } from './derive'
 import type { LayoutEdge, LayoutNode } from './layout'
 import type { EdgeFilters, FlowEdge, FlowNode } from './types'
@@ -10,6 +11,10 @@ export interface LayoutState {
   columnEdges: FlowEdge[]
   focusSchema: string | null
   filters: EdgeFilters
+  /** Collapsed groups and elided chains (graph/collapse.ts). Left out, the graph is laid out whole. */
+  grouping?: Grouping
+  groupTags?: Record<string, string>
+  groupPositions?: Record<string, { x: number; y: number }>
 }
 
 /**
@@ -18,9 +23,10 @@ export interface LayoutState {
  */
 export function layoutInput(s: LayoutState, placed: ReadonlySet<string>): { nodes: LayoutNode[]; links: LayoutEdge[] } {
   const via = viaMap(s.edges)
-  const drawn = deriveFlow({ nodes: s.nodes, edges: s.edges, columnEdges: s.columnEdges, focusSchema: s.focusSchema, filters: s.filters, hoverId: null })
+  const view = collapseGraph({ nodes: s.nodes, edges: s.edges, filters: s.filters, grouping: s.grouping ?? NO_GROUPING, groupTags: s.groupTags, groupPositions: s.groupPositions })
+  const drawn = deriveFlow({ nodes: view.nodes, edges: view.edges, columnEdges: s.columnEdges, focusSchema: s.focusSchema, filters: s.filters, hoverId: null, forceHidden: view.hidden })
   const drawnById = new Map(drawn.nodes.map((n) => [n.id, n]))
-  const nodes = s.nodes.map((n) => {
+  const nodes = view.nodes.filter((n) => !view.hidden.has(n.id)).map((n) => {
     const size = nodeSize(n, s.focusSchema, via.get(n.id))
     const data = drawnById.get(n.id)?.data ?? n.data
     const rows = rowsOf(data)
@@ -33,6 +39,7 @@ export function layoutInput(s: LayoutState, placed: ReadonlySet<string>): { node
       y: n.position.y,
       ...(rows.length > 0 && { rows: rows.map((r) => r.name), moreRow: !!data.allColumns || rows.length < (data.columns?.length ?? 0) }),
       ...(placed.has(n.id) && { placed: true }),
+      ...(view.boxOf.has(n.id) && { group: view.boxOf.get(n.id) }),
     }
   })
   const columnIds = new Set(s.columnEdges.map((e) => e.id))

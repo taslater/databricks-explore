@@ -10,6 +10,7 @@ import { GrainLine, LateDot, SizeBadge } from './NodeFacts'
 import { NeighborCounts } from './NeighborCounts'
 import { TypeIcon } from './TypeIcon'
 import { TableHandles } from './TableHandles'
+import { GroupSummary } from './CollapseMarks'
 import type { FlowNode } from './types'
 
 const LEVEL_LABEL = { none: '▸ cols', keys: '▾ keys', all: '▾ all' }
@@ -46,6 +47,8 @@ export function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
   useEffect(() => {
     updateInternals(id)
   }, [id, shown, splitKey, updateInternals])
+
+  if (data.summary) return <GroupSummary data={data.summary} split={split} />
 
   // Four handles per side. The edge picks the pair that matches its direction (see handlesFor in derive.ts).
   return (

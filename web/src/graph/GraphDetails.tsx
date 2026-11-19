@@ -16,6 +16,7 @@ import { NodeMarkDetails } from './NodeMarkDetails'
 import { useGraphStore } from './graphStore'
 import { canReview, patchIds } from './relationships'
 import { EdgeHow } from './EdgeTransforms'
+import { CollapseDetails, GroupsSection } from './CollapseControls'
 import { EdgeGrainDetails, NodeFactsDetails } from './NodeFacts'
 import type { FlowEdge, FlowNode } from './types'
 
@@ -65,6 +66,7 @@ export function GraphDetails() {
         </label>
         <EdgeLegend />
         <ColorLegend />
+        <GroupsSection />
       </section>
 
       <p className="hint">Click a node or edge for details. Shift-click to select several. Double-click a node to expand it. Drag to arrange.</p>
@@ -116,6 +118,7 @@ export function GraphDetails() {
       </div>
 
       <div className="details-body">
+        <CollapseDetails />
         {several && <SelectionDetails tables={pickedTables} />}
         {detailNode && (detailNode.data.missing ? <MissingDetails id={detailNode.id} node={detailNode} /> : <NodeDetails id={detailNode.id} node={detailNode} />)}
         {selectedEdge && <EdgeDetails edge={selectedEdge} />}

@@ -173,7 +173,7 @@ Response:
 
 ### Diagrams
 
-A saved graph is `data/diagrams/<stem>.json`: `{"name", "saved_at", "focus_schema", "color_by"?, "nodes": [{"data", "position"}], "edges": [{"data"}]}` (positions are node centers; see `web/src/graph/diagram.ts`). `color_by` is what a node's fill means (see "Color by" below) and is left out for the default, `type`. The stem is the name with anything but letters, digits, `_`, `.` and `-` turned into `_`. Everywhere a route or MCP tool takes a name, the name as typed (`Returns graph`) or as stored (`Returns_graph`) works. No connection needed. Agents read and change saved graphs over MCP (`contracts/mcp.md`, "Tools: saved graphs").
+A saved graph is `data/diagrams/<stem>.json`: `{"name", "saved_at", "focus_schema", "color_by"?, "grouping"?, "nodes": [{"data", "position"}], "edges": [{"data"}]}` (positions are node centers; see `web/src/graph/diagram.ts`). `color_by` is what a node's fill means (see "Color by" below) and is left out for the default, `type`. `grouping` is `{"by"?, "collapsed"?, "expanded"?, "chains"?}` and is left out while it is the default: `by` is `schema` (default), `none` or `tag:<key>`; `collapsed` and `expanded` list the group names (a schema's `catalog.schema`, or a tag value) the person collapsed or opened against the default rule (a group of more than 8 tables with no focus and no pinned table starts collapsed); `chains: false` turns off drawing chains of pass-through views as one edge. The page works the groups and chains out itself, so nothing else about them is stored. The stem is the name with anything but letters, digits, `_`, `.` and `-` turned into `_`. Everywhere a route or MCP tool takes a name, the name as typed (`Returns graph`) or as stored (`Returns_graph`) works. No connection needed. Agents read and change saved graphs over MCP (`contracts/mcp.md`, "Tools: saved graphs").
 
 Every saved graph has a **revision**: a counter that every write bumps, by the page or by an agent. It lives beside the file in `data/diagram_history/<stem>/meta.json`, never inside the diagram, and outlives a delete. A graph saved before revisions existed is at revision 0.
 
@@ -187,7 +187,7 @@ Returns the saved diagram file as stored: `{"name": str, "saved_at": str, ...}` 
 
 ### `POST /api/diagrams`
 
-Body: the diagram object. `name` is required, `nodes` and `edges` must be lists when given and `color_by` must be one of the values below (**400** otherwise). The server writes `data/diagrams/<stem>.json` with `{...body, "name", "saved_at": <now>}`: the server's time always wins. A name that differs from an existing graph's only by case is a **400**.
+Body: the diagram object. `name` is required, `nodes` and `edges` must be lists when given, `color_by` must be one of the values below and `grouping` must have the shape above (**400** otherwise). The server writes `data/diagrams/<stem>.json` with `{...body, "name", "saved_at": <now>}`: the server's time always wins. A name that differs from an existing graph's only by case is a **400**.
 
 Optional request header `X-Base-Revision: <n>`, the revision the sender started from. When the graph exists and is no longer at that revision, nothing is written and the answer is **409** `{"error": "graph g was saved by agent since revision 4 (now revision 6)", "name": "g", "revision": 6, "by": "agent"}`. A bad header value is 400. With no header the save is unchecked.
 

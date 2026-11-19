@@ -3,6 +3,7 @@
 // Positions are node centers (Cytoscape convention). React Flow uses top-left, so we convert on save and load.
 import type { DiagramBody, DiagramFile, FileUpstream, GraphEdge, SelfRefFk } from '../api/types'
 import { parseColorBy, type ColorBy } from './colorBy'
+import { groupingBody, parseGrouping, type Grouping } from './collapse'
 import { nameOf, schemaOf } from './format'
 import { estimateSize } from './layout'
 import { nodeCenter, nodeSize, viaMap } from './derive'
@@ -33,6 +34,8 @@ export interface DiagramPayload {
   focusSchema: string | null
   /** What the fill means; the default (type) is not written. */
   colorBy?: ColorBy
+  /** How the nodes are grouped and which groups are collapsed; the default is not written. */
+  grouping?: Grouping
 }
 
 export function toDiagramBody(name: string, payload: DiagramPayload): DiagramBody {
@@ -57,7 +60,8 @@ export function toDiagramBody(name: string, payload: DiagramPayload): DiagramBod
     return { data, position: { x: c.x, y: c.y } }
   })
   const edges = payload.edges.map((e) => ({ data: e.data!.info }))
-  return { name, focus_schema: payload.focusSchema, nodes, edges, ...(payload.colorBy && payload.colorBy !== 'type' ? { color_by: payload.colorBy } : {}) }
+  const grouping = payload.grouping && groupingBody(payload.grouping)
+  return { name, focus_schema: payload.focusSchema, nodes, edges, ...(payload.colorBy && payload.colorBy !== 'type' ? { color_by: payload.colorBy } : {}), ...(grouping ? { grouping } : {}) }
 }
 
 /** Reads a saved diagram (either UI's format). Malformed entries are skipped, not thrown. */
@@ -103,5 +107,5 @@ export function fromDiagram(d: DiagramFile): DiagramPayload {
     edges.push({ id: info.id, source: info.source, target: info.target, data: { info } })
   }
 
-  return { nodes, edges, focusSchema, colorBy: parseColorBy(d.color_by) }
+  return { nodes, edges, focusSchema, colorBy: parseColorBy(d.color_by), grouping: parseGrouping(d.grouping) }
 }

@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import * as api from '../api/client'
 import { ApiError } from '../api/client'
 import { getDiagramRevision, type DiagramRevision } from '../api/diagrams'
+import { DEFAULT_GROUPING, groupingBody, type Grouping } from './collapse'
 import { fromDiagram } from './diagram'
 import { useGraphStore, type OpenDiagram } from './graphStore'
 import type { FlowEdge, FlowNode } from './types'
@@ -15,15 +16,17 @@ export const DIAGRAM_POLL_MS = 2000
  * It is compared with the string taken when the graph was loaded or saved, to tell whether the person changed
  * anything since (a measured size or a selection is not a change).
  */
-export function graphSignature(nodes: FlowNode[], edges: FlowEdge[], focusSchema: string | null, colorBy: string = 'type'): string {
+export function graphSignature(nodes: FlowNode[], edges: FlowEdge[], focusSchema: string | null, colorBy: string = 'type', grouping: Grouping = DEFAULT_GROUPING): string {
   const n = nodes.map((x) => `${x.id}@${Math.round(x.position.x)},${Math.round(x.position.y)}${x.data.pinned ? 'p' : ''}`).sort()
-  return JSON.stringify(colorBy === 'type' ? [focusSchema, n, edges.map((e) => e.id).sort()] : [focusSchema, n, edges.map((e) => e.id).sort(), colorBy])
+  const base = [focusSchema, n, edges.map((e) => e.id).sort()]
+  const g = groupingBody(grouping)
+  return JSON.stringify(colorBy === 'type' ? (g ? [...base, null, g] : base) : g ? [...base, colorBy, g] : [...base, colorBy])
 }
 
 /** The signature of what is on screen now. */
 export function currentSignature(): string {
   const g = useGraphStore.getState()
-  return graphSignature(g.nodes, g.edges, g.focusSchema, g.colorBy)
+  return graphSignature(g.nodes, g.edges, g.focusSchema, g.colorBy, g.grouping)
 }
 
 export type DiagramSyncAction = 'none' | 'reload' | 'banner'
