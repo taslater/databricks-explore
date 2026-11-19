@@ -7,6 +7,7 @@ import { useUiStore } from '../store/uiStore'
 import { messageOf } from './actions'
 import { toDiagramBody, fromDiagram } from './diagram'
 import { useMiningWatcher } from './MiningPanel'
+import { TableStatsButton } from './TableStatsDialog'
 import { useSuggestions } from '../api/hooks'
 import { useGraphActions } from './actions'
 import { useGraphStore } from './graphStore'
@@ -226,6 +227,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
       >
         Concepts
       </button>
+      <TableStatsButton />
       <CertificationControl />
       <span className="spacer" />
       <span

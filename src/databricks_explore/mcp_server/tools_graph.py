@@ -3,6 +3,7 @@ import json
 
 from .. import dbx
 from .. import graphs
+from .. import nodefacts
 from .. import relationships
 
 from .tooling import B, ToolError, integer, obj, strings, text, tool
@@ -29,6 +30,32 @@ def _nodes_of(data: dict) -> list[dict]:
 
 def _edges_of(data: dict) -> list[dict]:
     return [e["data"] for e in data.get("edges") or [] if isinstance(e, dict) and isinstance(e.get("data"), dict)]
+
+
+def _card_facts(ctx, tables: list[str]) -> dict[str, dict]:
+    """Grain, size and freshness per table, from what the app has cached. Never reads the workspace; empty when not connected."""
+    ex = ctx.explorer()
+    return nodefacts.facts(ex, tables, fetch=False) if ex else {}
+
+
+def _facts_json(f: dict) -> dict:
+    """The agent's fields for one table: grain (label, basis, columns), rows, bytes, last_write, late, and when they were read."""
+    g, s = f.get("grain"), f.get("stats")
+    out: dict = {}
+    if g:
+        out["grain"] = {"label": g["label"], "basis": g["basis"], "columns": g["columns"], "source": g["source"]}
+    if s:
+        out.update({"rows": s["rows"], "bytes": s["bytes"], "last_write": s["last_write"], "late": s["late"], "stats_fetched_at": s["fetched_at"]})
+    return out
+
+
+def _facts_text(f: dict) -> str:
+    g, s = f.get("grain"), f.get("stats")
+    bits = [g["label"]] if g else []
+    if s:
+        bits += ([f"{s['rows']:,} rows"] if s["rows"] is not None else []) + ([f"{s['bytes']:,} bytes"] if s["bytes"] is not None else [])
+        bits += ["late"] if s["late"] else []
+    return f" ({', '.join(bits)})" if bits else ""
 
 
 def _kinds_line(edges: list[dict]) -> str:
@@ -59,19 +86,20 @@ def list_graphs(ctx, args):
     return text("\n".join(lines))
 
 
-@tool("get_graph", "Read a graph saved from the Graph tab: its tables (kind, focus) and edges (kind, source, target, status, join columns). The name may be typed (Returns graph) or stored (Returns_graph). json gives every field, with positions.",
+@tool("get_graph", "Read a graph saved from the Graph tab: its tables (kind, focus, and, when known, grain with its basis, rows, bytes, last_write and late from the cached size and history reads) and edges (kind, source, target, status, join columns). The name may be typed (Returns graph) or stored (Returns_graph). json gives every field, with positions.",
       obj({"name": NAME, "format": {"type": "string", "enum": ["text", "json"], "description": "text (default, compact) or json"}}, ("name",)))
 def get_graph(ctx, args):
     data = _run(graphs.load_graph, args["name"])
     info = _run(graphs.revision_info, args["name"])
     nodes, edges = _nodes_of(data), _edges_of(data)
     pos = {n["data"]["id"]: n.get("position") for n in data.get("nodes") or [] if isinstance(n, dict) and isinstance(n.get("data"), dict)}
+    card = _card_facts(ctx, [n["id"] for n in nodes])
     if args.get("format") == "json":
         return text(json.dumps({
             "name": info["name"], "title": data.get("name"), "revision": info["revision"], "by": info["by"], "saved_at": data.get("saved_at"),
             "focus_schema": data.get("focus_schema"),
             "nodes": [{"table": n["id"], "kind": n.get("kind", "table"), **({"focus": True} if n.get("focus") else {}),
-                       **({"pinned": True} if n.get("pinned") else {}), "x": (pos.get(n["id"]) or {}).get("x"), "y": (pos.get(n["id"]) or {}).get("y")}
+                       **({"pinned": True} if n.get("pinned") else {}), **_facts_json(card.get(n["id"], {})), "x": (pos.get(n["id"]) or {}).get("x"), "y": (pos.get(n["id"]) or {}).get("y")}
                       for n in nodes],
             "edges": [{k: v for k, v in {"id": e.get("id"), "kind": e.get("kind"), "source": e.get("source"), "target": e.get("target"),
                                          "status": e.get("status"), "directed": e.get("directed"), "bidir": e.get("bidir") or None,
@@ -82,7 +110,7 @@ def get_graph(ctx, args):
             + f", saved {data.get('saved_at')}")
     lines = [head, f"focus schema: {data.get('focus_schema') or 'none'}. Graph filters are not saved with a graph: the page's defaults apply on load.", "Tables:"]
     for n in nodes:
-        lines.append(f"  {n['id']} [{n.get('kind', 'table')}]" + (" focus" if n.get("focus") else "") + (" pinned" if n.get("pinned") else ""))
+        lines.append(f"  {n['id']} [{n.get('kind', 'table')}]" + (" focus" if n.get("focus") else "") + (" pinned" if n.get("pinned") else "") + _facts_text(card.get(n["id"], {})))
     lines.append("Edges:" if edges else "Edges: none")
     for e in edges:
         arrow = "<->" if e.get("bidir") else ("->" if e.get("directed", True) else "--")
