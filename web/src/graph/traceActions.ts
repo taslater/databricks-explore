@@ -26,7 +26,8 @@ export function makeTraceActions(qc: QueryClient) {
     const t = useTraceStore.getState()
     if (!t.request) return
     cancelLayouts()
-    useGraphStore.setState((s) => ({ ...withoutTrace(s, t.added, t.positions), layoutPending: false, layoutScope: null }))
+    // The positions were the lens's they were taken in: after a switch of lens they would put the tables where another lens had them.
+    useGraphStore.setState((s) => ({ ...withoutTrace(s, t.added, t.lens === null || t.lens === s.lens ? t.positions : {}), layoutPending: false, layoutScope: null }))
     t.reset()
     graph().setStatus('trace cleared')
   }
@@ -43,7 +44,7 @@ export function makeTraceActions(qc: QueryClient) {
   async function start(table: string, column: string, direction: TraceDirection) {
     stop()
     const request: TraceRequest = { table, column, direction, depth: TRACE_DEPTH }
-    useTraceStore.getState().begin(request, Object.fromEntries(graph().nodes.map((n) => [n.id, n.position])))
+    useTraceStore.getState().begin(request, Object.fromEntries(graph().nodes.map((n) => [n.id, n.position])), graph().lens)
     graph().setStatus(`tracing ${column} of ${table}…`)
     try {
       const profile = useUiStore.getState().connectedProfile

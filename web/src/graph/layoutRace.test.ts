@@ -82,6 +82,17 @@ describe('a layout in flight', () => {
     expect(useGraphStore.getState().layoutPending).toBe(false)
   })
 
+  it('does not put back the positions of another lens when a trace is cleared after a switch of lens', async () => {
+    await laidOut()
+    const stand = Object.fromEntries(useGraphStore.getState().nodes.map((n) => [n.id, { ...n.position }]))
+    useTraceStore.getState().begin({ table: T('b'), column: 'v', direction: 'both', depth: 4 }, stand, 'all')
+    useTraceStore.getState().setAdded([T('c')])
+    useGraphStore.getState().setLens('flow')
+    useGraphStore.setState((s) => ({ nodes: s.nodes.map((n) => ({ ...n, position: { x: 555, y: 666 } })), layoutPending: false }))
+    makeTraceActions(new QueryClient()).stop()
+    expect(pos(T('a'))).toEqual({ x: 555, y: 666 })
+  })
+
   it('does not lay out when a trace is cleared before the layout it asked for was due', async () => {
     await laidOut()
     vi.useFakeTimers()

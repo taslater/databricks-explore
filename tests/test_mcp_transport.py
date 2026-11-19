@@ -178,3 +178,12 @@ def test_agent_access_routes_show_the_command_and_rotate_the_token(connected):
 def test_the_rest_of_the_app_still_works_next_to_mcp(connected):
     assert connected.get("/api/session").get_json()["profile"] == "demo"
     assert connected.get("/api/nope").status_code == 404
+
+
+def test_the_contract_lists_every_tool_and_the_count_it_shows():
+    """contracts/mcp.md names each registered tool and the agent-access example reports as many tools as there are."""
+    import re
+    from pathlib import Path
+    doc = (Path(__file__).parent.parent / "contracts" / "mcp.md").read_text(encoding="utf-8")
+    assert [t for t in REGISTRY if f"`{t}`" not in doc] == []
+    assert int(re.search(r'"tools": (\d+)', doc).group(1)) == len(REGISTRY)

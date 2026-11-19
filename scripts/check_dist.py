@@ -21,6 +21,9 @@ def check_wheel(path: Path) -> list[str]:
             problems.append(f"{path.name}: missing {need}")
     if not any(n.startswith("databricks_explore/web_dist/assets/") and n.endswith(".js") for n in names):
         problems.append(f"{path.name}: no JavaScript under databricks_explore/web_dist/assets/")
+    elk = [n for n in names if n.startswith("databricks_explore/web_dist/assets/") and "/elk" in n and n.endswith(".js") and "elk-api" not in n]
+    if len(elk) > 1:  # the layout worker is shipped once; dagre covers a browser that cannot start it
+        problems.append(f"{path.name}: elkjs is shipped more than once: {', '.join(n.rsplit('/', 1)[1] for n in elk)}")
     if not any(n.endswith(".dist-info/licenses/LICENSE") for n in names):
         problems.append(f"{path.name}: the LICENSE file is not in the dist-info")
     if "databricks-explore = databricks_explore.cli:main" not in entry_points:
