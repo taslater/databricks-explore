@@ -120,7 +120,7 @@ describe('conceptOverlay', () => {
   it('draws a column link to the column handle when the column is showing, else to the table', () => {
     const cols = [
       { name: 'order_id', type: 'bigint' },
-      { name: 'customer_id', type: 'bigint' },
+      { name: 'customer_id', type: 'bigint', fk: true }, // a key, so its row shows at the keys level
     ]
     const links = [link('e1', ID1, A, 'identifies', 'Customer_ID')]
     const withCols = conceptOverlay([table(A, 0, 0, { showColumns: true, columns: cols })], data([concept(ID1, 'Customer')], links))

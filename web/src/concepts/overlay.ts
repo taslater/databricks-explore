@@ -2,7 +2,7 @@
 // (or to the column's handle when that column is showing). Pure, so it can be unit tested. Nothing here is stored.
 import { MarkerType, Position } from '@xyflow/react'
 import type { ConceptsForTables } from '../api/concepts'
-import { columnHandleId, findColumn, visibleColumns } from '../graph/columns'
+import { columnHandleId, findColumn, rowsOf } from '../graph/columns'
 import { EDGE_COLORS } from '../graph/format'
 import type { ConceptFlowNode, FlowEdge, FlowNode } from '../graph/types'
 
@@ -82,9 +82,7 @@ export function conceptOverlay(
       for (const link of links) {
         const table = tables.get(link.target.table)!
         const column =
-          link.target.column && table.data.showColumns && table.data.columns
-            ? findColumn(visibleColumns(table.data.columns, table.data.involved ?? [], !!table.data.allColumns), link.target.column)
-            : undefined
+          link.target.column ? findColumn(rowsOf(table.data), link.target.column) : undefined
         outEdges.push({
           id: `${CONCEPT_EDGE_PREFIX}${link.id}`,
           source: `concept:${id}`,

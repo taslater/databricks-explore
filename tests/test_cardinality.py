@@ -102,3 +102,16 @@ def test_the_route_reads_the_demo_lakehouse_keys_and_nullability(client):
         "fk:store": ("zero_many", "one"),      # composite key, both columns NOT NULL
         "fk:self": ("zero_many", "zero_one")}  # lineage is not a reference: not answered
     assert client.post("/api/relationships/cardinality", json={"edges": "x"}).status_code == 400
+
+
+def test_a_column_edge_reads_only_the_key_sets_that_hold_its_pair(client):
+    fact, store = f"{LAKE}.gold.fact_order_lines", f"{LAKE}.gold.dim_store"
+    edge = {"kind": "fk", "source": fact, "target": store}
+    edges = [{**edge, "id": "col:store_id", "source_column": "store_id", "target_column": "store_id"},
+             {**edge, "id": "col:region", "source_column": "region_code", "target_column": "REGION_CODE"},
+             {**edge, "id": "col:other", "source_column": "sku", "target_column": "store_id"}]
+    out = client.post("/api/relationships/cardinality", json={"edges": edges}).json["cardinality"]
+    assert {k: ends(v) for k, v in out.items()} == {
+        "col:store_id": ("zero_many", "one"),  # each pair of the composite key carries the key's ends
+        "col:region": ("zero_many", "one"),
+        "col:other": None}  # not a pair of any key: nothing is known
