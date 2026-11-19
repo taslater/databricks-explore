@@ -6,7 +6,7 @@ import { getColumnTrace, traceKey, type TraceDirection, type TraceRequest } from
 import { useUiStore } from '../store/uiStore'
 import { columnsOf } from './columns'
 import { makeExpansion } from './expansion'
-import { useGraphStore } from './graphStore'
+import { cancelLayouts, useGraphStore } from './graphStore'
 import { useTraceStore } from './traceStore'
 import { withoutTrace } from './traceDraw'
 
@@ -25,6 +25,7 @@ export function makeTraceActions(qc: QueryClient) {
   function stop() {
     const t = useTraceStore.getState()
     if (!t.request) return
+    cancelLayouts()
     useGraphStore.setState((s) => ({ ...withoutTrace(s, t.added, t.positions), layoutPending: false, layoutScope: null }))
     t.reset()
     graph().setStatus('trace cleared')

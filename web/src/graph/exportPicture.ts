@@ -6,7 +6,7 @@ import type { FactsByTable } from '../api/nodeFacts'
 import { typeLegend, type NodeColors } from './colorBy'
 import { edgeShown } from './derive'
 import { legendOf } from './EdgeFamilies'
-import { edgeStyle, FAMILY_LABEL } from './edgeStyles'
+import { edgeStyle, familyOf, FAMILY_LABEL } from './edgeStyles'
 import { hasEnds } from './EdgeEnds'
 import type { EdgeFilters, FlowNode } from './types'
 
@@ -28,9 +28,11 @@ export interface LegendInput {
 /** The same words as the page's legend and the MCP picture's. */
 export const ENDS_TEXT = 'ends: || exactly one, o| zero or one, o< zero or more'
 
-/** The legend of what the picture draws and nothing else: the edge families shown, dashed, the ends, the key markers, what the fill means. */
+/** (graph_export.legend is the Python twin; web/src/parity.test.ts and tests/test_parity.py run both on the same cases.) The legend of what the picture draws and nothing else: the edge families shown, dashed, the ends, the key markers, what the fill means. */
 export function pictureLegend(input: LegendInput): LegendItem[] {
-  const { families, inferred, superseded } = legendOf(input.edges.filter((e) => edgeShown(e, input.filters)))
+  const shownEdges = input.edges.filter((e) => edgeShown(e, input.filters))
+  const { families, inferred, superseded } = legendOf(shownEdges)
+  const shownEnds = Object.fromEntries(shownEdges.filter((e) => familyOf(e.kind) === 'reference').map((e) => [e.id, input.ends?.[e.id] ?? null]))
   const out: LegendItem[] = families.map((f) => {
     const s = edgeStyle(f, false)
     return { kind: 'line', text: FAMILY_LABEL[f], stroke: s.stroke, width: s.strokeWidth ?? 1.6, dash: s.strokeDasharray }
@@ -38,7 +40,7 @@ export function pictureLegend(input: LegendInput): LegendItem[] {
   const line = (text: string, s: ReturnType<typeof edgeStyle>): LegendItem => ({ kind: 'line', text, stroke: s.stroke, width: s.strokeWidth ?? 1.6, dash: s.strokeDasharray })
   if (inferred) out.push(line('dashed: inferred or proposed', edgeStyle('reference', true)))
   if (superseded) out.push(line('no longer holds', edgeStyle('flow', false, true)))
-  if (families.includes('reference') && hasEnds(input.ends)) out.push({ kind: 'text', text: ENDS_TEXT })
+  if (hasEnds(shownEnds)) out.push({ kind: 'text', text: ENDS_TEXT })
   const columns = input.nodes.filter((n) => !n.hidden && n.data.showColumns).flatMap((n) => n.data.columns ?? [])
   if (columns.some((c) => c.pk)) out.push({ kind: 'text', text: 'key icon: primary key' })
   if (columns.some((c) => c.fk)) out.push({ kind: 'text', text: 'arrow icon: foreign key' })

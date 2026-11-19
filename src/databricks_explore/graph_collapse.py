@@ -52,7 +52,7 @@ def _label(key: str, by: str, all_keys: list[str]) -> str:
 
 
 def plan(nodes: list[dict], edges: list[dict], grouping: Optional[dict] = None, tags: Optional[dict] = None) -> dict:
-    """{"by", "chains_on", "groups": [{key, label, tables, count, collapsed, default_collapsed}], "chains": [{id, source, target, views, edges}]}.
+    """Twin of collapseGraph in web/src/graph/collapse.ts (tests/test_parity.py). {"by", "chains_on", "groups": [{key, label, tables, count, collapsed, default_collapsed}], "chains": [{id, source, target, views, edges}]}.
 
     `nodes` are the saved node data ({id, kind, focus?, pinned?}), `edges` the saved edge data. `tags` is {table: tag value} for a tag grouping
     (tables without one are in no group)."""

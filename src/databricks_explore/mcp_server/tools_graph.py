@@ -223,27 +223,23 @@ def derive(ctx, tables: list[str]) -> tuple[list[dict], dict[str, dict], list[st
             f"{t}: {next(e for e in relations_of(t)['errors'] if str(e).startswith('tables.get:'))}" for t in unreadable[:3]))
     wanted = {t.lower(): t for t in tables}
     found: dict[str, dict] = {}
-    left_out = 0
     with ctx.store() as store:
         for t in tables:
             out = relationships.unified(store, t, relations_of(t), dbx.cache_times(ex, t), "table")
             for e in out["edges"]:
                 a, b = e["source"]["table"].lower(), e["target"]["table"].lower()
-                if e["kind"] in GRAPH_KINDS and a != b and a in wanted and b in wanted and e["id"] not in found:
-                    if e["status"] in SHOWN:
-                        e["source"]["table"], e["target"]["table"] = wanted[a], wanted[b]
-                        found[e["id"]] = e
-                    elif e["status"] == "superseded":
-                        found[e["id"]] = None  # counted once
-                        left_out += 1
-    rels = [e for e in found.values() if e]
+                if e["kind"] in GRAPH_KINDS and a != b and a in wanted and b in wanted and e["id"] not in found and (e["status"] in SHOWN or e["status"] == "superseded"):
+                    e["source"]["table"], e["target"]["table"] = wanted[a], wanted[b]
+                    found[e["id"]] = e
+    merged = graphs.graph_edges(list(found.values()))  # a pair seen both ways is one edge, superseded only when both ways are, as on the page
+    left_out = sum(1 for e in merged if e.get("status") == "superseded")
     notes = [f"{left_out} superseded lineage edge(s) left out (the view no longer reads that source)"] if left_out else []
     facts = {}
     for t in tables:
         node = next((n for n in relations_of(t).get("nodes", []) if n["id"] == t), {})
         facts[t] = {"id": t, "kind": node.get("kind", "table"), "self_ref": node.get("self_ref"), "self_ref_last_seen": node.get("self_ref_last_seen"),
                      "self_ref_fks": node.get("self_ref_fks"), "files": node.get("files")}
-    edges = graphs.graph_edges(rels)
+    edges = [e for e in merged if e.get("status") != "superseded"]
     ends = _cardinalities(ctx, edges, fetch=True)  # both ends were just read, so this costs no new call
     return [{**e, "cardinality": ends[e["id"]]} if e["id"] in ends else e for e in edges], facts, notes
 

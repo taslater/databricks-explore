@@ -88,6 +88,7 @@ export interface GraphLayout {
  *   stacked top to bottom, in the order of their first node, so one part's reference row never lands on another part.
  *   The first part keeps the position the rules above give it.
  */
+// Python twin: graphs.layout_positions (the rules, not the positions) and graph_lens.model_layout, checked by web/src/parity.test.ts.
 export async function computeLayout(nodes: LayoutNode[], edges: LayoutEdge[], opts: LayoutOptions = {}): Promise<Map<string, Point>> {
   return (await layoutGraph(nodes, edges, opts)).positions
 }
@@ -281,7 +282,7 @@ async function dagreLayout(main: LayoutNode[], flowEdges: LayoutEdge[]): Promise
   return out
 }
 
-/** Size estimate for a node that React Flow has not measured yet. Good enough for layout before the first render. */
+/** Size estimate for a node that React Flow has not measured yet. Good enough for layout before the first render. Python twin: graphs.estimate_size. */
 export function estimateSize(lines: string[]): { width: number; height: number } {
   const longest = Math.max(0, ...lines.map((l) => l.length))
   return {

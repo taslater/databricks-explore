@@ -74,7 +74,7 @@ def facts_read(edges: list[dict], stats_times: Iterable[Optional[str]] = ()) -> 
 
 
 def legend(lens: str, edges: list[dict], cards: dict, keys: dict) -> list[str]:
-    """What the picture's legend lists, and only what is drawn: the edge families, dashed, the crow's-foot ends and the key markers."""
+    """Twin of pictureLegend in web/src/graph/exportPicture.ts (tests/test_parity.py). What the picture's legend lists, and only what is drawn: the edge families, dashed, the crow's-foot ends and the key markers."""
     drawn = _drawn(lens, edges)
     families = {family_of(e.get("kind")) for e in drawn}
     out = []

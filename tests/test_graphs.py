@@ -114,7 +114,7 @@ def test_the_layout_flows_left_to_right_and_stacks_unconnected_parts():
     sizes = {"a": (100, 40), "b": (100, 40), "c": (100, 40), "d": (100, 40), "e": (100, 40)}
     at = graphs.layout_positions(sizes, [("a", "b", "lineage"), ("b", "c", "view_dep"), ("d", "a", "fk")])
     assert at["a"][0] < at["b"][0] < at["c"][0]
-    assert at["d"][0] == at["a"][0] and at["d"][1] != at["a"][1]  # a reference joins its partner's column
+    assert at["d"][1] > max(at[i][1] for i in "abc")  # a table with only references hangs under the flow
     assert at["e"][1] > max(at[i][1] for i in "abcd")  # a part with no edge is a band below
     assert graphs.layout_positions(sizes, [("a", "b", "lineage"), ("b", "a", "lineage")])["b"][0] > 0  # a cycle still lays out
 
@@ -127,7 +127,7 @@ def test_only_flow_edges_set_the_rank_and_every_kind_has_a_family():
     sizes = {i: (100, 40) for i in "abc"}
     for kind in ("fk", "join_mined", "manual", "sketch"):
         at = graphs.layout_positions(sizes, [("a", "b", "lineage"), ("c", "b", kind)])
-        assert at["b"][0] > at["a"][0] and at["c"][0] == at["b"][0], kind
+        assert at["b"][0] > at["a"][0] and at["c"][1] > at["b"][1], kind
 
 
 def test_adapt_merges_lineage_both_ways_into_one_bidir_edge():
@@ -137,3 +137,27 @@ def test_adapt_merges_lineage_both_ways_into_one_bidir_edge():
     [e] = graphs.graph_edges([rel("a.b.c", "a.b.d", "2026-01-01"), rel("a.b.d", "a.b.c", "2026-02-01")])
     assert e["id"] == "lineage:a.b.c<->a.b.d" and e["bidir"] and e["last_seen"] == "2026-02-01"
     assert e["patch_ids"] == ["lineage:a.b.c->a.b.d", "lineage:a.b.d->a.b.c"]
+
+
+def test_a_lineage_pair_superseded_one_way_only_is_still_one_edge(monkeypatch):
+    """The order the two directions arrive in must not decide whether the pair is drawn (the page keeps it, and so must an agent's graph)."""
+    from types import SimpleNamespace
+    from contextlib import nullcontext
+    from databricks_explore.mcp_server import tools_graph
+
+    def rel(s, t, status):
+        return {"id": f"lineage:{s}->{t}", "kind": "lineage", "source": {"table": s}, "target": {"table": t}, "status": status,
+                "provenance": {"origin": "x"}, "evidence": {"last_seen": "2026-01-01"}}
+    for first, second in (("superseded", "derived"), ("derived", "superseded")):
+        edges = [rel("a.b.c", "a.b.d", first), rel("a.b.d", "a.b.c", second)]
+        ex = SimpleNamespace(relations=lambda t: {"errors": [], "nodes": []})
+        ctx = SimpleNamespace(need_explorer=lambda: ex, store=lambda: nullcontext(None), explorer=lambda: None)
+        monkeypatch.setattr(tools_graph.relationships, "unified", lambda store, t, r, times, level: {"edges": [dict(e, source=dict(e["source"]), target=dict(e["target"])) for e in edges]})
+        monkeypatch.setattr(tools_graph.dbx, "cache_times", lambda ex, t: {})
+        monkeypatch.setattr(tools_graph, "_cardinalities", lambda ctx, edges, fetch=False: {})
+        out, _, notes = tools_graph.derive(ctx, ["a.b.c", "a.b.d"])
+        assert [(e["id"], e["bidir"], e["status"]) for e in out] == [("lineage:a.b.c<->a.b.d", True, "derived")], (first, second)
+        assert notes == []
+    edges = [rel("a.b.c", "a.b.d", "superseded"), rel("a.b.d", "a.b.c", "superseded")]
+    out, _, notes = tools_graph.derive(ctx, ["a.b.c", "a.b.d"])
+    assert out == [] and "1 superseded" in notes[0]

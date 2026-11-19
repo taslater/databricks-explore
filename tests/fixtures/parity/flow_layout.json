@@ -1,0 +1,278 @@
+{
+ "note": "Python: graphs.layout_positions. TypeScript: layoutGraph in web/src/graph/layout.ts (ELK). The two are not the same algorithm, so the shared expectation is rules both must keep: flow edges run left to right, nothing overlaps, and a table with only references hangs below the flow. Spec keys: left_of [a, b] (a is entirely left of b), below [a, b] (a is entirely below b).",
+ "cases": [
+  {
+   "name": "a chain runs left to right and parts with no edge between them are stacked",
+   "input": {
+    "sizes": {
+     "c.s.a": [
+      80,
+      40
+     ],
+     "c.s.b": [
+      90,
+      40
+     ],
+     "c.s.c": [
+      80,
+      40
+     ],
+     "c.s.x": [
+      70,
+      40
+     ],
+     "c.s.y": [
+      70,
+      40
+     ]
+    },
+    "edges": [
+     {
+      "source": "c.s.a",
+      "target": "c.s.b",
+      "kind": "lineage"
+     },
+     {
+      "source": "c.s.b",
+      "target": "c.s.c",
+      "kind": "view_dep"
+     },
+     {
+      "source": "c.s.x",
+      "target": "c.s.y",
+      "kind": "lineage"
+     }
+    ],
+    "focus": null
+   },
+   "expected": {
+    "left_of": [
+     [
+      "c.s.a",
+      "c.s.b"
+     ],
+     [
+      "c.s.b",
+      "c.s.c"
+     ],
+     [
+      "c.s.x",
+      "c.s.y"
+     ]
+    ],
+    "below": [
+     [
+      "c.s.x",
+      "c.s.a"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "a fan in and a diamond",
+   "input": {
+    "sizes": {
+     "c.s.a": [
+      80,
+      40
+     ],
+     "c.s.b": [
+      80,
+      40
+     ],
+     "c.s.c": [
+      80,
+      40
+     ],
+     "c.s.d": [
+      80,
+      40
+     ]
+    },
+    "edges": [
+     {
+      "source": "c.s.a",
+      "target": "c.s.b",
+      "kind": "lineage"
+     },
+     {
+      "source": "c.s.a",
+      "target": "c.s.c",
+      "kind": "lineage"
+     },
+     {
+      "source": "c.s.b",
+      "target": "c.s.d",
+      "kind": "lineage"
+     },
+     {
+      "source": "c.s.c",
+      "target": "c.s.d",
+      "kind": "lineage"
+     }
+    ],
+    "focus": null
+   },
+   "expected": {
+    "left_of": [
+     [
+      "c.s.a",
+      "c.s.b"
+     ],
+     [
+      "c.s.a",
+      "c.s.c"
+     ],
+     [
+      "c.s.b",
+      "c.s.d"
+     ],
+     [
+      "c.s.c",
+      "c.s.d"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "a table with only references hangs below the flow",
+   "input": {
+    "sizes": {
+     "c.s.src": [
+      80,
+      40
+     ],
+     "c.s.mid": [
+      80,
+      40
+     ],
+     "c.s.out": [
+      80,
+      40
+     ],
+     "c.s.dim": [
+      80,
+      40
+     ]
+    },
+    "edges": [
+     {
+      "source": "c.s.src",
+      "target": "c.s.mid",
+      "kind": "lineage"
+     },
+     {
+      "source": "c.s.mid",
+      "target": "c.s.out",
+      "kind": "lineage"
+     },
+     {
+      "source": "c.s.mid",
+      "target": "c.s.dim",
+      "kind": "fk"
+     }
+    ],
+    "focus": null
+   },
+   "expected": {
+    "left_of": [
+     [
+      "c.s.src",
+      "c.s.mid"
+     ],
+     [
+      "c.s.mid",
+      "c.s.out"
+     ]
+    ],
+    "below": [
+     [
+      "c.s.dim",
+      "c.s.src"
+     ],
+     [
+      "c.s.dim",
+      "c.s.mid"
+     ],
+     [
+      "c.s.dim",
+      "c.s.out"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "a reference-only table that is the focus stays in the flow",
+   "input": {
+    "sizes": {
+     "c.s.src": [
+      80,
+      40
+     ],
+     "c.s.mid": [
+      80,
+      40
+     ],
+     "c.s.dim": [
+      80,
+      40
+     ]
+    },
+    "edges": [
+     {
+      "source": "c.s.src",
+      "target": "c.s.mid",
+      "kind": "lineage"
+     },
+     {
+      "source": "c.s.mid",
+      "target": "c.s.dim",
+      "kind": "fk"
+     }
+    ],
+    "focus": "c.s.dim"
+   },
+   "expected": {
+    "left_of": [
+     [
+      "c.s.src",
+      "c.s.mid"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "references only: everything is laid out, nothing overlaps",
+   "input": {
+    "sizes": {
+     "c.s.a": [
+      80,
+      40
+     ],
+     "c.s.b": [
+      80,
+      40
+     ],
+     "c.s.c": [
+      80,
+      40
+     ]
+    },
+    "edges": [
+     {
+      "source": "c.s.a",
+      "target": "c.s.b",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.a",
+      "target": "c.s.c",
+      "kind": "fk"
+     }
+    ],
+    "focus": null
+   },
+   "expected": {}
+  }
+ ]
+}
