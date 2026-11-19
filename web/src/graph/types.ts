@@ -1,6 +1,7 @@
 import type { Edge, Node } from '@xyflow/react'
 import type { GraphEdge, GraphEdgeKind } from '../api/types'
 import type { ColumnInfo } from './columns'
+import type { EdgeFamily } from './edgeStyles'
 
 /** Data stored on a React Flow node. Fields marked "derived" are filled in by deriveFlow and never saved. */
 export type TableNodeData = {
@@ -62,8 +63,8 @@ export type FlowEdge = Edge<EdgeData>
 
 export type Selection = { kind: 'node' | 'edge'; id: string } | null
 
-/** One checkbox per edge kind, plus superseded and rejected edges (hidden unless asked for). */
-export type EdgeFilters = Record<GraphEdgeKind, boolean> & {
+/** One checkbox per edge family and per kind (an edge shows when both are on), plus superseded and rejected edges (hidden unless asked for). */
+export type EdgeFilters = Record<GraphEdgeKind, boolean> & Record<EdgeFamily, boolean> & {
   showSuperseded: boolean
   showRejected: boolean
 }

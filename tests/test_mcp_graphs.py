@@ -25,10 +25,10 @@ def test_a_graph_saved_from_the_ui_is_found_by_list_graphs_and_read_by_get_graph
     assert "named 'Returns graph'" in out[1]
     for name in ("Returns graph", "Returns_graph"):
         text = agent.ok("get_graph", name=name)
-        assert f"{ORDERS} [managed] focus" in text and f"{ORDERS} -> {CUSTOMERS}  fk derived (customer_id)" in text
+        assert f"{ORDERS} [managed] focus" in text and f"{ORDERS} -> {CUSTOMERS}  fk (reference) derived (customer_id)" in text
     j = graph_json(agent, "Returns graph")
     assert j["focus_schema"] == "demo.sales" and j["nodes"][0] == {"table": ORDERS, "kind": "managed", "focus": True, "x": 0, "y": 0}
-    assert j["edges"][0]["columns"] == ["customer_id"]
+    assert j["edges"][0]["columns"] == ["customer_id"] and j["edges"][0]["family"] == "reference"
     assert "not found" in agent.fails("get_graph", name="nope")
 
 

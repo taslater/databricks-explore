@@ -3,6 +3,7 @@ import json
 
 from .. import dbx
 from .. import graphs
+from ..edge_families import family_of
 from .. import relationships
 
 from .tooling import B, ToolError, integer, obj, strings, text, tool
@@ -59,7 +60,7 @@ def list_graphs(ctx, args):
     return text("\n".join(lines))
 
 
-@tool("get_graph", "Read a graph saved from the Graph tab: its tables (kind, focus) and edges (kind, source, target, status, join columns). The name may be typed (Returns graph) or stored (Returns_graph). json gives every field, with positions.",
+@tool("get_graph", "Read a graph saved from the Graph tab: its tables (kind, focus) and edges (kind, family: flow, reference or meaning, source, target, status, join columns). The name may be typed (Returns graph) or stored (Returns_graph). json gives every field, with positions.",
       obj({"name": NAME, "format": {"type": "string", "enum": ["text", "json"], "description": "text (default, compact) or json"}}, ("name",)))
 def get_graph(ctx, args):
     data = _run(graphs.load_graph, args["name"])
@@ -74,7 +75,7 @@ def get_graph(ctx, args):
                        **({"pinned": True} if n.get("pinned") else {}), "x": (pos.get(n["id"]) or {}).get("x"), "y": (pos.get(n["id"]) or {}).get("y")}
                       for n in nodes],
             "edges": [{k: v for k, v in {"id": e.get("id"), "kind": e.get("kind"), "source": e.get("source"), "target": e.get("target"),
-                                         "status": e.get("status"), "directed": e.get("directed"), "bidir": e.get("bidir") or None,
+                                         "family": family_of(e.get("kind")), "status": e.get("status"), "directed": e.get("directed"), "bidir": e.get("bidir") or None,
                                          "columns": e.get("child_columns"), "parent_columns": e.get("parent_columns"),
                                          "note": e.get("note") or None}.items() if v is not None} for e in edges]},
             separators=(",", ":")))
@@ -87,7 +88,7 @@ def get_graph(ctx, args):
     for e in edges:
         arrow = "<->" if e.get("bidir") else ("->" if e.get("directed", True) else "--")
         keys = e.get("label") or ""
-        lines.append(f"  {e.get('source')} {arrow} {e.get('target')}  {e.get('kind')} {e.get('status') or ''}".rstrip() + (f" ({keys})" if keys else "")
+        lines.append(f"  {e.get('source')} {arrow} {e.get('target')}  {e.get('kind')} ({family_of(e.get('kind')) or '?'}) {e.get('status') or ''}".rstrip() + (f" ({keys})" if keys else "")
                      + (f" note: {e['note']}" if e.get("note") else ""))
     return text("\n".join(lines))
 

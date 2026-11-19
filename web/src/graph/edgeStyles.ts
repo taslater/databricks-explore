@@ -1,6 +1,38 @@
-// How each relationship kind is drawn and named. Shared by the edge components and the legend.
-import type { GraphEdgeKind } from '../api/types'
-import { EDGE_COLORS } from './format'
+// How each relationship is drawn and named. Shared by the edge components, the filters and the legend.
+// The family says what a relationship means, dashing says how sure we are, and Details says where it came from.
+import type { GraphEdge, GraphEdgeKind } from '../api/types'
+import { EDGE_COLORS, FAMILY_COLORS } from './format'
+
+/** flow: data moves from source to target. reference: a key identifies a row elsewhere. meaning: concept, ontology and sketch links. */
+export type EdgeFamily = 'flow' | 'reference' | 'meaning'
+
+export const FAMILIES: readonly EdgeFamily[] = ['flow', 'reference', 'meaning']
+
+export const FAMILY_OF: Record<GraphEdgeKind, EdgeFamily> = {
+  lineage: 'flow',
+  view_dep: 'flow',
+  fk: 'reference',
+  join_mined: 'reference',
+  manual: 'reference',
+  sketch: 'meaning',
+  concept_link: 'meaning',
+  ontology: 'meaning',
+}
+
+export const familyOf = (kind: GraphEdgeKind): EdgeFamily => FAMILY_OF[kind]
+
+export const FAMILY_LABEL: Record<EdgeFamily, string> = {
+  flow: 'data flows',
+  reference: 'key reference',
+  meaning: 'meaning link',
+}
+
+/** What each family covers, for the filter boxes' tooltips. */
+export const FAMILY_HINT: Record<EdgeFamily, string> = {
+  flow: 'Lineage and view dependencies: data moves from the source to the target.',
+  reference: 'Foreign keys and joins: a key in one table identifies a row in another.',
+  meaning: 'Concept, ontology and sketch links. Off until asked for.',
+}
 
 export interface KindStyle {
   stroke: string
@@ -8,17 +40,27 @@ export interface KindStyle {
   strokeWidth?: number
 }
 
-/** Legacy kinds keep their look (lineage solid, FK dashed, view dep solid purple, superseded edges dotted gray). New kinds differ by color and dash. */
-export const KIND_STYLE: Record<GraphEdgeKind | 'superseded', KindStyle> = {
-  lineage: { stroke: EDGE_COLORS.lineage },
-  fk: { stroke: EDGE_COLORS.fk, strokeDasharray: '6 4' },
-  view_dep: { stroke: EDGE_COLORS.view_dep },
-  join_mined: { stroke: EDGE_COLORS.join_mined, strokeDasharray: '9 3 2 3' },
-  manual: { stroke: EDGE_COLORS.manual, strokeWidth: 2.4 },
-  sketch: { stroke: EDGE_COLORS.sketch, strokeDasharray: '1 4' },
-  concept_link: { stroke: EDGE_COLORS.concept_link, strokeDasharray: '12 4' },
-  ontology: { stroke: EDGE_COLORS.ontology, strokeDasharray: '14 3 2 3 2 3' },
-  superseded: { stroke: EDGE_COLORS.superseded, strokeDasharray: '2 3' },
+/** Dash of an inferred or proposed edge. A meaning edge is dotted already, so it keeps its dots. */
+export const INFERRED_DASH = '6 4'
+
+/** Family styles, solid. An edge that is not declared or measured adds the dash (see edgeStyle). */
+export const FAMILY_STYLE: Record<EdgeFamily, KindStyle> = {
+  flow: { stroke: FAMILY_COLORS.flow, strokeWidth: 1.8 },
+  reference: { stroke: FAMILY_COLORS.reference, strokeWidth: 1.2 },
+  meaning: { stroke: FAMILY_COLORS.meaning, strokeWidth: 1, strokeDasharray: '1 4' },
+}
+
+/** An edge that no longer holds, drawn dotted gray whatever its family. */
+export const SUPERSEDED_STYLE: KindStyle = { stroke: EDGE_COLORS.superseded, strokeWidth: 1.6, strokeDasharray: '2 3' }
+
+/** Confidence: dashed when the edge is proposed (mined and not accepted, suggestions). Declared, derived, accepted and drawn edges are solid. */
+export const isInferred = (info: GraphEdge): boolean => info.status === 'proposed'
+
+/** The line style of an edge: its family's, dashed when inferred, gray and dotted when superseded. */
+export function edgeStyle(family: EdgeFamily, inferred: boolean, superseded = false): KindStyle {
+  if (superseded) return SUPERSEDED_STYLE
+  const base = FAMILY_STYLE[family]
+  return inferred && family !== 'meaning' ? { ...base, strokeDasharray: INFERRED_DASH } : base
 }
 
 export const KIND_LABEL: Record<GraphEdgeKind, string> = {
@@ -30,6 +72,13 @@ export const KIND_LABEL: Record<GraphEdgeKind, string> = {
   sketch: 'sketch',
   concept_link: 'concept link',
   ontology: 'ontology',
+}
+
+/** The kinds of a family, in the order the filters list them. */
+export const KINDS_OF: Record<EdgeFamily, readonly GraphEdgeKind[]> = {
+  flow: ['lineage', 'view_dep'],
+  reference: ['fk', 'join_mined', 'manual'],
+  meaning: ['sketch', 'concept_link', 'ontology'],
 }
 
 /** Kinds read from Unity Catalog every time. They are never stored. */

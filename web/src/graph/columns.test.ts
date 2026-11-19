@@ -197,9 +197,9 @@ describe('deriveFlow with column edges', () => {
     ]
     const fresh = derive(nodes, [colEdge({ id: 'l1', kind: 'lineage', directed: true, status: 'derived', source_column: 'amount', target_column: 'revenue', last_seen: '2026-11-12' })], [])
     expect(fresh.edges[0].markerEnd).toBeDefined()
-    expect(fresh.edges[0].type).toBe('lineage')
+    expect(fresh.edges[0].type).toBe('flow')
     const old = derive(nodes, [colEdge({ id: 'l1', kind: 'lineage', directed: true, status: 'derived', source_column: 'amount', target_column: 'revenue', last_seen: '2026-01-01' })], [])
-    expect(old.edges[0].type).toBe('lineage') // age alone dims nothing
+    expect(old.edges[0].type).toBe('flow') // age alone dims nothing
     const gone = derive(nodes, [colEdge({ id: 'l1', kind: 'lineage', directed: true, status: 'superseded', source_column: 'amount', target_column: 'revenue' })], [])
     expect(gone.edges[0].hidden).toBe(true) // hidden until "superseded edges" is on
   })
