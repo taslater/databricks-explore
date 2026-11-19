@@ -131,7 +131,8 @@ export function useEdge(src: string | null, tgt: string | null) {
 // ---- Diagrams -------------------------------------------------------------
 
 export function useDiagrams() {
-  return useQuery({ queryKey: ['diagrams'], queryFn: api.listDiagrams })
+  // An agent can save a graph while the page is open: refresh the list now and then.
+  return useQuery({ queryKey: ['diagrams'], queryFn: api.listDiagrams, refetchInterval: 5000 })
 }
 
 export function useDiagram(name: string | null) {

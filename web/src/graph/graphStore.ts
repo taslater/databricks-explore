@@ -7,6 +7,7 @@ import { nameOf, schemaOf } from './format'
 import { computeLayout } from './layout'
 import { nodeSize, viaMap } from './derive'
 import type { DiagramPayload } from './diagram'
+import type { DiagramRevision } from '../api/diagrams'
 import type { EdgeFilters, FlowEdge, FlowNode, Selection } from './types'
 
 export const DEFAULT_FILTERS: EdgeFilters = {
@@ -20,6 +21,13 @@ export const DEFAULT_FILTERS: EdgeFilters = {
   ontology: true,
   showSuperseded: false,
   showRejected: false,
+}
+
+/** The saved graph the page is showing: its stored name, the revision it was loaded or saved at, and what the page held then (see diagramSync.ts). */
+export interface OpenDiagram {
+  name: string
+  revision: number
+  signature: string
 }
 
 /** The panel open at the bottom of the graph: mining, suggested relationships, usage. */
@@ -46,6 +54,15 @@ interface GraphState {
   layoutPending: boolean
   /** Fit the view on the next render where every visible node has been measured. */
   fitPending: boolean
+  /** The saved graph on screen, for live sync with agents. Null for a graph built here and never saved or loaded. */
+  openDiagram: OpenDiagram | null
+  /** Someone else saved the open graph while the page held unsaved changes: the page asks (Reload or Keep mine). */
+  diagramChanged: DiagramRevision | null
+  /** A save is in flight: a poll must not take its write for someone else's. */
+  diagramSaving: boolean
+  setOpenDiagram: (open: OpenDiagram | null) => void
+  setDiagramChanged: (remote: DiagramRevision | null) => void
+  setDiagramSaving: (saving: boolean) => void
   /** UI only, not saved. The pan and zoom when the Graph view was last hidden, restored when it shows again. */
   viewport: { x: number; y: number; zoom: number } | null
   setViewport: (viewport: { x: number; y: number; zoom: number } | null) => void
@@ -97,6 +114,12 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   fitPending: false,
   viewport: null,
   setViewport: (viewport) => set({ viewport }),
+  openDiagram: null,
+  diagramChanged: null,
+  diagramSaving: false,
+  setOpenDiagram: (openDiagram) => set({ openDiagram, diagramChanged: null }),
+  setDiagramChanged: (diagramChanged) => set({ diagramChanged }),
+  setDiagramSaving: (diagramSaving) => set({ diagramSaving }),
 
   applyNodeChanges: (changes) => set({ nodes: applyNodeChanges(changes, get().nodes) }),
   applyEdgeChanges: (changes) => set({ edges: applyEdgeChanges(changes, get().edges) }),
@@ -191,7 +214,18 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
     }),
 
   clear: () =>
-    set({ nodes: [], edges: [], columnEdges: [], selection: null, hoverId: null, layoutPending: false, fitPending: false, viewport: null }),
+    set({
+      nodes: [],
+      edges: [],
+      columnEdges: [],
+      selection: null,
+      hoverId: null,
+      layoutPending: false,
+      fitPending: false,
+      viewport: null,
+      openDiagram: null,
+      diagramChanged: null,
+    }),
 
   requestLayout: () => set({ layoutPending: true }),
 

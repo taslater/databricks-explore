@@ -11,6 +11,7 @@ from . import concepts
 from . import dbx
 from . import demo
 from . import genie
+from . import graphs
 from . import layout
 from . import mcp_server
 from . import mining
@@ -176,20 +177,59 @@ def edge():
     return jsonify(ex().edge_details(request.args["src"], request.args["tgt"]))
 
 
+@app.errorhandler(graphs.GraphInvalid)
+def graph_invalid(e):
+    return jsonify({"error": str(e)}), 400
+
+
+@app.errorhandler(graphs.GraphNotFound)
+def graph_not_found(e):
+    return jsonify({"error": str(e)}), 404
+
+
+@app.errorhandler(graphs.GraphConflict)
+def graph_conflict(e):
+    return jsonify({"error": str(e), **e.info}), 409
+
+
 @app.get("/api/diagrams")
 def diagrams():
-    return jsonify(dbx.list_diagrams())
+    return jsonify(graphs.list_graphs())
 
 
 @app.get("/api/diagrams/<name>")
 def diagram(name):
-    return jsonify(dbx.load_diagram(name))
+    return jsonify(graphs.load_graph(name))
 
 
 @app.post("/api/diagrams")
 def save():
-    body = request.json
-    return jsonify({"saved": dbx.save_diagram(body["name"], body)})
+    base = request.headers.get("X-Base-Revision")  # the page sends the revision it loaded, to avoid overwriting a newer save
+    if base is not None and not base.isdigit():
+        return jsonify({"error": "X-Base-Revision: must be a whole number"}), 400
+    name, revision = graphs.write_graph(request.get_json(silent=True), expect=int(base) if base is not None else None)
+    return jsonify({"saved": name, "revision": revision})
+
+
+@app.get("/api/diagrams/<name>/revision")
+def diagram_revision(name):
+    """The saved graph's revision and who wrote it last (ui or agent). The page polls this."""
+    return jsonify(graphs.revision_info(name))
+
+
+@app.post("/api/diagrams/<name>/rename")
+def diagram_rename(name):
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("new_name"), str):
+        return jsonify({"error": "send new_name (a string)"}), 400
+    new, revision = graphs.rename_graph(name, body["new_name"])
+    return jsonify({"renamed": new, "revision": revision})
+
+
+@app.delete("/api/diagrams/<name>")
+def diagram_delete(name):
+    """Move a saved graph to diagrams/.trash/ (a copy is kept)."""
+    return jsonify({"deleted": graphs.resolve(name), "trash": graphs.delete_graph(name)})
 
 
 # ---------- relationships (relationships.py): derived edges plus the persisted ones ----------
