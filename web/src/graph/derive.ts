@@ -5,6 +5,7 @@ import type { GraphEdge } from '../api/types'
 import { columnHandles, findColumn, visibleColumns } from './columns'
 import { EDGE_COLORS } from './format'
 import { estimateSize } from './layout'
+import { nameLine } from './nodeMarks'
 import type { EdgeFilters, FlowEdge, FlowNode } from './types'
 
 export interface DeriveInput {
@@ -27,7 +28,7 @@ export function viaMap(edges: FlowEdge[]): Map<string, string> {
 }
 
 function nodeLines(n: FlowNode, showSchema: boolean, via: string | undefined): string[] {
-  const lines = [`${n.data.selfRef ? '↻ ' : ''}${n.data.name}`]
+  const lines = [nameLine(n.data)]
   if (showSchema) lines.push(n.data.schema)
   if (via) lines.push(`via ${via}`)
   if (n.data.showColumns && n.data.columns) {

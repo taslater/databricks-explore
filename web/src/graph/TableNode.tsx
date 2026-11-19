@@ -5,6 +5,7 @@ import { useGraphActions } from './actions'
 import { columnHandleId, visibleColumns } from './columns'
 import { isPlaceholder, nodeFill } from './format'
 import { useGraphStore } from './graphStore'
+import { FilesMark } from './FilesMark'
 import type { FlowNode } from './types'
 
 /** Table, view, or streaming node. Same look as the legacy Cytoscape style. It can list its columns, each with its own handles. */
@@ -48,6 +49,7 @@ export function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
         {data.selfRef && '↻ '}
         {data.name}
         {data.certification && <CertBadge status={data.certification} />}
+        <FilesMark data={data} />
       </div>
       {data.showSchema && <div className="tbl-sub">{data.schema}</div>}
       {data.via && <div className="tbl-sub">via {data.via}</div>}

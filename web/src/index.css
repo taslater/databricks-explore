@@ -273,6 +273,18 @@ button:disabled {
   color: #444;
 }
 
+/* Small muted marks beside a node's name (nodeMarks.ts). */
+.tbl-mark {
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid #8a9aa9;
+  border-radius: 8px;
+  color: #556;
+  font-size: 9px;
+  font-weight: 400;
+  vertical-align: 1px;
+}
+
 /* Handles exist so edges have anchor points. They are not drawn. */
 .tbl-handle {
   opacity: 0;

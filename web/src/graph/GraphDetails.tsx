@@ -7,6 +7,7 @@ import type { EdgeFlow, GraphEdge, JoinKey, Producer, RelationshipStatus } from 
 import { fetchCurrentEdge, messageOf, useGraphActions } from './actions'
 import { DERIVED_KINDS, KIND_LABEL, KIND_STYLE, STORED_KINDS } from './edgeStyles'
 import { fmtAge, fmtTime, lastPart } from './format'
+import { NodeMarkDetails } from './NodeMarkDetails'
 import { useGraphStore } from './graphStore'
 import { canReview, patchIds } from './relationships'
 import type { FlowEdge, FlowNode } from './types'
@@ -206,7 +207,7 @@ function NodeDetails({ id, node }: { id: string; node: FlowNode }) {
         {str(t.table_type)} · {str(t.data_source_format)} · owner {str(t.owner) || '?'}
       </div>
       <div className="hint">cached {payload.fetched_at}</div>
-      {node.data.selfRef && <p>↻ Reads its own data (e.g. MERGE). Last seen {fmtAge(node.data.selfRefLastSeen)}</p>}
+      <NodeMarkDetails data={node.data} />
       <p>{str(t.comment)}</p>
       {constraints.length > 0 && (
         <>

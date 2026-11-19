@@ -603,6 +603,10 @@ class Explorer:
                 if fk and not is_internal(fk["parent_table"]):
                     parent = fk["parent_table"]
                     node(parent)
+                    if parent.lower() == full_name.lower():  # a self-reference: the Graph marks the node, see web/src/graph/nodeMarks.ts
+                        nodes[full_name]["self_ref"] = True
+                        nodes[full_name].setdefault("self_ref_fks", []).append(
+                            {"constraint": fk.get("name"), "columns": fk.get("child_columns", []), "parent_columns": fk.get("parent_columns", [])})
                     edges[f"fk:{full_name}->{parent}"] = {
                         "id": f"fk:{full_name}->{parent}", "source": full_name, "target": parent, "kind": "fk",
                         "constraint": fk.get("name"), "child_columns": fk.get("child_columns", []),
@@ -620,12 +624,17 @@ class Explorer:
         flows = {}  # (source, target) -> lineage time, in the order met
         hints = {}  # neighbor -> the lineage API's table type, a guess for its kind
         downstream = set()
+        files = {}  # (path, readable) -> lineage time, for the file upstreams of this table
         try:
             lin = self.lineage(full_name, refresh)["data"]
             for direction in ("upstreams", "downstreams"):
                 for item in lin.get(direction) or []:
                     ti = item.get("tableInfo")
                     if not ti:
+                        fi = item.get("fileInfo")
+                        if fi and direction == "upstreams":  # a table loaded from files: the path is "" when the API hides it
+                            path = fi.get("path") or fi.get("storage_location") or ""
+                            files.setdefault((path, fi.get("has_permission") is not False), fi.get("lineage_timestamp"))
                         continue
                     other = f"{ti['catalog_name']}.{ti['schema_name']}.{ti['name']}"
                     if is_internal(other):
@@ -643,6 +652,9 @@ class Explorer:
                         downstream.add(other)
         except Exception as e:
             errors.append(f"lineage: {clean_error(e)}")
+
+        if files:
+            nodes[full_name]["files"] = [{"path": p, "readable": ok, "last_seen": ts} for (p, ok), ts in sorted(files.items())]
 
         # Look every neighbor up. A downstream neighbor's own metadata says whether the edge into it still holds.
         budget = [MAX_NEIGHBOR_READS]

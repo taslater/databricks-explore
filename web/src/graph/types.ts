@@ -1,5 +1,5 @@
 import type { Edge, Node } from '@xyflow/react'
-import type { GraphEdge, GraphEdgeKind } from '../api/types'
+import type { FileUpstream, GraphEdge, GraphEdgeKind, SelfRefFk } from '../api/types'
 import type { ColumnInfo } from './columns'
 
 /** Data stored on a React Flow node. Fields marked "derived" are filled in by deriveFlow and never saved. */
@@ -15,6 +15,9 @@ export type TableNodeData = {
   pinned?: boolean
   selfRef: boolean
   selfRefLastSeen?: string
+  /** Self-referencing foreign keys, and files the table is loaded from: the markers of nodeMarks.ts. */
+  selfRefFks?: SelfRefFk[]
+  files?: FileUpstream[]
   /** The object does not exist. Drawn dashed with no fill, never expanded. */
   missing?: boolean
   missingReason?: string

@@ -180,9 +180,10 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
           if (n.self_ref) {
             nodes[idx] = {
               ...nodes[idx],
-              data: { ...nodes[idx].data, selfRef: true, selfRefLastSeen: n.self_ref_last_seen },
+              data: { ...nodes[idx].data, selfRef: true, selfRefLastSeen: n.self_ref_last_seen, selfRefFks: n.self_ref_fks },
             }
           }
+          if (n.files) nodes[idx] = { ...nodes[idx], data: { ...nodes[idx].data, files: n.files } }
           continue
         }
         nodes.push({
@@ -196,6 +197,8 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
             focus: first && !!n.focus,
             selfRef: !!n.self_ref,
             selfRefLastSeen: n.self_ref_last_seen,
+            selfRefFks: n.self_ref_fks,
+            files: n.files,
             ...(n.missing ? { missing: true, missingReason: n.missing_reason, renamedTo: n.renamed_to } : null),
           },
         })
