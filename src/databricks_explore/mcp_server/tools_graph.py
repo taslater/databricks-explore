@@ -15,6 +15,7 @@ GRAPH_KINDS = ("fk", "view_dep", "lineage", "join_mined", "manual", "sketch")  #
 SHOWN = ("derived", "accepted")  # the Graph's default filters hide rejected edges; proposed joins wait for a review
 NAME = {"type": "string", "minLength": 1, "description": "graph name, as typed (Returns graph) or as stored (Returns_graph)"}
 TABLES = strings("full table names, catalog.schema.table")
+COLOR_BY = {"type": "string", "description": "what the node fill means: type (default), schema, catalog, owner, certification, freshness, or tag:<key> (for example tag:domain). Color by tag shows a table's value once the page has read its tags."}
 
 
 def _run(fn, *a, **kw):
@@ -125,7 +126,7 @@ def get_graph(ctx, args):
     if args.get("format") == "json":
         return text(json.dumps({
             "name": info["name"], "title": data.get("name"), "revision": info["revision"], "by": info["by"], "saved_at": data.get("saved_at"),
-            "focus_schema": data.get("focus_schema"),
+            "focus_schema": data.get("focus_schema"), "color_by": data.get("color_by") or "type",
             "nodes": [{"table": n["id"], "kind": n.get("kind", "table"), **({"focus": True} if n.get("focus") else {}),
                        **({"pinned": True} if n.get("pinned") else {}), **_facts_json(card.get(n["id"], {})), "x": (pos.get(n["id"]) or {}).get("x"), "y": (pos.get(n["id"]) or {}).get("y")}
                       for n in nodes],
@@ -136,7 +137,7 @@ def get_graph(ctx, args):
             separators=(",", ":")))
     head = (f"{info['name']}: {len(nodes)} tables, {len(edges)} edges, revision {info['revision']}" + (f" ({info['by']})" if info["by"] else "")
             + f", saved {data.get('saved_at')}")
-    lines = [head, f"focus schema: {data.get('focus_schema') or 'none'}. Graph filters are not saved with a graph: the page's defaults apply on load.", "Tables:"]
+    lines = [head, f"focus schema: {data.get('focus_schema') or 'none'}. Color by: {data.get('color_by') or 'type'}. Graph filters are not saved with a graph: the page's defaults apply on load.", "Tables:"]
     for n in nodes:
         lines.append(f"  {n['id']} [{n.get('kind', 'table')}]" + (" focus" if n.get("focus") else "") + (" pinned" if n.get("pinned") else "") + _facts_text(card.get(n["id"], {})))
     lines.append("Edges:" if edges else "Edges: none")
@@ -223,7 +224,8 @@ def _result(verb: str, stem: str, rev: int, tables: list[str], edges: list[dict]
 
 @tool("create_graph", "Save a new graph from tables: a node for each table and an edge for each relationship the app knows between them (foreign keys, view dependencies, lineage, accepted or manual joins; rejected and proposed ones are left out, as in the Graph tab), laid out left to right. You name tables, not edges or positions. Fails if the name is taken. Needs a connected profile. Use the lineage tool to find a path's tables first.",
       obj({"name": {**NAME, "description": "graph name (letters, digits, _ . - ; other characters become _)"}, "tables": {**TABLES, "minItems": 1, "maxItems": MAX_TABLES},
-           "focus": {"type": "string", "description": "one of the tables: the focus (the Graph's starting object); its schema is the focus schema"}}, ("name", "tables")), read_only=False)
+           "focus": {"type": "string", "description": "one of the tables: the focus (the Graph's starting object); its schema is the focus schema"},
+           "color_by": COLOR_BY}, ("name", "tables")), read_only=False)
 def create_graph(ctx, args):
     ctx.need_explorer()
     stem = _run(graphs.stem_of, args["name"])
@@ -239,7 +241,7 @@ def create_graph(ctx, args):
             raise ToolError(f"focus {args['focus']!r} is not one of the tables")
     edges, facts, notes = derive(ctx, tables)
     nodes = [{**facts[t], "focus": t == focus} for t in tables]
-    body = graphs.build_body(args["name"].strip(), nodes, edges)
+    body = _run(graphs.build_body, args["name"].strip(), nodes, edges, color_by=args.get("color_by"))
     with graphs.LOCK:
         stem, rev = _run(graphs.write_graph, body, "agent", None, True)
     return text(_result("created", stem, rev, tables, edges, notes))
@@ -247,12 +249,12 @@ def create_graph(ctx, args):
 
 @tool("update_graph", "Add or remove tables on a saved graph. Edges are derived again for the new set of tables, as in create_graph. Tables already on the graph keep their positions unless relayout is true; added tables are placed clear of them. Needs a connected profile.",
       obj({"name": NAME, "add": {**TABLES, "description": "tables to add"}, "remove": {**TABLES, "description": "tables to remove (with their edges)"},
-           "relayout": {**B, "description": "lay every table out again (default false)"}}, ("name",)), read_only=False)
+           "relayout": {**B, "description": "lay every table out again (default false)"}, "color_by": COLOR_BY}, ("name",)), read_only=False)
 def update_graph(ctx, args):
     ctx.need_explorer()
     add, remove = args.get("add") or [], args.get("remove") or []
-    if not add and not remove and not args.get("relayout"):
-        raise ToolError("nothing to do: give add, remove or relayout")
+    if not add and not remove and not args.get("relayout") and not args.get("color_by"):
+        raise ToolError("nothing to do: give add, remove, relayout or color_by")
     with graphs.LOCK:
         data = _run(graphs.load_graph, args["name"])
         stem = _run(graphs.resolve, args["name"])
@@ -272,9 +274,10 @@ def update_graph(ctx, args):
         edges, facts, notes = derive(ctx, tables)
         focus = {n["id"] for n in old if n.get("focus")}
         nodes = [{**facts[t], "focus": t in focus} for t in tables]
-        body = graphs.build_body(data.get("name") or stem, nodes, edges, previous=data, relayout=bool(args.get("relayout")))
+        body = _run(graphs.build_body, data.get("name") or stem, nodes, edges, previous=data, relayout=bool(args.get("relayout")),
+                    color_by=args.get("color_by") or data.get("color_by"))
         stem, rev = _run(graphs.write_graph, body, "agent")
-    changes = [f"added {len(new)}" if new else "", f"removed {len(gone)}" if gone else "", "laid out again" if args.get("relayout") else ""]
+    changes = [f"added {len(new)}" if new else "", f"removed {len(gone)}" if gone else "", "laid out again" if args.get("relayout") else "", f"colored by {args['color_by']}" if args.get("color_by") else ""]
     return text(_result("updated", stem, rev, tables, edges, [", ".join(c for c in changes if c) + ".", *notes]))
 
 

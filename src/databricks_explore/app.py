@@ -18,6 +18,7 @@ from . import layout
 from . import mcp_server
 from . import mining
 from . import nodefacts
+from . import nodemeta
 from . import ontology
 from . import relationships
 from . import sqltools
@@ -492,6 +493,29 @@ def table_stats_read():
     with ThreadPoolExecutor(max_workers=4) as pool:
         errors = {t: msg for t, msg in pool.map(one, eligible) if msg}
     return jsonify({"facts": nodefacts.facts(e, eligible), "skipped": skipped, "errors": errors})
+
+
+@app.post("/api/node-meta")
+def node_meta():
+    """The owner of each table and the tags read before, for Color by. Reads the cache and tables.get; never the warehouse."""
+    return jsonify({"meta": nodemeta.meta(ex(), _table_names(request.get_json(silent=True)))})
+
+
+@app.post("/api/node-tags/plan")
+def node_tags_plan():
+    """The statements `POST /api/node-tags/read` would run: one per table, for its table tags and column tags."""
+    return jsonify(nodemeta.plan(ex(), _table_names(request.get_json(silent=True))))
+
+
+@app.post("/api/node-tags/read")
+def node_tags_read():
+    """Read the tags of the tables on the warehouse and cache them (replacing what was cached); answers their meta and the errors."""
+    e = ex()
+    names = _table_names(request.get_json(silent=True))
+    if not e.warehouse_id:
+        raise ontology.NeedsWarehouse("Pick a SQL warehouse to read tags.")
+    found, errors = nodemeta.read(e, names)
+    return jsonify({"meta": found, "errors": errors})
 
 
 # ---------- ontology import (ontology.py): read-only, into concepts with origin "ontology" ----------

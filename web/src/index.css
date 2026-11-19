@@ -191,8 +191,9 @@ button:disabled {
 
 .graph-toolbar {
   display: flex;
+  flex-wrap: wrap; /* the buttons wrap onto a second row instead of being cut off when the page is narrow */
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   min-width: 0;
@@ -379,6 +380,37 @@ button:disabled {
 .legend-kinds .miss {
   border-style: dashed;
   color: #6b7580;
+}
+
+.legend-kinds .other {
+  background: #d9dde1;
+}
+
+.color-legend .legend-group {
+  margin-top: 6px;
+}
+
+.color-legend .type-icons {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  color: #555;
+  font-size: 11px;
+}
+
+.type-icon-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* The kind of object, before the name. It sits in the text color and never takes the fill's meaning. */
+.type-icon {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: -1px;
+  color: #4a5568;
 }
 
 .details .btns {

@@ -7,6 +7,7 @@ import { nameOf, schemaOf } from './format'
 import { computeLayout, computeScopedLayout } from './layout'
 import { nodeSize, viaMap } from './derive'
 import type { NeighborSet } from './neighbors'
+import type { ColorBy } from './colorBy'
 import type { DiagramPayload } from './diagram'
 import type { DiagramRevision } from '../api/diagrams'
 import type { EdgeFilters, FlowEdge, FlowNode, Selection } from './types'
@@ -49,6 +50,8 @@ interface GraphState {
   mineDialog: boolean
   /** Draw the concepts linked to the tables on the graph (the Concepts toggle). Not part of a saved diagram. */
   showConcepts: boolean
+  /** What a node's fill means (the Color by menu). Saved with the graph as `color_by`. */
+  colorBy: ColorBy
   focusSchema: string | null
   selection: Selection
   hoverId: string | null
@@ -96,6 +99,7 @@ interface GraphState {
   setColumnsOn: (on: boolean) => void
   setMineDialog: (open: boolean) => void
   setShowConcepts: (show: boolean) => void
+  setColorBy: (colorBy: ColorBy) => void
   /** Stores a node's columns and shows them. */
   setColumns: (id: string, columns: ColumnInfo[]) => void
   setShowColumns: (id: string, show: boolean) => void
@@ -123,6 +127,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   columnsOn: false,
   mineDialog: false,
   showConcepts: false,
+  colorBy: 'type',
   focusSchema: null,
   selection: null,
   hoverId: null,
@@ -187,6 +192,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   setColumnsOn: (columnsOn) => set({ columnsOn }),
   setMineDialog: (mineDialog) => set({ mineDialog }),
   setShowConcepts: (showConcepts) => set({ showConcepts }),
+  setColorBy: (colorBy) => set({ colorBy }),
   setColumns: (id, columns) =>
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, columns, showColumns: true } } : n)),
@@ -325,6 +331,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       columnEdges: [],
       expansions: {},
       focusSchema: payload.focusSchema,
+      colorBy: payload.colorBy ?? 'type',
       selection: null,
       hoverId: null,
       layoutPending: false,

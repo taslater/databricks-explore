@@ -6,6 +6,7 @@ import { CertificationControl } from '../concepts/CertificationControl'
 import { useUiStore } from '../store/uiStore'
 import { messageOf } from './actions'
 import { toDiagramBody, fromDiagram } from './diagram'
+import { ColorByControl } from './ColorByControl'
 import { useMiningWatcher } from './MiningPanel'
 import { TableStatsButton } from './TableStatsDialog'
 import { useSuggestions } from '../api/hooks'
@@ -91,7 +92,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
     setSaving(true)
     try {
       const res = await saveDiagramChecked(
-        toDiagramBody(name, { nodes: g.nodes, edges: g.edges, focusSchema: g.focusSchema }),
+        toDiagramBody(name, { nodes: g.nodes, edges: g.edges, focusSchema: g.focusSchema, colorBy: g.colorBy }),
         checked,
       )
       void qc.invalidateQueries({ queryKey: ['diagrams'] })
@@ -229,6 +230,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
       </button>
       <TableStatsButton />
       <CertificationControl />
+      <ColorByControl />
       <span className="spacer" />
       <span
         style={{ flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
