@@ -277,6 +277,18 @@ def test_a_warehouse_is_still_preferred_when_it_works(client, monkeypatch):
     assert out["column_lineage_source"] == "system_table" and rest.calls == []
 
 
+def test_an_empty_system_table_answer_falls_back_to_the_rest_api(client, monkeypatch):
+    # live on dbx-free: system.access.column_lineage had no rows for a table written minutes before, the REST API had them
+    client.post("/api/warehouse", json={"id": "demo-wh-1"})
+    ex = app_module.STATE["ex"]
+    monkeypatch.setattr(ex, "sql", lambda *a, **k: [])
+    monkeypatch.setattr(ex.w.api_client, "do", RestAnswers(ex, {(O, "amount"): {"downstream_cols": [col(V, "revenue")]}}))
+    out = column_edges(client, O)
+    assert out["column_lineage_source"] == "api" and ("orders", "amount", "v_daily_revenue", "revenue") in pairs_of(out)
+    monkeypatch.setattr(ex.w.api_client, "do", RestAnswers(ex, {}))
+    assert column_edges(client, O, refresh=1)["column_lineage_source"] == "system_table"  # nothing anywhere: the empty answer
+
+
 def test_when_the_warehouse_fails_the_rest_api_answers_instead(client, monkeypatch):
     client.post("/api/warehouse", json={"id": "demo-wh-1"})
     ex = app_module.STATE["ex"]

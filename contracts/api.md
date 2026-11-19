@@ -132,7 +132,7 @@ Response: `{"fetched_at": str, "data": <Databricks TableInfo as_dict()>}`. `data
 
 ### `GET /api/relations?name=<cat.sch.obj>`
 
-*Needs connection.* Builds the graph for one object from its cached `object` (constraints, view deps) and `lineage` (`/api/2.0/lineage-tracking/table-lineage`). Supports `?refresh=1`. Partial failures are reported in `errors` with status 200. Every neighbor is looked up too, from the cache first and otherwise with one `tables.get` (at most 40 per call; a not-found answer is remembered until `?refresh=1`), and a lookup that fails is not an error.
+*Needs connection.* Builds the graph for one object from its cached `object` (constraints, view deps) and `lineage` (`/api/2.0/lineage-tracking/table-lineage`). Supports `?refresh=1`. Partial failures are reported in `errors` with status 200. Every neighbor is looked up too, from the cache first and otherwise with one `tables.get` (at most 40 per call; a not-found answer is remembered until `?refresh=1`, which also reads cached neighbors again, within the same 40, so a dropped neighbor shows as missing), and a lookup that fails is not an error.
 
 Response:
 
