@@ -11,6 +11,8 @@ Magic words in SQL (matched anywhere in the statement, case-insensitive):
 Otherwise the result follows the first demo table named in the SQL (orders when none is named).
 The system tables system.query.history and system.access.table_lineage / column_lineage are answered by demo_history.py.
 The information_schema tag tables (catalog_tags ... column_tags) answer with the few tags in TAGS.
+The catalog demo_lake (demo_lake.py, answers in demo_lake_sql.py) is an invented lakehouse for graph work: DESCRIBE DETAIL,
+DESCRIBE HISTORY and relationship-profile statements (a LEFT ANTI JOIN over two tables) are answered for it.
 """
 import json
 import random
@@ -21,7 +23,7 @@ from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import sqlglot
-from . import demo_history, search_terms
+from . import demo_history, demo_lake, demo_lake_sql, search_terms
 from databricks.sdk.service import catalog as uc
 from databricks.sdk.service import iam
 from databricks.sdk.service import sql as sqlsvc
@@ -42,7 +44,7 @@ class DemoError(Exception):
 
 # ---------------------------------------------------------------- catalog
 
-CATALOGS = {"demo": "Invented demo data", "samples": "Invented sample datasets"}
+CATALOGS = {"demo": "Invented demo data", "samples": "Invented sample datasets", **demo_lake.CATALOGS}
 
 # name, type text, comment
 ORDERS = [("order_id", "bigint", "Primary key"), ("customer_id", "bigint", "Customer who placed the order"),
@@ -93,6 +95,7 @@ FOREIGN_KEYS = [("demo.sales.orders", "demo.sales.customers", "customer_id", "cu
 # Tables whose primary key is not just the first column: an order line is keyed by its order and its line number.
 COMPOSITE_KEYS = {"demo.sales.order_items": ["order_id", "line_no"], "samples.tpch.lineitem": ["order_id", "line_no"]}
 VIEW_DEPS = {"demo.sales.v_daily_revenue": ["demo.sales.orders"]}
+TABLES.update(demo_lake.TABLES)  # after the hand-made ones, so a short name in SQL finds those first
 # upstream table, downstream table, producing job id
 LINEAGE = [("demo.sales.orders", "demo.sales.v_daily_revenue", "1001"),
            ("samples.nyctaxi.trips", "demo.metrics.wide_metrics", "1002")]
@@ -109,6 +112,9 @@ TAGS = [("catalog", "demo", None, None, None, "environment", "sandbox"),
         ("column", "demo", "hr", "employees", "salary", "sensitivity", "confidential")]
 
 
+TAGS.extend(demo_lake.TAGS)
+
+
 def _type_name(type_text):
     base = re.split(r"[(<]", type_text)[0].upper()
     return {"BIGINT": "LONG"}.get(base, base)
@@ -117,6 +123,8 @@ def _type_name(type_text):
 def _table_info(full_name):
     if full_name not in TABLES:
         raise LookupError(f"[TABLE_OR_VIEW_NOT_FOUND] {full_name}")
+    if demo_lake.is_lake(full_name):
+        return demo_lake.table_info(full_name)
     kind, cols, comment, _ = TABLES[full_name]
     c, s, n = full_name.split(".")
     constraints = [uc.TableConstraint(primary_key_constraint=uc.PrimaryKeyConstraint(
@@ -270,6 +278,12 @@ def result_for(statement, params=None):
         low = wrapped.group(1)
         inner = re.match(r"^\s*select\s+\*\s+from\s+\((.*)\)\s+limit\s+\d+\s*$", statement, re.I | re.S)
         wrapped_sql = inner.group(1) if inner else low
+    try:  # the lake's warehouse answers: DESCRIBE DETAIL and HISTORY, row counts, relationship profiles
+        hit = demo_lake_sql.answer(low, wrapped_sql or statement, params, TABLES)
+    except LookupError as e:
+        raise DemoError(str(e))
+    if hit:
+        return hit
     if re.search(r"\bsystem\.(query\.history|access\.(table|column)_lineage)\b", low):
         return demo_history.system_query(low, params, cap or 5000)
     if re.search(r"\binformation_schema\.(catalog|schema|table|column)_tags\b", low):
@@ -277,18 +291,21 @@ def result_for(statement, params=None):
                 ("scope", "catalog_name", "schema_name", "table_name", "column_name", "tag_name", "tag_value")]
         rows = [list(t) for t in TAGS]
         asked = {k: str(v) for k, v in (params or {}).items() if k in ("sch", "tbl", "tag", "val", "cat")}
+        home = re.search(r"`?([\w-]+)`?\.information_schema\.", low)
+        if home and home.group(1) != "system":
+            asked.setdefault("cat", home.group(1))
+        if not asked.get("cat"):  # a metastore-wide lookup stays with the older demo data; the lake answers when its catalog is named
+            rows = [r for r in rows if r[1] != demo_lake.LAKE]
         if asked:  # a lookup by schema and table, or by tag: only table and column tags, narrowed by what was asked
-            home = re.search(r"`?([\w-]+)`?\.information_schema\.", low)
-            if home and home.group(1) != "system":
-                asked.setdefault("cat", home.group(1))
             index = {"cat": 1, "sch": 2, "tbl": 3, "tag": 5, "val": 6}
             rows = [r for r in rows if r[0] in ("table", "column") and all((r[index[k]] or "").lower() == v.lower() for k, v in asked.items())]
         return cols, rows[: cap or len(rows)]
     if "information_schema.tables" in low:
         asked = {k: str(v) for k, v in (params or {}).items() if k in ("cat", "sch", "q")}  # LIKE patterns, see search_terms
-        hits = [(f.split(".")[0], f.split(".")[1], f.split(".")[2], "VIEW" if v[0] == "VIEW" else "BASE TABLE")
+        hits = [(f.split(".")[0], f.split(".")[1], f.split(".")[2], v[0] if v[0] in ("VIEW", "MATERIALIZED_VIEW") else "BASE TABLE")
                 for f, v in sorted(TABLES.items())
-                if all(search_terms.like_matches(p, f.split(".")[{"cat": 0, "sch": 1, "q": 2}[k]]) for k, p in asked.items())]
+                if (asked.get("cat") or not demo_lake.is_lake(f))  # an unscoped name search skips the lake, like the tag lookups
+                and all(search_terms.like_matches(p, f.split(".")[{"cat": 0, "sch": 1, "q": 2}[k]]) for k, p in asked.items())]
         cols = [{"name": k, "type": "STRING"} for k in ("table_catalog", "table_schema", "table_name", "table_type")]
         return cols, [list(h) for h in hits][: cap or 300]
     if re.match(r"^(create|insert|drop|alter|use|set|optimize|vacuum|grant|merge|update|delete|truncate)\b", low):
@@ -406,7 +423,7 @@ class _CurrentUser:
 
 class _ApiClient:
     def do(self, method, path, body=None, **_):
-        """Only the table-lineage endpoint exists."""
+        """Only the table-lineage endpoint exists (the lake's items come from demo_lake.lineage_items)."""
         name = (body or {}).get("table_name")
         ups, downs = [], []
         for up, down, job in LINEAGE:
@@ -417,7 +434,8 @@ class _ApiClient:
                                                  "table_type": TABLES[other][0], "lineage_timestamp": LINEAGE_SEEN},
                                    "jobInfos": [{"job_id": job, "workspace_id": "1111111111",
                                                  "lineage_timestamp": LINEAGE_SEEN}]})
-        return {"upstreams": ups, "downstreams": downs}
+        lake_ups, lake_downs = demo_lake.lineage_items(name)
+        return {"upstreams": ups + lake_ups, "downstreams": downs + lake_downs}
 
 
 class FakeWorkspaceClient:
