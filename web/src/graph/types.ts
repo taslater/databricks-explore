@@ -1,5 +1,6 @@
 import type { Edge, Node } from '@xyflow/react'
 import type { GraphEdge, GraphEdgeKind } from '../api/types'
+import type { NodeFacts } from '../api/nodeFacts'
 import type { ColumnInfo } from './columns'
 import type { EdgeFamily } from './edgeStyles'
 
@@ -34,6 +35,8 @@ export type TableNodeData = {
   faded?: boolean
   /** The table's `system.certification_status` tag, added at draw time (concepts/certification.ts) and never saved. */
   certification?: 'certified' | 'deprecated'
+  /** The grain and the size and freshness last read, added at draw time (graph/nodeFacts.ts) and never saved. */
+  facts?: NodeFacts
 }
 
 export type FlowNode = Node<TableNodeData, 'table'>
@@ -57,6 +60,8 @@ export type EdgeData = {
   /** The edge no longer holds (status `superseded`). */
   superseded?: boolean
   faded?: boolean
+  /** `per a → per b`: the target is a GROUP BY of a different grain than the source (added at draw time, never saved). */
+  grainChange?: string
 }
 
 export type FlowEdge = Edge<EdgeData>

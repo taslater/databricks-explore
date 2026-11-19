@@ -1,5 +1,6 @@
 import { BaseEdge, getBezierPath, type EdgeProps } from '@xyflow/react'
 import { edgeStyle, isInferred, type EdgeFamily } from './edgeStyles'
+import { EdgeGrainGlyph } from './NodeFacts'
 import type { FlowEdge } from './types'
 
 /** Width in pixels of the invisible path that takes clicks and hovers, so a thin line is easy to hit. React Flow's default is 20. */
@@ -10,6 +11,7 @@ const REJECTED_OPACITY = 0.3
 
 function makeEdge(family: EdgeFamily, superseded = false) {
   function Edge({
+    id,
     sourceX,
     sourceY,
     targetX,
@@ -21,20 +23,23 @@ function makeEdge(family: EdgeFamily, superseded = false) {
     selected,
     data,
   }: EdgeProps<FlowEdge>) {
-    const [path] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
+    const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
     const rejected = data?.info.status === 'rejected'
     return (
-      <BaseEdge
-        path={path}
-        markerStart={markerStart}
-        markerEnd={markerEnd}
-        interactionWidth={EDGE_INTERACTION_WIDTH}
-        style={{
-          ...edgeStyle(family, data ? isInferred(data.info) : false, superseded),
-          ...(selected ? { strokeWidth: 3.5 } : null),
-          opacity: data?.faded ? 0.2 : rejected ? REJECTED_OPACITY : 1,
-        }}
-      />
+      <>
+        <BaseEdge
+          path={path}
+          markerStart={markerStart}
+          markerEnd={markerEnd}
+          interactionWidth={EDGE_INTERACTION_WIDTH}
+          style={{
+            ...edgeStyle(family, data ? isInferred(data.info) : false, superseded),
+            ...(selected ? { strokeWidth: 3.5 } : null),
+            opacity: data?.faded ? 0.2 : rejected ? REJECTED_OPACITY : 1,
+          }}
+        />
+        <EdgeGrainGlyph id={id} change={data?.grainChange} x={labelX} y={labelY} faded={data?.faded} />
+      </>
     )
   }
   return Edge

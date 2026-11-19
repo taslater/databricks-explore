@@ -138,3 +138,21 @@ def test_the_tools_are_listed_and_the_instructions_name_the_separate_store(agent
     by = {t["name"]: t for t in agent.rpc("tools/list").get_json()["result"]["tools"]}
     assert by["list_graphs"]["annotations"]["readOnlyHint"] and by["delete_graph"]["annotations"]["destructiveHint"]
     assert not by["create_graph"]["annotations"]["readOnlyHint"]
+
+
+def test_get_graph_has_the_grain_and_the_cached_size_and_freshness_of_each_table(agent, connected):
+    lake = ["demo_lake.silver.orders", "demo_lake.silver.shipments", "demo_lake.gold.revenue_metrics"]
+    agent.ok("create_graph", name="lake", tables=lake)
+    connected.post("/api/node-facts", json={"tables": lake})  # reads tables.get, so the grain is cached
+    before = graph_json(agent, "lake")["nodes"]
+    assert [n.get("rows") for n in before] == [None] * 3 and "late" not in before[0]  # nothing read yet
+    connected.post("/api/warehouse", json={"id": "demo-wh-1"})
+    assert connected.post("/api/table-stats/read", json={"tables": lake}).status_code == 200
+    nodes = {n["table"]: n for n in graph_json(agent, "lake")["nodes"]}
+    orders, shipments, metrics = (nodes[t] for t in lake)
+    assert orders["grain"] == {"label": "per order_id", "basis": "primary_key", "columns": ["order_id"], "source": "declared primary key pk_orders"}
+    assert orders["rows"] == 12_100_000 and orders["bytes"] > 0 and orders["late"] is False and orders["last_write"]["operation"]
+    assert shipments["late"] is True
+    assert "grain" not in metrics and "rows" not in metrics
+    text = agent.ok("get_graph", name="lake")
+    assert "per order_id, 12,100,000 rows" in text and "late)" in text

@@ -573,3 +573,93 @@ def view_column_lineage(sql: str, columns: Iterable[str], default_catalog: str |
                 seen.add(row)
                 out.append(row)
     return out
+
+
+# ---------- grain: what one row of a view stands for ----------
+
+class Grain(NamedTuple):
+    """What one row stands for, from a view's SELECT: the basis ("group_by", "dedupe" or "distinct") and the key columns (none for distinct)."""
+    basis: str
+    columns: list[str]
+
+
+def _key_name(key: exp.Expression, select: exp.Select) -> str:
+    """A grouping key as the view names it: its select alias, else the column or expression's own SQL."""
+    for i, item in enumerate(select.expressions):
+        if isinstance(key, exp.Literal) and key.is_int and int(key.name) == i + 1:  # GROUP BY 1
+            return _item_name(item)
+        inner = item.this if isinstance(item, exp.Alias) else item
+        if inner == key:
+            return _item_name(item)
+        if isinstance(key, exp.Column) and not key.table and isinstance(item, exp.Alias) and item.alias == key.name:
+            return item.alias  # Spark lets GROUP BY name a select alias
+    return key.name if isinstance(key, exp.Column) else key.sql(dialect=_DIALECT)
+
+
+def _item_name(item: exp.Expression) -> str:
+    if isinstance(item, exp.Alias):
+        return item.alias
+    return item.name if isinstance(item, exp.Column) else item.sql(dialect=_DIALECT)
+
+
+def _is_row_number_one(cond: exp.Expression) -> exp.Window | exp.Column | None:
+    """The row_number() window, or the column naming one, of a `... = 1` test."""
+    if not isinstance(cond, exp.EQ):
+        return None
+    for a, b in ((cond.left, cond.right), (cond.right, cond.left)):
+        if isinstance(b, exp.Literal) and b.is_int and int(b.name) == 1 and (
+                isinstance(a, exp.Column) or (isinstance(a, exp.Window) and isinstance(a.this, exp.RowNumber))):
+            return a
+    return None
+
+
+def _dedupe_keys(tree: exp.Select) -> list[exp.Expression] | None:
+    """The PARTITION BY of a row_number() = 1 filter: QUALIFY, or WHERE on a subquery or CTE that numbers the rows."""
+    qualify = tree.args.get("qualify")
+    found = _is_row_number_one(qualify.this) if qualify is not None else None
+    if isinstance(found, exp.Window):
+        return list(found.args.get("partition_by") or [])
+    where = tree.args.get("where")
+    if where is None or not isinstance(found := _is_row_number_one(where.this), exp.Column):
+        return None
+    clause = tree.args.get("from_") or tree.args.get("from")
+    source = clause.this if clause is not None else None
+    inner = source.this if isinstance(source, exp.Subquery) else None
+    if inner is None and isinstance(source, exp.Table):  # a CTE of this statement
+        inner = next((c.this for c in tree.ctes if c.alias.lower() == source.name.lower()), None)
+    if not isinstance(inner, exp.Select):
+        return None
+    for item in inner.expressions:
+        if isinstance(item, exp.Alias) and item.alias.lower() == found.name.lower() and isinstance(item.this, exp.Window) \
+                and isinstance(item.this.this, exp.RowNumber):
+            return list(item.this.args.get("partition_by") or [])
+    return None
+
+
+def view_grain(sql: str) -> Grain | None:
+    """The grain a view's top-level SELECT gives its rows, or None: GROUP BY keys, else a row_number() = 1 dedupe, else DISTINCT.
+
+    Keys are named as the view names them (the select alias when there is one). Set operations, ROLLUP and CUBE, and SQL
+    sqlglot cannot read give None. Never raises."""
+    try:
+        tree = _parse(sql)
+    except ValueError:
+        return None
+    if not isinstance(tree, exp.Select):
+        return None
+    group = tree.args.get("group")
+    if group is not None:
+        if group.args.get("all"):  # GROUP BY ALL: every select item that is not an aggregate
+            names = [_item_name(i) for i in tree.expressions if not (i.this if isinstance(i, exp.Alias) else i).find(exp.AggFunc)]
+            return Grain("group_by", names) if names else None
+        keys = list(group.expressions)
+        if keys and not any(isinstance(k, (exp.Rollup, exp.Cube, exp.GroupingSets)) for k in keys) and not group.args.get("rollup") \
+                and not group.args.get("cube") and not group.args.get("grouping_sets"):
+            return Grain("group_by", [_key_name(k, tree) for k in keys])
+        return None
+    keys = _dedupe_keys(tree)
+    if keys:
+        return Grain("dedupe", [_key_name(k, tree) for k in keys])
+    if tree.args.get("distinct"):
+        return Grain("distinct", [])
+    return None

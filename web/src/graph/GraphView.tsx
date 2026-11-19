@@ -13,6 +13,7 @@ import {
 } from '@xyflow/react'
 import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import { useCertification, useConceptsForTables } from '../api/concepts'
+import { useNodeFacts } from '../api/nodeFacts'
 import { withCertification } from '../concepts/certification'
 import { useConceptsStore } from '../concepts/conceptsStore'
 import { conceptOverlay, isConceptEdge } from '../concepts/overlay'
@@ -25,6 +26,8 @@ import { useGraphStore } from './graphStore'
 import { GraphToolbar } from './GraphToolbar'
 import { MineDialog } from './MineDialog'
 import { MiningPanel } from './MiningPanel'
+import { withGrainChanges, withNodeFacts } from './cardFacts'
+import { TableStatsDialog } from './TableStatsDialog'
 import { TableNode } from './TableNode'
 import type { ConceptFlowNode, FlowEdge, FlowNode } from './types'
 import { useUiStore } from '../store/uiStore'
@@ -74,6 +77,7 @@ export function GraphView() {
       </div>
       {drawer && <MiningPanel drawer={drawer} />}
       {mineDialog && <MineDialog />}
+      <TableStatsDialog />
     </div>
   )
 }
@@ -114,11 +118,14 @@ function GraphCanvas() {
   )
   // Certification badges (system.certification_status), added when drawing like the concepts. Silent when it cannot be read.
   const certification = useCertification()
+  // The grain line, size badge and late dot, and the Σ on edges that change grain: read from the server's cache, drawn, never saved.
+  const readable = useMemo(() => rawNodes.filter((n) => !n.data.missing).map((n) => n.id).filter((id) => !id.startsWith('ph:')), [rawNodes])
+  const nodeFacts = useNodeFacts(readable)
   const drawnNodes = useMemo<Array<FlowNode | ConceptFlowNode>>(
-    () => [...withCertification(flow.nodes, certification.data), ...overlay.nodes],
-    [flow.nodes, overlay.nodes, certification.data],
+    () => [...withNodeFacts(withCertification(flow.nodes, certification.data), nodeFacts.data), ...overlay.nodes],
+    [flow.nodes, overlay.nodes, certification.data, nodeFacts.data],
   )
-  const drawnEdges = useMemo(() => [...flow.edges, ...overlay.edges], [flow.edges, overlay.edges])
+  const drawnEdges = useMemo(() => [...withGrainChanges(flow.edges, nodeFacts.data), ...overlay.edges], [flow.edges, overlay.edges, nodeFacts.data])
 
   // Layout and fit need real node sizes, so they wait until every visible node has been measured.
   useEffect(() => {
