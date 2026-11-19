@@ -1,0 +1,212 @@
+{
+ "note": "Python: graph_lens.roles. TypeScript: rolesOf in web/src/graph/lens.ts.",
+ "cases": [
+  {
+   "name": "a star: one fact, three dimensions",
+   "input": {
+    "ids": [
+     "c.s.orders",
+     "c.s.cust",
+     "c.s.prod",
+     "c.s.date"
+    ],
+    "edges": [
+     {
+      "source": "c.s.orders",
+      "target": "c.s.cust",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.orders",
+      "target": "c.s.prod",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.orders",
+      "target": "c.s.date",
+      "kind": "join_mined",
+      "status": "accepted"
+     }
+    ]
+   },
+   "expected": {
+    "c.s.orders": {
+     "role": "fact",
+     "reason": "references cust, prod, date and nothing references it",
+     "depth": 0
+    },
+    "c.s.cust": {
+     "role": "dimension",
+     "reason": "referenced by orders",
+     "depth": 1
+    },
+    "c.s.prod": {
+     "role": "dimension",
+     "reason": "referenced by orders",
+     "depth": 1
+    },
+    "c.s.date": {
+     "role": "dimension",
+     "reason": "referenced by orders",
+     "depth": 1
+    }
+   }
+  },
+  {
+   "name": "a snowflake: a dimension of a dimension, and a table nothing joins",
+   "input": {
+    "ids": [
+     "c.s.f",
+     "c.s.d1",
+     "c.s.d2",
+     "c.s.lonely"
+    ],
+    "edges": [
+     {
+      "source": "c.s.f",
+      "target": "c.s.d1",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.d1",
+      "target": "c.s.d2",
+      "kind": "fk"
+     }
+    ]
+   },
+   "expected": {
+    "c.s.f": {
+     "role": "fact",
+     "reason": "references d1 and nothing references it",
+     "depth": 0
+    },
+    "c.s.d1": {
+     "role": "dimension",
+     "reason": "referenced by f, and references d2 in turn (a dimension of a dimension)",
+     "depth": 1
+    },
+    "c.s.d2": {
+     "role": "dimension",
+     "reason": "referenced by d1",
+     "depth": 2
+    }
+   }
+  },
+  {
+   "name": "a cycle starts at its first table; superseded, rejected, meaning, flow and self edges do not count",
+   "input": {
+    "ids": [
+     "c.s.x",
+     "c.s.y",
+     "c.s.z"
+    ],
+    "edges": [
+     {
+      "source": "c.s.x",
+      "target": "c.s.y",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.y",
+      "target": "c.s.x",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.x",
+      "target": "c.s.z",
+      "kind": "fk",
+      "status": "superseded"
+     },
+     {
+      "source": "c.s.y",
+      "target": "c.s.z",
+      "kind": "manual",
+      "status": "rejected"
+     },
+     {
+      "source": "c.s.x",
+      "target": "c.s.z",
+      "kind": "lineage"
+     },
+     {
+      "source": "c.s.x",
+      "target": "c.s.z",
+      "kind": "sketch"
+     },
+     {
+      "source": "c.s.z",
+      "target": "c.s.z",
+      "kind": "fk"
+     }
+    ]
+   },
+   "expected": {
+    "c.s.x": {
+     "role": "fact",
+     "reason": "references y, and y references it back (a cycle, so it starts the picture)",
+     "depth": 0
+    },
+    "c.s.y": {
+     "role": "dimension",
+     "reason": "referenced by x, and references x in turn (a dimension of a dimension)",
+     "depth": 1
+    }
+   }
+  },
+  {
+   "name": "two facts share a dimension; an edge to a table off the graph is ignored",
+   "input": {
+    "ids": [
+     "c.s.f1",
+     "c.s.f2",
+     "c.s.shared",
+     "c.s.own"
+    ],
+    "edges": [
+     {
+      "source": "c.s.f1",
+      "target": "c.s.shared",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.f2",
+      "target": "c.s.shared",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.f2",
+      "target": "c.s.own",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.f1",
+      "target": "c.s.gone",
+      "kind": "fk"
+     }
+    ]
+   },
+   "expected": {
+    "c.s.f1": {
+     "role": "fact",
+     "reason": "references shared and nothing references it",
+     "depth": 0
+    },
+    "c.s.f2": {
+     "role": "fact",
+     "reason": "references shared, own and nothing references it",
+     "depth": 0
+    },
+    "c.s.shared": {
+     "role": "dimension",
+     "reason": "referenced by f1, f2",
+     "depth": 1
+    },
+    "c.s.own": {
+     "role": "dimension",
+     "reason": "referenced by f2",
+     "depth": 1
+    }
+   }
+  }
+ ]
+}

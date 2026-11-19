@@ -5,12 +5,14 @@ import * as api from '../api/client'
 import { useNodeFacts } from '../api/nodeFacts'
 import { messageOf } from './actions'
 import { useNodeColors } from './ColorByControl'
-import { deriveFlow } from './derive'
+import { useActiveTrace } from './ColumnTrace'
+import { countText, isSummaryId } from './collapse'
 import { useCardinality } from './EdgeEnds'
 import { useEdgeTransforms } from './EdgeTransforms'
 import {
   canvasBlob,
   dateLine,
+  exportScene,
   factsReadDate,
   fileStem,
   pictureLegend,
@@ -72,13 +74,20 @@ function ExportDialog({ onClose }: { onClose: () => void }) {
   const { colorBy, colors } = useNodeColors()
   const ends = useCardinality().data
   const transforms = useEdgeTransforms().data?.edges
-  const flow = useMemo(() => deriveFlow({ nodes, edges, columnEdges, focusSchema, filters, hoverId: null }), [nodes, edges, columnEdges, focusSchema, filters])
-  const shownNodes = flow.nodes.filter((n) => !n.hidden)
-  const shownEdges = flow.edges.filter((e) => !e.hidden).map((e) => e.data!.info)
-  const facts = useNodeFacts(shownNodes.filter((n) => !n.data.missing && !n.id.startsWith('ph:')).map((n) => n.id)).data
+  // What the canvas draws: collapsed groups as one node each, chains of pass-through views as one edge, the tables a column trace added.
+  const trace = useActiveTrace()
+  const grouping = useGraphStore((s) => s.grouping)
+  const groupTags = useGraphStore((s) => s.groupTags)
+  const scene = useMemo(
+    () => exportScene({ nodes, edges, columnEdges, focusSchema, filters, grouping, groupTags, trace }),
+    [nodes, edges, columnEdges, focusSchema, filters, grouping, groupTags, trace],
+  )
+  const shownNodes = scene.nodes
+  const shownEdges = scene.edges
+  const facts = useNodeFacts(shownNodes.filter((n) => !n.data.missing && !n.id.startsWith('ph:') && !isSummaryId(n.id)).map((n) => n.id)).data
   const legend = useMemo(
     () => pictureLegend({ edges: shownEdges, filters, ends, nodes: shownNodes, colorBy, colors }),
-    [flow, filters, ends, colorBy, colors],
+    [shownEdges, shownNodes, filters, ends, colorBy, colors],
   )
   const read = factsReadDate(shownEdges, facts)
   const today = new Date().toISOString().slice(0, 10)
@@ -124,7 +133,7 @@ function ExportDialog({ onClose }: { onClose: () => void }) {
 
   const copyMermaid = (lens: 'flow' | 'model') =>
     run(async () => {
-      const text = await api.getMermaid({ lens, nodes: shownNodes.map((n) => ({ id: n.id, kind: n.data.kind })), edges: shownEdges, glyphs: glyphsOf(shownEdges, transforms) })
+      const text = await api.getMermaid({ lens, nodes: shownNodes.map((n) => ({ id: n.id, kind: n.data.kind, ...(n.data.summary ? { label: `${n.data.summary.label} (${countText(n.data.summary.count, n.data.summary.noun)})` } : {}) })), edges: shownEdges, glyphs: glyphsOf(shownEdges, transforms) })
       setMermaid(text)
       try {
         await navigator.clipboard.writeText(text)

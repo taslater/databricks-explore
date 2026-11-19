@@ -230,6 +230,7 @@ function findChains(nodes: FlowNode[], shown: FlowEdge[], visible: Set<string>, 
  * The graph with its collapsed groups and elided chains: the nodes and edges to draw (the original ones stay, so the
  * filters see them as before), the nodes to hide, and what each group and chain is. Counts follow the filters.
  */
+// Python twin: graph_collapse.plan (tests/test_parity.py and web/src/parity.test.ts run both on the same cases).
 export function collapseGraph(input: CollapseInput): CollapseView {
   const { nodes, edges, filters, grouping } = input
   const none: CollapseView = { nodes, edges, hidden: new Set(), groups: [], chains: [], boxOf: new Map() }

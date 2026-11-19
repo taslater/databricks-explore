@@ -149,3 +149,37 @@ def test_the_mermaid_route_exports_what_the_page_shows(connected):
     for bad in ({**body, "lens": "wide"}, {**body, "nodes": "x"}, {**body, "edges": [{"id": 1}]}):
         r = connected.post("/api/graph/mermaid", json=bad)
         assert r.status_code == 400 and r.get_json()["error"]
+
+
+def grouped_graph(client):
+    """Ten tables in one schema (collapsed by the default rule), two in another, and a chain of two views between a source and an output."""
+    def node(i, kind="managed", x=0, y=0):
+        return {"data": {"id": i, "label": i.rsplit(".", 1)[1], "kind": kind}, "position": {"x": x, "y": y}}
+
+    def link(a, b, kind="lineage"):
+        return {"data": {"id": f"{kind}:{a}->{b}", "source": a, "target": b, "kind": kind, "status": "derived"}}
+    big = [f"c.big.t{i}" for i in range(10)]
+    nodes = [node(t, x=i * 10, y=i * 10) for i, t in enumerate(big)] + [node("c.small.x", x=300), node("c.small.y", x=300, y=80), node("c.a.src", x=0, y=300),
+                                                                         node("c.a.v1", "view", 100, 300), node("c.b.v2", "view", 200, 300), node("c.b.out", x=300, y=300)]
+    edges = [link("c.big.t0", "c.small.x"), link("c.big.t1", "c.small.x"), link("c.big.t2", "c.small.y"),
+             link("c.a.src", "c.a.v1", "view_dep"), link("c.a.v1", "c.b.v2", "view_dep"), link("c.b.v2", "c.b.out")]
+    assert client.post("/api/diagrams", json={"name": "grouped", "focus_schema": "c.small", "nodes": nodes, "edges": edges}).status_code == 200
+
+
+def test_an_export_draws_collapsed_groups_and_chains_as_the_graph_tab_does(agent, connected):
+    grouped_graph(connected)
+    text = agent.ok("export_graph", name="grouped")
+    assert 'big (10 tables)' in text and "t0" not in text and "t7" not in text  # the group is one node
+    assert "v1" not in text and "v2" not in text  # the chain's views are left out
+    assert text.count("-->") == 3  # group to x, group to y, source to out through the chain
+    full = agent.ok("export_graph", name="grouped", expand_groups=True)
+    assert "t0" in full and "v1" in full and "big (10 tables)" not in full and full.count("-->") == 6
+
+
+def test_a_png_of_a_collapsed_graph_has_a_node_for_the_group(agent, connected):
+    grouped_graph(connected)
+    r = agent.rpc("tools/call", {"name": "export_graph", "arguments": {"name": "grouped", "format": "png"}})
+    caption = r.get_json()["result"]["content"][1]["text"]
+    assert caption.startswith("grouped: 5 nodes") and "3 edges drawn" in caption  # the group, x, y, src and out
+    full = agent.rpc("tools/call", {"name": "export_graph", "arguments": {"name": "grouped", "format": "png", "expand_groups": True}}).get_json()["result"]["content"][1]["text"]
+    assert full.startswith("grouped: 16 tables") and "6 edges drawn" in full

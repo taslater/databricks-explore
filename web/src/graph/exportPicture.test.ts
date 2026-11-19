@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { Cardinality, GraphEdge, GraphEdgeKind } from '../api/types'
 import { colorNodes } from './colorBy'
-import { ENDS_TEXT, dateLine, factsReadDate, fileStem, frameMetrics, legendRows, pictureLegend, type LegendInput } from './exportPicture'
+import { DEFAULT_GROUPING } from './collapse'
+import { ENDS_TEXT, dateLine, exportScene, factsReadDate, fileStem, frameMetrics, legendRows, pictureLegend, type LegendInput } from './exportPicture'
 import { DEFAULT_FILTERS } from './graphStore'
-import type { FlowNode } from './types'
+import type { FlowEdge, FlowNode } from './types'
 
 const S = 'main.sales'
 const node = (name: string, extra: Partial<FlowNode['data']> = {}, hidden = false): FlowNode => ({
@@ -76,5 +77,39 @@ describe('the frame around the picture', () => {
   it('names the file after the title', () => {
     expect(fileStem('Order model, v2')).toBe('Order-model-v2')
     expect(fileStem('  ')).toBe('graph')
+  })
+})
+
+describe('what an export draws', () => {
+  const at = (schema: string, name: string, kind = 'table'): FlowNode => ({ id: `c.${schema}.${name}`, type: 'table', position: { x: 0, y: 0 }, data: { name, schema: `c.${schema}`, kind, focus: false, selfRef: false } })
+  const link = (id: string, source: string, target: string, kind: GraphEdgeKind = 'lineage'): FlowEdge => ({ id, source, target, data: { info: { id, source, target, kind, status: 'derived' } } })
+  const scene = (nodes: FlowNode[], edges: FlowEdge[], extra: Partial<Parameters<typeof exportScene>[0]> = {}) =>
+    exportScene({ nodes, edges, columnEdges: [], focusSchema: null, filters: DEFAULT_FILTERS, grouping: DEFAULT_GROUPING, groupTags: {}, trace: null, ...extra })
+
+  it('is a collapsed group as one node and its edges merged, as the canvas draws it', () => {
+    const big = Array.from({ length: 10 }, (_, i) => at('big', `t${i}`))
+    const small = [at('small', 'x'), at('small', 'y')]
+    const out = scene([...big, ...small], [link('e1', 'c.big.t0', 'c.small.x'), link('e2', 'c.big.t1', 'c.small.x')])
+    expect(out.nodes.map((n) => n.id).sort()).toEqual(['c.small.x', 'c.small.y', 'summary:c.big'])
+    expect(out.nodes.find((n) => n.id === 'summary:c.big')!.data.summary).toMatchObject({ label: 'big', count: 10 })
+    expect(out.edges.map((e) => [e.source, e.target])).toEqual([['summary:c.big', 'c.small.x']])
+    expect(out.edges).toHaveLength(1) // two edges into one table from one group are one
+  })
+
+  it('is a chain of pass-through views as one edge, or every table when chains are off', () => {
+    const nodes = [at('a', 'src'), at('a', 'v1', 'view'), at('b', 'v2', 'view'), at('b', 'out')]
+    const edges = [link('e1', 'c.a.src', 'c.a.v1', 'view_dep'), link('e2', 'c.a.v1', 'c.b.v2', 'view_dep'), link('e3', 'c.b.v2', 'c.b.out')]
+    const chained = scene(nodes, edges)
+    expect(chained.nodes.map((n) => n.id).sort()).toEqual(['c.a.src', 'c.b.out'])
+    expect(chained.edges.map((e) => [e.source, e.target])).toEqual([['c.a.src', 'c.b.out']])
+    expect(scene(nodes, edges, { grouping: { ...DEFAULT_GROUPING, chains: false } }).nodes).toHaveLength(4)
+  })
+
+  it('leaves out what the filters hide (the Model lens draws references only) and the column edges of a trace', () => {
+    const nodes = [at('a', 'x'), at('a', 'y'), at('a', 'z')]
+    const column = { ...link('col', 'c.a.x', 'c.a.y'), data: { info: { ...link('col', 'c.a.x', 'c.a.y').data!.info, source_column: 'v', target_column: 'v' } } }
+    const model = { ...DEFAULT_FILTERS, lineage: false, view_dep: false, flow: false }
+    const out = scene(nodes, [link('l1', 'c.a.x', 'c.a.y'), link('r1', 'c.a.y', 'c.a.z', 'fk')], { filters: model, columnEdges: [column] })
+    expect(out.edges.map((e) => e.id)).toEqual(['r1'])
   })
 })
