@@ -8,6 +8,7 @@ import { messageOf } from './actions'
 import { toDiagramBody, fromDiagram } from './diagram'
 import { ColorByControl } from './ColorByControl'
 import { GroupControl } from './CollapseControls'
+import { LensSwitch } from './LensSwitch'
 import { GraphExportButton } from './GraphExport'
 import { useMiningWatcher } from './MiningPanel'
 import { ProfileButton } from './ProfileDialog'
@@ -95,7 +96,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
     setSaving(true)
     try {
       const res = await saveDiagramChecked(
-        toDiagramBody(name, { nodes: g.nodes, edges: g.edges, focusSchema: g.focusSchema, colorBy: g.colorBy, grouping: g.grouping }),
+        toDiagramBody(name, { nodes: g.nodes, edges: g.edges, focusSchema: g.focusSchema, colorBy: g.colorBy, grouping: g.grouping, lens: g.lens, lensPositions: g.lensPositions }),
         checked,
       )
       void qc.invalidateQueries({ queryKey: ['diagrams'] })
@@ -200,6 +201,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
       )}
       {diagrams.isError && <span className="error">{diagrams.error.message}</span>}
       <span className="toolbar-sep" />
+      <LensSwitch />
       <button
         style={NOWRAP}
         onClick={() => useGraphStore.getState().setMineDialog(true)}

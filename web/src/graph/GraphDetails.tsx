@@ -13,6 +13,7 @@ import { EdgeFilterBoxes, EdgeFrom, EdgeLegend } from './EdgeFamilies'
 import { fmtAge, fmtTime, lastPart } from './format'
 import { NeighborDetails } from './NeighborDetails'
 import { NodeMarkDetails } from './NodeMarkDetails'
+import { NodeRole } from './LensSwitch'
 import { useGraphStore } from './graphStore'
 import { canReview, patchIds } from './relationships'
 import { TraceButtons, TraceDetails } from './ColumnTrace'
@@ -185,6 +186,7 @@ function NodeDetails({ id, node }: { id: string; node: FlowNode }) {
       </div>
       <div className="hint">cached {payload.fetched_at}</div>
       <NodeMarkDetails data={node.data} />
+      <NodeRole id={id} />
       <NeighborDetails id={id} />
       <p>{str(t.comment)}</p>
       <NodeFactsDetails id={id} />

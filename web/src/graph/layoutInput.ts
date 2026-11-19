@@ -1,7 +1,7 @@
 // What the layout reads from the Graph's state: node sizes, the column rows each node draws, and the visible edges. Pure.
 import { rowsOf } from './columns'
 import { collapseGraph, NO_GROUPING, type Grouping } from './collapse'
-import { deriveFlow, nodeSize, viaMap } from './derive'
+import { deriveFlow, edgeShown, nodeSize, viaMap } from './derive'
 import type { LayoutEdge, LayoutNode } from './layout'
 import type { EdgeFilters, FlowEdge, FlowNode } from './types'
 
@@ -37,6 +37,7 @@ export function layoutInput(s: LayoutState, placed: ReadonlySet<string>): { node
       focus: n.data.focus || !!n.data.pinned,
       x: n.position.x,
       y: n.position.y,
+      ...(drawnById.get(n.id)?.hidden && { hidden: true }),
       ...(rows.length > 0 && { rows: rows.map((r) => r.name), moreRow: !!data.allColumns || rows.length < (data.columns?.length ?? 0) }),
       ...(placed.has(n.id) && { placed: true }),
       ...(view.boxOf.has(n.id) && { group: view.boxOf.get(n.id) }),
@@ -49,7 +50,7 @@ export function layoutInput(s: LayoutState, placed: ReadonlySet<string>): { node
       // A column edge counts when both its rows are drawn (deriveFlow hides it otherwise).
       return e.hidden ? [] : [{ source: e.source, target: e.target, kind: info.kind, sourceColumn: info.source_column, targetColumn: info.target_column }]
     }
-    return [{ source: e.source, target: e.target, kind: info.kind }]
+    return [{ source: e.source, target: e.target, kind: info.kind, ...(!edgeShown(info, s.filters) && { hidden: true }) }]
   })
   return { nodes, links }
 }

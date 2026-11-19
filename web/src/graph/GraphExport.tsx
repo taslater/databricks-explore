@@ -50,6 +50,7 @@ function ExportDialog({ onClose }: { onClose: () => void }) {
   const focusSchema = useGraphStore((s) => s.focusSchema)
   const filters = useGraphStore((s) => s.filters)
   const openName = useGraphStore((s) => s.openDiagram?.name)
+  const lens = useGraphStore((s) => s.lens)
   const [title, setTitle] = useState(openName ?? 'Graph')
   const [caption, setCaption] = useState('')
   const [scope, setScope] = useState<PictureScope>('graph')
@@ -162,12 +163,18 @@ function ExportDialog({ onClose }: { onClose: () => void }) {
           <button disabled={busy} onClick={() => void copyImage()}>
             Copy image
           </button>
-          <button disabled={busy} onClick={() => void copyMermaid('flow')} title="data flows left to right; GitHub renders it">
-            Copy Mermaid flowchart
-          </button>
-          <button disabled={busy} onClick={() => void copyMermaid('model')} title="key references as an erDiagram, with crow's-foot ends and key columns">
-            Copy Mermaid ER
-          </button>
+          {/* The lens decides which comes first: the flowchart for Flow and All, the ER diagram for Model. */}
+          {(lens === 'model' ? (['model', 'flow'] as const) : (['flow', 'model'] as const)).map((l, i) => (
+            <button
+              key={l}
+              disabled={busy}
+              className={i === 0 ? 'app-dialog-primary' : undefined}
+              onClick={() => void copyMermaid(l)}
+              title={l === 'flow' ? 'data flows left to right; GitHub renders it' : "key references as an erDiagram, with crow's-foot ends and key columns"}
+            >
+              {l === 'flow' ? 'Copy Mermaid flowchart' : 'Copy Mermaid ER'}
+            </button>
+          ))}
         </div>
         {note && (
           <p className={note.error ? 'error' : 'hint'} role={note.error ? 'alert' : 'status'}>

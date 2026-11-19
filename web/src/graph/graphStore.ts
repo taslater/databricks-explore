@@ -1,7 +1,7 @@
 // Client state for the relationship graph. Server data is in TanStack Query. This store holds only what the user has built on screen.
 import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange } from '@xyflow/react'
 import { create } from 'zustand'
-import type { GraphEdge, GraphNode, RelationsResponse } from '../api/types'
+import type { GraphEdge, GraphEdgeKind, GraphNode, RelationsResponse } from '../api/types'
 import type { ColumnInfo } from './columns'
 import { nameOf, schemaOf } from './format'
 import { computeLayout, computeScopedLayout } from './layout'
@@ -10,6 +10,8 @@ import type { NeighborSet } from './neighbors'
 import type { ColorBy } from './colorBy'
 import { collapseGraph, DEFAULT_GROUPING, groupingSignature, type GroupBy, type Grouping } from './collapse'
 import type { DiagramPayload } from './diagram'
+import { DEFAULT_LENS, LENS_COLUMNS, presetFilters, type Lens, type LensPositions } from './lens'
+import { familyOf } from './edgeStyles'
 import type { DiagramRevision } from '../api/diagrams'
 import type { EdgeFilters, FlowEdge, FlowNode, Selection } from './types'
 
@@ -66,6 +68,20 @@ interface GraphState {
   layoutFresh: boolean
   /** Fit the view on the next render where every visible node has been measured. */
   fitPending: boolean
+  /** The question the graph answers: Flow, Model or All. A preset for the edge filters, the column level and the layout. Saved with the graph as `lens`. */
+  lens: Lens
+  /** The top-left positions of the tables in each lens that is not showing, kept so switching back puts them where they were. Saved with the graph as `lens_positions`. */
+  lensPositions: LensPositions
+  /** The column level the lens just switched to wants on every table; the lens switch carries it out and clears it. Never saved. */
+  columnsRequest: 'off' | 'keys' | null
+  /** Layout requests are ignored while a lens switch loads columns, so the positions it brought back stay. Never saved. */
+  lensHold: boolean
+  /** Shows another lens: its edge filters, its column level and its own positions (laid out when it has none for these tables). */
+  setLens: (lens: Lens) => void
+  /** Puts the edge filters back to the lens's own. */
+  resetLens: () => void
+  /** The lens switch has set the column level it was asked for. */
+  finishLensColumns: () => void
   /** How the nodes are grouped, which groups are collapsed, and whether chains of pass-through views are drawn as one edge. Saved with the graph as `grouping`. */
   grouping: Grouping
   /** Where each collapsed group's node sits (by group key). Never saved. */
@@ -169,6 +185,36 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   grouping: DEFAULT_GROUPING,
   groupPositions: {},
   groupTags: {},
+  lens: DEFAULT_LENS,
+  lensPositions: {},
+  columnsRequest: null,
+  lensHold: false,
+  setLens: (lens) => {
+    const s = get()
+    if (lens === s.lens) return
+    // The positions of the lens that was showing wait; the new lens takes back its own, for the tables that have one.
+    const waiting: LensPositions = { ...s.lensPositions, [s.lens]: Object.fromEntries(s.nodes.map((n) => [n.id, { ...n.position }])) }
+    const saved = waiting[lens] ?? {}
+    delete waiting[lens]
+    const known = s.nodes.filter((n) => saved[n.id]).map((n) => n.id)
+    const missing = s.nodes.filter((n) => !saved[n.id]).map((n) => n.id)
+    for (const id of known) placedIds.add(id)
+    set({
+      lens,
+      lensPositions: waiting,
+      filters: { ...s.filters, ...presetFilters(lens) },
+      nodes: s.nodes.map((n) => (saved[n.id] ? { ...n, position: { ...saved[n.id] } } : n)),
+      columnsRequest: LENS_COLUMNS[lens],
+      lensHold: known.length > 0 && missing.length === 0,
+      fitPending: true,
+      layoutPending: known.length === 0 || missing.length > 0,
+      // Tables the lens has no place for: the Model lens lays everything out again, the others only the parts those tables are in.
+      layoutFresh: known.length === 0 || (lens === 'model' && missing.length > 0),
+      layoutScope: known.length > 0 && lens !== 'model' && missing.length > 0 ? missing : null,
+    })
+  },
+  resetLens: () => set((s) => ({ filters: { ...s.filters, ...presetFilters(s.lens) } })),
+  finishLensColumns: () => set({ columnsRequest: null, lensHold: false }),
   setGroupBy: (by) => set((s) => ({ grouping: { ...s.grouping, by, overrides: {} }, ...RELAYOUT })),
   setGroupCollapsed: (key, collapsed) =>
     set((s) => {
@@ -333,17 +379,26 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       grouping: DEFAULT_GROUPING,
       groupPositions: {},
       groupTags: {},
+      lens: DEFAULT_LENS,
+      lensPositions: {},
+      columnsRequest: null,
+      lensHold: false,
+      ...(get().lens !== DEFAULT_LENS ? { filters: { ...get().filters, ...presetFilters(DEFAULT_LENS) } } : {}),
       openDiagram: null,
       diagramChanged: null,
     })
   },
 
   requestLayout: (scope) =>
-    set((s) => ({
-      layoutPending: true,
-      layoutFresh: s.layoutFresh || !scope,
-      layoutScope: scope && (!s.layoutPending || s.layoutScope) ? [...(s.layoutScope ?? []), ...scope] : null,
-    })),
+    set((s) =>
+      s.lensHold
+        ? {}
+        : {
+            layoutPending: true,
+            layoutFresh: s.layoutFresh || !scope,
+            layoutScope: scope && (!s.layoutPending || s.layoutScope) ? [...(s.layoutScope ?? []), ...scope] : null,
+          },
+    ),
   requestLayoutSoon: (scope) => void setTimeout(() => useGraphStore.getState().requestLayout(scope), 250),
 
   runLayout: async () => {
@@ -357,8 +412,12 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       const stamp = (g: typeof s) => g.nodes.map((n) => n.id).join('|') + '#' + groupingSignature(g.grouping) + g.grouping.shownChains.join()
       const scope = s.layoutScope
       // A level change only moves the parts of the graph it touches, and leaves the view where it is, unless they would then overlap.
-      const scoped = scope ? await computeScopedLayout(laid, links, scope) : null
-      const positions = scoped ?? (await computeLayout(laid, links))
+      // The Model lens lays out only the tables a reference edge shows, by its own rules (graph/modelLayout.ts).
+      const model = s.lens === 'model' ? ({ lens: 'model' } as const) : undefined
+      const layNodes = model ? laid.filter((n) => !n.hidden) : laid
+      const layLinks = model ? links.filter((l) => !l.hidden && familyOf(l.kind as GraphEdgeKind) === 'reference') : links
+      const scoped = scope ? await computeScopedLayout(layNodes, layLinks, scope, model) : null
+      const positions = scoped ?? (await computeLayout(layNodes, layLinks, model))
       for (const id of positions.keys()) placedIds.add(id)
       set((now) => {
         // Nodes added or a new scope requested while this ran: the positions still apply, and another layout follows.
@@ -385,7 +444,16 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   loadDiagram: (payload) => {
     placedIds.clear()
     for (const n of payload.nodes) placedIds.add(n.id)
+    // A graph saved in a lens opens in it: the lens's filters, and its column level once the lens switch has set it. Positions kept from before stay.
+    const lens = payload.lens ?? DEFAULT_LENS
+    const lensChanged = lens !== get().lens
+    const columnsRequest = lens === DEFAULT_LENS && !lensChanged ? null : LENS_COLUMNS[lens]
     set({
+      lens,
+      lensPositions: payload.lensPositions ?? {},
+      ...(lens !== DEFAULT_LENS || lensChanged ? { filters: { ...get().filters, ...presetFilters(lens) } } : {}),
+      columnsRequest,
+      lensHold: columnsRequest !== null,
       nodes: payload.nodes,
       edges: payload.edges,
       columnEdges: [],

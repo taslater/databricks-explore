@@ -7,6 +7,7 @@ from .. import column_trace
 from .. import dbx
 from .. import graph_collapse
 from .. import graph_export
+from .. import graph_lens
 from .. import graphs
 from ..edge_families import family_of
 from .. import nodefacts
@@ -22,6 +23,7 @@ GRAPH_KINDS = ("fk", "view_dep", "lineage", "join_mined", "manual", "sketch")  #
 SHOWN = ("derived", "accepted")  # the Graph's default filters hide rejected edges; proposed joins wait for a review
 NAME = {"type": "string", "minLength": 1, "description": "graph name, as typed (Returns graph) or as stored (Returns_graph)"}
 TABLES = strings("full table names, catalog.schema.table")
+LENS = {"type": "string", "enum": list(graph_lens.LENSES), "description": "the question the graph answers: all (the whole graph, the default), flow (where data comes from: flow edges, left to right, no columns) or model (how tables join: key references with crow's feet, key columns, facts in a middle row and dimensions above and below). Each lens keeps its own positions; a table's fact or dimension role is inferred, never stored."}
 COLOR_BY = {"type": "string", "description": "what the node fill means: type (default), schema, catalog, owner, certification, freshness, or tag:<key> (for example tag:domain). Color by tag shows a table's value once the page has read its tags."}
 
 
@@ -143,7 +145,7 @@ def list_graphs(ctx, args):
     return text("\n".join(lines))
 
 
-@tool("get_graph", "Read a graph saved from the Graph tab: its tables (kind, focus, and, when known, grain with its basis, rows, bytes, last_write and late from the cached size and history reads) and edges (kind, family: flow, reference or meaning, source, target, status, join columns, and for a reference edge its crow's-foot cardinality: the end at each table that is known, with its basis; for a flow edge its transform when the SQL behind it is known: the aggregate, join, union, dedupe and filters its source goes through), the groups the Graph draws (by schema or tag: table count, collapsed or open) and the chains of pass-through views it draws as one edge. The name may be typed (Returns graph) or stored (Returns_graph). json gives every field, with positions.",
+@tool("get_graph", "Read a graph saved from the Graph tab: its tables (kind, focus, and, when known, grain with its basis, rows, bytes, last_write and late from the cached size and history reads) and edges (kind, family: flow, reference or meaning, source, target, status, join columns, and for a reference edge its crow's-foot cardinality: the end at each table that is known, with its basis; for a flow edge its transform when the SQL behind it is known: the aggregate, join, union, dedupe and filters its source goes through), the groups the Graph draws (by schema or tag: table count, collapsed or open) and the chains of pass-through views it draws as one edge. Also the graph's lens (all, flow or model) and each table's inferred role (fact or dimension, with the reason in json). The name may be typed (Returns graph) or stored (Returns_graph). json gives every field, with positions.",
       obj({"name": NAME, "format": {"type": "string", "enum": ["text", "json"], "description": "text (default, compact) or json"}}, ("name",)))
 def get_graph(ctx, args):
     data = _run(graphs.load_graph, args["name"])
@@ -155,13 +157,15 @@ def get_graph(ctx, args):
     how = _transforms(ctx, edges)
     grouping = graph_collapse.grouping_of(data)
     shape = graph_collapse.plan(nodes, edges, grouping, _group_tags(ctx, grouping, [n["id"] for n in nodes]))
+    role = graph_lens.roles([n["id"] for n in nodes], edges)
+    lens = graph_lens.lens_of(data)
     if args.get("format") == "json":
         return text(json.dumps({
             "name": info["name"], "title": data.get("name"), "revision": info["revision"], "by": info["by"], "saved_at": data.get("saved_at"),
-            "focus_schema": data.get("focus_schema"), "color_by": data.get("color_by") or "type",
+            "focus_schema": data.get("focus_schema"), "color_by": data.get("color_by") or "type", "lens": lens,
             "grouping": {"by": shape["by"], "chains": shape["chains_on"]}, "groups": shape["groups"], "chains": shape["chains"],
             "nodes": [{"table": n["id"], "kind": n.get("kind", "table"), **({"focus": True} if n.get("focus") else {}),
-                       **({"pinned": True} if n.get("pinned") else {}), **_facts_json(card.get(n["id"], {})), "x": (pos.get(n["id"]) or {}).get("x"), "y": (pos.get(n["id"]) or {}).get("y")}
+                       **({"pinned": True} if n.get("pinned") else {}), **({"role": {"role": role[n["id"]]["role"], "reason": role[n["id"]]["reason"]}} if n["id"] in role else {}), **_facts_json(card.get(n["id"], {})), "x": (pos.get(n["id"]) or {}).get("x"), "y": (pos.get(n["id"]) or {}).get("y")}
                       for n in nodes],
             "edges": [{k: v for k, v in {"id": e.get("id"), "kind": e.get("kind"), "source": e.get("source"), "target": e.get("target"),
                                          "family": family_of(e.get("kind")), "cardinality": ends.get(e.get("id")), "transform": how.get((e.get("source"), e.get("target"))), "status": e.get("status"), "directed": e.get("directed"), "bidir": e.get("bidir") or None,
@@ -170,9 +174,9 @@ def get_graph(ctx, args):
             separators=(",", ":")))
     head = (f"{info['name']}: {len(nodes)} tables, {len(edges)} edges, revision {info['revision']}" + (f" ({info['by']})" if info["by"] else "")
             + f", saved {data.get('saved_at')}")
-    lines = [head, f"focus schema: {data.get('focus_schema') or 'none'}. Color by: {data.get('color_by') or 'type'}. Graph filters are not saved with a graph: the page's defaults apply on load.", "Tables:"]
+    lines = [head, f"focus schema: {data.get('focus_schema') or 'none'}. Lens: {lens}. Color by: {data.get('color_by') or 'type'}. Graph filters are not saved with a graph: the page's defaults apply on load.", "Tables:"]
     for n in nodes:
-        lines.append(f"  {n['id']} [{n.get('kind', 'table')}]" + (" focus" if n.get("focus") else "") + (" pinned" if n.get("pinned") else "") + _facts_text(card.get(n["id"], {})))
+        lines.append(f"  {n['id']} [{n.get('kind', 'table')}]" + (" focus" if n.get("focus") else "") + (" pinned" if n.get("pinned") else "") + (f" {role[n['id']]['role']}" if n["id"] in role else "") + _facts_text(card.get(n["id"], {})))
     lines.extend(graph_collapse.text_lines(shape))
     lines.append("Edges:" if edges else "Edges: none")
     for e in edges:
@@ -260,7 +264,7 @@ def _result(verb: str, stem: str, rev: int, tables: list[str], edges: list[dict]
 @tool("create_graph", "Save a new graph from tables: a node for each table and an edge for each relationship the app knows between them (foreign keys, view dependencies, lineage, accepted or manual joins; rejected and proposed ones are left out, as in the Graph tab), laid out left to right. You name tables, not edges or positions. Fails if the name is taken. Needs a connected profile. Use the lineage tool to find a path's tables first.",
       obj({"name": {**NAME, "description": "graph name (letters, digits, _ . - ; other characters become _)"}, "tables": {**TABLES, "minItems": 1, "maxItems": MAX_TABLES},
            "focus": {"type": "string", "description": "one of the tables: the focus (the Graph's starting object); its schema is the focus schema"},
-           "color_by": COLOR_BY}, ("name", "tables")), read_only=False)
+           "color_by": COLOR_BY, "lens": LENS}, ("name", "tables")), read_only=False)
 def create_graph(ctx, args):
     ctx.need_explorer()
     stem = _run(graphs.stem_of, args["name"])
@@ -276,7 +280,7 @@ def create_graph(ctx, args):
             raise ToolError(f"focus {args['focus']!r} is not one of the tables")
     edges, facts, notes = derive(ctx, tables)
     nodes = [{**facts[t], "focus": t == focus} for t in tables]
-    body = _run(graphs.build_body, args["name"].strip(), nodes, edges, color_by=args.get("color_by"))
+    body = _run(graphs.build_body, args["name"].strip(), nodes, edges, color_by=args.get("color_by"), lens=args.get("lens"))
     with graphs.LOCK:
         stem, rev = _run(graphs.write_graph, body, "agent", None, True)
     return text(_result("created", stem, rev, tables, edges, notes))
@@ -284,12 +288,12 @@ def create_graph(ctx, args):
 
 @tool("update_graph", "Add or remove tables on a saved graph. Edges are derived again for the new set of tables, as in create_graph. Tables already on the graph keep their positions unless relayout is true; added tables are placed clear of them. Needs a connected profile.",
       obj({"name": NAME, "add": {**TABLES, "description": "tables to add"}, "remove": {**TABLES, "description": "tables to remove (with their edges)"},
-           "relayout": {**B, "description": "lay every table out again (default false)"}, "color_by": COLOR_BY}, ("name",)), read_only=False)
+           "relayout": {**B, "description": "lay every table out again (default false)"}, "color_by": COLOR_BY, "lens": LENS}, ("name",)), read_only=False)
 def update_graph(ctx, args):
     ctx.need_explorer()
     add, remove = args.get("add") or [], args.get("remove") or []
-    if not add and not remove and not args.get("relayout") and not args.get("color_by"):
-        raise ToolError("nothing to do: give add, remove, relayout or color_by")
+    if not add and not remove and not args.get("relayout") and not args.get("color_by") and not args.get("lens"):
+        raise ToolError("nothing to do: give add, remove, relayout, color_by or lens")
     with graphs.LOCK:
         data = _run(graphs.load_graph, args["name"])
         stem = _run(graphs.resolve, args["name"])
@@ -310,9 +314,9 @@ def update_graph(ctx, args):
         focus = {n["id"] for n in old if n.get("focus")}
         nodes = [{**facts[t], "focus": t in focus} for t in tables]
         body = _run(graphs.build_body, data.get("name") or stem, nodes, edges, previous=data, relayout=bool(args.get("relayout")),
-                    color_by=args.get("color_by") or data.get("color_by"))
+                    color_by=args.get("color_by") or data.get("color_by"), lens=args.get("lens"))
         stem, rev = _run(graphs.write_graph, body, "agent")
-    changes = [f"added {len(new)}" if new else "", f"removed {len(gone)}" if gone else "", "laid out again" if args.get("relayout") else "", f"colored by {args['color_by']}" if args.get("color_by") else ""]
+    changes = [f"added {len(new)}" if new else "", f"removed {len(gone)}" if gone else "", "laid out again" if args.get("relayout") else "", f"colored by {args['color_by']}" if args.get("color_by") else "", f"lens {args['lens']}" if args.get("lens") else ""]
     return text(_result("updated", stem, rev, tables, edges, [", ".join(c for c in changes if c) + ".", *notes]))
 
 
@@ -379,21 +383,24 @@ def delete_graph(ctx, args):
 
 # ---------------------------------------------------------------- export
 
-@tool("export_graph", "Export a saved graph for a pull request, wiki or README. format mermaid returns text GitHub renders: lens flow (default) is a flowchart of the data flows (reference edges as plain lines), lens model an erDiagram of the key references with crow's-foot ends where known and key columns. format png returns a picture with the title, a legend of only what is drawn, and the date the facts were read (oldest cached read, else today). Uses the cache only; never reads the workspace. The name may be typed or stored.",
+@tool("export_graph", "Export a saved graph for a pull request, wiki or README. format mermaid returns text GitHub renders: lens flow (default; model for a graph saved with the model lens) is a flowchart of the data flows (reference edges as plain lines), lens model an erDiagram of the key references with crow's-foot ends where known and key columns. format png returns a picture with the title, a legend of only what is drawn, and the date the facts were read (oldest cached read, else today). Uses the cache only; never reads the workspace. The name may be typed or stored.",
       obj({"name": NAME, "format": {"type": "string", "enum": ["mermaid", "png"], "description": "mermaid (default) or png"},
-           "lens": {"type": "string", "enum": list(graph_export.LENSES), "description": "flow (default) or model"},
+           "lens": {"type": "string", "enum": list(graph_export.LENSES), "description": "flow or model; default the graph's own lens (model for a model graph, else flow)"},
            "title": {"type": "string", "description": "png title (default: the graph's name)"}, "caption": {"type": "string", "description": "png: one line under the title"},
            "width": integer(400, 4000, "png: the widest the picture may be, in pixels (default 1200); a smaller picture is not stretched")}, ("name",)))
 def export_graph(ctx, args):
     data = _run(graphs.load_graph, args["name"])
     info = _run(graphs.revision_info, args["name"])
-    lens = args.get("lens") or "flow"
+    saved = graph_lens.lens_of(data)
+    lens = args.get("lens") or ("model" if saved == "model" else "flow")
     if lens not in graph_export.LENSES:
         raise ToolError("lens: expected flow or model")
     fmt = args.get("format") or "mermaid"
     if fmt not in ("mermaid", "png"):
         raise ToolError("format: expected mermaid or png")
     pos = {n["data"]["id"]: n.get("position") or {} for n in data.get("nodes") or [] if isinstance(n, dict) and isinstance(n.get("data"), dict) and n["data"].get("id")}
+    if lens != saved and isinstance(data.get("lens_positions"), dict):  # a lens that was shown before keeps its own positions
+        pos.update({i: p for i, p in (data["lens_positions"].get(lens) or {}).items() if i in pos})
     nodes = [{"id": n["id"], "kind": n.get("kind"), "x": pos[n["id"]].get("x", 0), "y": pos[n["id"]].get("y", 0)} for n in _nodes_of(data)]
     edges = _edges_of(data)
     ex = ctx.explorer()
