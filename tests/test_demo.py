@@ -33,7 +33,7 @@ def test_fake_profile_and_warehouses(client):
 
 
 def test_catalogs_schemas_objects_and_columns(client):
-    assert [c["name"] for c in client.get("/api/catalogs").json["data"]] == ["demo", "samples"]
+    assert [c["name"] for c in client.get("/api/catalogs").json["data"]] == ["demo", "demo_lake", "samples"]
     assert [s["name"] for s in client.get("/api/schemas?catalog=demo").json["data"]] == ["hr", "metrics", "sales"]
     objs = client.get("/api/objects?catalog=demo&schema=sales").json["data"]
     assert {o["name"]: o["type"] for o in objs}["v_daily_revenue"] == "VIEW"
