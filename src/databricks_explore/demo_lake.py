@@ -4,7 +4,8 @@ About 30 objects in three schemas. bronze: raw tables loaded from files (file up
 silver: CTAS, INSERT and MERGE tables, one written by a notebook with no SQL, and a chain of two pass-through views.
 gold: a fact at order_id x line_no with foreign keys to four dimensions (one FK column nullable, one key composite, one
 reference with orphans), a self-referencing dimension, a daily aggregate materialized view, a metric view, and a column
-fed by a PII column that is not tagged. Owners are split across two groups.
+fed by a PII column that is not tagged. Lineage still names one edge that no longer holds (SUPERSEDED_EDGES) and one dropped
+table (DROPPED). Owners are split across two groups.
 
 Everything is invented, deterministic and generated here. Times are anchored to the current UTC hour, so which table is
 late never changes. This module is plain data and small helpers: it imports nothing from demo.py (demo.py and
@@ -408,6 +409,11 @@ SOURCES = {
     "gold.session_funnel": ["silver.sessions"],
 }
 LINEAGE_EDGES = [(f"{LAKE}.{s}", f"{LAKE}.{t}") for t, srcs in SOURCES.items() for s in srcs]
+# Edges the REST lineage API still returns that no longer hold (#19): v_orders_current once read silver.orders directly,
+# before it was repointed at v_orders, so its view dependencies no longer name silver.orders.
+SUPERSEDED_EDGES = [(f"{LAKE}.silver.orders", f"{LAKE}.silver.v_orders_current")]
+# Objects lineage still names that were dropped (#20): (existing table, direction, dropped table). tables.get says not found.
+DROPPED = [(f"{LAKE}.silver.sessions", "downstreams", f"{LAKE}.silver.sessions_v1")]
 
 
 def _writer_info(kind, ident, when):
@@ -436,16 +442,24 @@ def lineage_items(full_name):
 
     def item(other_full, target_sh):
         c, s, n = other_full.split(".")
+        if target_sh not in SPEC:  # a view: lineage records who read it, not a writer
+            return {"tableInfo": {"catalog_name": c, "schema_name": s, "name": n, "table_type": TABLES[other_full][0],
+                                  "lineage_timestamp": fmt(anchor() - timedelta(days=3))}}
         when = _last_write(target_sh)
         key, info = _writer_info(*SPEC[target_sh]["writer"], when)
         return {"tableInfo": {"catalog_name": c, "schema_name": s, "name": n, "table_type": TABLES[other_full][0],
                               "lineage_timestamp": fmt(when)}, key: [info]}
 
-    for up, down in LINEAGE_EDGES:
+    for up, down in LINEAGE_EDGES + SUPERSEDED_EDGES:
         if down == full_name:
             ups.append(item(up, sh))
         if up == full_name:
             downs.append(item(down, short(down)))
+    for table, direction, gone in DROPPED:
+        if table == full_name:
+            c, s, n = gone.split(".")
+            (ups if direction == "upstreams" else downs).append({"tableInfo": {
+                "catalog_name": c, "schema_name": s, "name": n, "table_type": "TABLE", "lineage_timestamp": fmt(_last_write(sh) - timedelta(days=30))}})
     for ident in READERS.get(sh, []):  # a dashboard that reads the table, with no table built from it
         downs.append({"dashboardV3Infos": [{"dashboard_id": ident, "workspace_id": WORKSPACE_ID, "lineage_timestamp": fmt(_last_write(sh))}]})
     if sh in FILES:

@@ -20,6 +20,10 @@ the version is `__version__` in `src/databricks_explore/__init__.py` and nowhere
 - `uv run databricks-explore --demo --no-browser` runs the app on invented data (`--port N` to pick a port;
   `--data-dir DIR` keeps the files somewhere disposable).
 - `uv run pytest -q` runs the Python tests. `cd web && npm test` runs the web tests.
+- `cd web && npm run e2e` builds the UI and runs the Playwright scenarios (`web/e2e`, Chromium, demo mode on a free port and a
+  temporary data folder). Once per machine: `npx playwright install chromium`. `npx playwright test e2e/graph-groups.spec.ts`
+  reruns one file without rebuilding. A UI change adds or updates a scenario; add a `data-testid` only where role, label or
+  text would be brittle. CI runs it as the `e2e` job and uploads the report when it fails.
 - `uv build` makes the wheel and sdist in `dist/`; `python scripts/check_dist.py dist` checks them.
 - `uv run --with mcp scripts/mcp_interop.py` checks the MCP server with the official SDK client.
 
