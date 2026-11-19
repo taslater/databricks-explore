@@ -952,3 +952,71 @@ def edge_transform(analysis: dict, source: str) -> dict | None:
                "dedupe": facts["dedupe"] or facts["distinct"], "filter": facts["filters"]}
     return {**facts, "window": facts["window"] and not facts["dedupe"], "glyphs": [g for g in GLYPH_ORDER if present[g]][:2],
             "statement": analysis["statement"]}
+
+
+# ---------- how each output column is made ----------
+
+def _top_select(tree: exp.Expression) -> exp.Select | None:
+    """The SELECT whose list names a statement's output columns: a query, CREATE/INSERT ... AS, or a MERGE's USING query."""
+    if isinstance(tree, exp.Merge):
+        query = tree.args.get("using")
+    elif isinstance(tree, (exp.Create, exp.Insert)):
+        query = tree.expression
+    else:
+        query = tree
+    query = _unwrap_query(query)
+    while isinstance(query, exp.SetOperation):  # a union names its columns by its first branch
+        query = _unwrap_query(query.this)
+    return query if isinstance(query, exp.Select) else None
+
+
+def _aggregate_in(node: exp.Expression) -> exp.Expression | None:
+    """The first aggregate function in an expression that is not inside a window function."""
+    for found in node.find_all(exp.AggFunc):
+        if found.find_ancestor(exp.Window) is None:
+            return found
+    return None
+
+
+def _expression_class(node: exp.Expression) -> dict:
+    """{"class", "agg"} of one select expression: ref (a column), agg, cast, case or func."""
+    if isinstance(node, exp.Paren):
+        node = node.this
+    if isinstance(node, exp.Column):
+        return {"class": "ref", "agg": None}
+    agg = _aggregate_in(node)
+    if agg is not None:
+        return {"class": "agg", "agg": agg.key.lower() if agg.key else "agg"}
+    if isinstance(node, (exp.Cast, exp.TryCast)):
+        return {"class": "cast", "agg": None}
+    if isinstance(node, (exp.Case, exp.If)):
+        return {"class": "case", "agg": None}
+    return {"class": "func", "agg": None}
+
+
+def column_expressions(sql: str, default_catalog: str | None = None, default_schema: str | None = None,
+                       known: Iterable[str] | None = None) -> dict[str, dict]:
+    """How each output column of a statement's query is made: {column name (lowercase): {"class", "agg", "sql"}}.
+
+    The statement is a SELECT (a view's definition), CREATE ... AS SELECT, INSERT ... SELECT or MERGE (its USING query);
+    the first one with a query is used. class is ref (a column read as it is, possibly renamed), agg (an aggregate
+    function, "agg" names it), cast, case, or func (any other function or expression); sql is the expression, cut when
+    long. A `*` names no column. Empty when the statement has no query. Raises ValueError when the SQL does not parse."""
+    try:
+        for tree in sqlglot.parse(sql, read=_DIALECT):
+            select = _top_select(tree) if tree is not None else None
+            if select is None:
+                continue
+            out: dict[str, dict] = {}
+            for item in select.expressions:
+                inner = item.this if isinstance(item, exp.Alias) else item
+                name = item.alias_or_name
+                if not name or isinstance(inner, exp.Star) or (isinstance(inner, exp.Column) and isinstance(inner.this, exp.Star)):
+                    continue
+                out.setdefault(name.lower(), {**_expression_class(inner), "sql": _short_sql(inner)})
+            return out
+        return {}
+    except sqlglot.errors.SqlglotError as e:
+        raise ValueError(f"cannot parse SQL: {e}") from e
+    except RecursionError as e:
+        raise ValueError("cannot parse SQL: nested too deeply") from e

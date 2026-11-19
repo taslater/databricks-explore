@@ -31,6 +31,7 @@ CATALOGS = {LAKE: "Invented lakehouse: raw files to a star schema"}
 OWNERS = {"bronze": "data-engineering", "silver": "data-engineering", "gold": "analytics"}
 OWNER_OVERRIDES = {"silver.customers": "analytics", "gold.session_funnel": "data-engineering"}
 JOBS = {"2001": "ingest_landing_files", "3001": "silver_refresh", "4001": "gold_build"}
+READERS = {"gold.daily_revenue": ["d-revenue-0001"], "gold.fact_returns": ["d-returns-0002"]}  # tables read by dashboards
 NOTEBOOKS = {"7001": "merge_customers", "7002": "refresh_returns"}
 PIPELINES = {"pl-clicks-0001": "clickstream_to_silver", "pl-gold-0002": "gold_revenue_mv"}
 PRINCIPALS = {"job": "svc-lakehouse@example.invalid", "notebook": "dev.p@example.invalid",
@@ -445,6 +446,8 @@ def lineage_items(full_name):
             ups.append(item(up, sh))
         if up == full_name:
             downs.append(item(down, short(down)))
+    for ident in READERS.get(sh, []):  # a dashboard that reads the table, with no table built from it
+        downs.append({"dashboardV3Infos": [{"dashboard_id": ident, "workspace_id": WORKSPACE_ID, "lineage_timestamp": fmt(_last_write(sh))}]})
     if sh in FILES:
         when = _last_write(sh)
         key, info = _writer_info(*SPEC[sh]["writer"], when)
