@@ -25,10 +25,10 @@ def test_a_graph_saved_from_the_ui_is_found_by_list_graphs_and_read_by_get_graph
     assert "named 'Returns graph'" in out[1]
     for name in ("Returns graph", "Returns_graph"):
         text = agent.ok("get_graph", name=name)
-        assert f"{ORDERS} [managed] focus" in text and f"{ORDERS} -> {CUSTOMERS}  fk derived (customer_id)" in text
+        assert f"{ORDERS} [managed] focus" in text and f"{ORDERS} -> {CUSTOMERS}  fk (reference) derived (customer_id)" in text
     j = graph_json(agent, "Returns graph")
     assert j["focus_schema"] == "demo.sales" and j["nodes"][0] == {"table": ORDERS, "kind": "managed", "focus": True, "x": 0, "y": 0}
-    assert j["edges"][0]["columns"] == ["customer_id"]
+    assert j["edges"][0]["columns"] == ["customer_id"] and j["edges"][0]["family"] == "reference"
     assert "not found" in agent.fails("get_graph", name="nope")
 
 
@@ -156,3 +156,14 @@ def test_get_graph_has_the_grain_and_the_cached_size_and_freshness_of_each_table
     assert "grain" not in metrics and "rows" not in metrics
     text = agent.ok("get_graph", name="lake")
     assert "per order_id, 12,100,000 rows" in text and "late)" in text
+
+
+def test_get_graph_reports_the_crows_foot_ends_of_reference_edges_and_nothing_for_flow(agent):
+    agent.ok("create_graph", name="Ends", tables=[ITEMS, ORDERS, CUSTOMERS, VIEW])
+    j = graph_json(agent, "Ends")
+    by = {(e["kind"], e["source"], e["target"]): e for e in j["edges"]}
+    fk = by[("fk", ITEMS, ORDERS)]["cardinality"]
+    assert fk["source"]["end"] == "zero_many" and fk["target"]["end"] in ("one", "zero_one") and "sentence" in fk
+    assert "cardinality" not in by[("view_dep", ORDERS, VIEW)]  # only reference edges have ends
+    text = agent.ok("get_graph", name="Ends")
+    assert f"{ITEMS} -> {ORDERS}  fk (reference) derived (order_id) [order_items o<, orders " in text

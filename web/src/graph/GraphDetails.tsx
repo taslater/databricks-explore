@@ -5,7 +5,9 @@ import { formatConstraints } from './constraints'
 import { keyDetail, rankKeys } from '../canvas/linking/joinKeys'
 import type { EdgeFlow, GraphEdge, JoinKey, Producer, RelationshipStatus } from '../api/types'
 import { fetchCurrentEdge, messageOf, useGraphActions } from './actions'
-import { DERIVED_KINDS, KIND_LABEL, KIND_STYLE, STORED_KINDS } from './edgeStyles'
+import { KIND_LABEL } from './edgeStyles'
+import { EdgeCardinality } from './EdgeEnds'
+import { EdgeFilterBoxes, EdgeFrom, EdgeLegend } from './EdgeFamilies'
 import { fmtAge, fmtTime, lastPart } from './format'
 import { useGraphStore } from './graphStore'
 import { canReview, patchIds } from './relationships'
@@ -39,14 +41,7 @@ export function GraphDetails() {
   return (
     <div className="details">
       <section className="graph-controls">
-        <div className="legend-group">From Unity Catalog</div>
-        {DERIVED_KINDS.map((kind) => (
-          <KindFilter key={kind} kind={kind} />
-        ))}
-        <div className="legend-group">Stored</div>
-        {STORED_KINDS.map((kind) => (
-          <KindFilter key={kind} kind={kind} />
-        ))}
+        <EdgeFilterBoxes />
         <label className="check">
           <input
             type="checkbox"
@@ -63,7 +58,7 @@ export function GraphDetails() {
           />
           superseded edges (no longer hold)
         </label>
-        <p className="hint legend-note">Lighter lines are proposed, faint ones rejected. No arrowhead means undirected.</p>
+        <EdgeLegend />
         <div className="legend-kinds">
           <span className="k tbl">table</span> <span className="k view">view / MV</span>{' '}
           <span className="k st">streaming</span> <span className="k ext">other schema</span>{' '}
@@ -125,30 +120,6 @@ export function GraphDetails() {
         {selectedEdge && <EdgeDetails edge={selectedEdge} />}
       </div>
     </div>
-  )
-}
-
-/** A filter checkbox for one edge kind, with a sample of its line style as the legend. */
-function KindFilter({ kind }: { kind: GraphEdge['kind'] }) {
-  const checked = useGraphStore((s) => s.filters[kind])
-  const setFilter = useGraphStore((s) => s.setFilter)
-  const style = KIND_STYLE[kind]
-  return (
-    <label className="check kind-filter">
-      <input type="checkbox" checked={checked} onChange={(e) => setFilter(kind, e.target.checked)} />
-      <svg className="lg-line" width="34" height="8" aria-hidden="true">
-        <line
-          x1="1"
-          y1="4"
-          x2="33"
-          y2="4"
-          stroke={style.stroke}
-          strokeWidth={style.strokeWidth ?? 1.6}
-          strokeDasharray={style.strokeDasharray}
-        />
-      </svg>
-      {KIND_LABEL[kind]}
-    </label>
   )
 }
 
@@ -247,6 +218,8 @@ function EdgeDetails({ edge }: { edge: FlowEdge }) {
   return (
     <div>
       <EdgeBody info={info} />
+      <EdgeFrom info={info} />
+      <EdgeCardinality info={info} />
       <EdgeGrainDetails edge={edge} />
       <EdgeProvenance info={info} />
       <EdgeReview key={edge.id} info={info} />

@@ -157,7 +157,7 @@ describe('deriveFlow', () => {
       last_seen: '2020-01-01 00:00:00.0',
     })
     const out = deriveFlow({ nodes: [F, A], edges: [edge], focusSchema: S, filters: ALL_ON, hoverId: null })
-    expect(out.edges[0].type).toBe('lineage')
+    expect(out.edges[0].type).toBe('flow')
     expect(out.edges[0].hidden).toBe(false)
     expect(out.edges[0].data!.superseded).toBe(false)
   })

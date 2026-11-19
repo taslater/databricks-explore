@@ -161,7 +161,7 @@ describe('kinds in deriveFlow', () => {
     expect(out.nodes.find((n) => n.id === B)!.hidden).toBe(true)
     const on = deriveFlow({ ...base, edges: [manual('accepted')], filters: DEFAULT_FILTERS })
     expect(on.edges[0].hidden).toBe(false)
-    expect(on.edges[0].type).toBe('manual')
+    expect(on.edges[0].type).toBe('reference')
   })
 
   it('hides rejected edges unless asked for', () => {
@@ -170,11 +170,16 @@ describe('kinds in deriveFlow', () => {
     expect(deriveFlow({ ...base, edges, filters: { ...DEFAULT_FILTERS, showRejected: true } }).edges[0].hidden).toBe(false)
   })
 
-  it('draws no arrowheads on an undirected edge', () => {
-    const [und] = deriveFlow({ ...base, edges: [manual('accepted', { directed: false })], filters: DEFAULT_FILTERS }).edges
+  it('draws no arrowheads on an undirected edge, nor on a reference edge', () => {
+    const lineage = (extra: Partial<GraphEdge> = {}) => flowEdge({ id: 'l_1', source: A, target: B, kind: 'lineage', directed: true, status: 'derived', ...extra })
+    const filters = { ...DEFAULT_FILTERS }
+    const [und] = deriveFlow({ ...base, edges: [lineage({ directed: false })], filters }).edges
     expect(und.markerEnd).toBeUndefined()
-    const [dir] = deriveFlow({ ...base, edges: [manual('accepted')], filters: DEFAULT_FILTERS }).edges
+    const [dir] = deriveFlow({ ...base, edges: [lineage()], filters }).edges
     expect(dir.markerEnd).toBeDefined()
+    // A reference edge's ends come later (crow's feet), never an arrowhead.
+    const [ref] = deriveFlow({ ...base, edges: [manual('accepted')], filters }).edges
+    expect(ref.markerEnd).toBeUndefined()
   })
 
   it('treats an edge without a status (old diagram) as a normal derived edge', () => {
@@ -233,10 +238,11 @@ describe('graph store with relationships', () => {
     store.clear()
   })
 
-  it('has every kind on, and rejected and superseded edges off, by default', () => {
+  it('has every kind and the flow and reference families on, and meaning, rejected and superseded edges off, by default', () => {
     expect(DEFAULT_FILTERS.showRejected).toBe(false)
     expect(DEFAULT_FILTERS.showSuperseded).toBe(false)
-    expect(Object.entries(DEFAULT_FILTERS).filter(([k]) => !k.startsWith('show')).every(([, v]) => v)).toBe(true)
+    expect(DEFAULT_FILTERS.meaning).toBe(false)
+    expect(Object.entries(DEFAULT_FILTERS).filter(([k]) => !k.startsWith('show') && k !== 'meaning').every(([, v]) => v)).toBe(true)
   })
 })
 

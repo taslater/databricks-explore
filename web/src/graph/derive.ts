@@ -5,6 +5,7 @@ import type { GraphEdge } from '../api/types'
 import { columnHandles, findColumn, visibleColumns } from './columns'
 import { EDGE_COLORS } from './format'
 import { estimateSize } from './layout'
+import { familyOf } from './edgeStyles'
 import type { EdgeFilters, FlowEdge, FlowNode } from './types'
 
 export interface DeriveInput {
@@ -73,14 +74,18 @@ export function handlesFor(
 /** The server says the edge no longer holds (a view's source it stopped reading, a table recreated since). Age alone never does. */
 export const isSuperseded = (info: GraphEdge): boolean => info.status === 'superseded'
 
-/** Whether the filters let an edge show: its kind is on, and it is neither superseded nor rejected unless those are on too. */
+/** Whether the filters let an edge show: its family and its kind are on, and it is neither superseded nor rejected unless those are on too. */
 export function edgeShown(info: GraphEdge, filters: EdgeFilters): boolean {
   return (
+    (filters[familyOf(info.kind)] ?? false) &&
     (filters[info.kind] ?? false) &&
     !(isSuperseded(info) && !filters.showSuperseded) &&
     !(info.status === 'rejected' && !filters.showRejected)
   )
 }
+
+/** Arrowheads: flow edges have one, reference edges have none (their ends are crow's feet, later), meaning edges have one when directed. An undirected edge (directed === false) never does. */
+const hasArrow = (info: GraphEdge): boolean => info.directed !== false && familyOf(info.kind) !== 'reference'
 
 export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: FlowEdge[] } {
   const { filters, focusSchema, hoverId } = input
@@ -175,11 +180,11 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
     )
     columnEdges.push({
       ...e,
-      type: superseded ? 'superseded' : info.kind,
+      type: superseded ? 'superseded' : familyOf(info.kind),
       hidden,
       sourceHandle: handles.sourceHandle,
       targetHandle: handles.targetHandle,
-      markerEnd: info.directed === false ? undefined : { type: MarkerType.ArrowClosed, color },
+      markerEnd: hasArrow(info) ? { type: MarkerType.ArrowClosed, color } : undefined,
       data: { ...e.data!, superseded, faded: hoverId !== null && e.source !== hoverId && e.target !== hoverId },
     })
   }
@@ -200,13 +205,12 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
     const drawnInColumns = covered.has([info.kind, ...[e.source, e.target].sort()].join('|'))
     return {
       ...e,
-      type: superseded ? 'superseded' : info.kind,
+      type: superseded ? 'superseded' : familyOf(info.kind),
       hidden: edgeHidden.get(e.id) === true || drawnInColumns,
       sourceHandle: handles.sourceHandle,
       targetHandle: handles.targetHandle,
-      // An undirected edge (directed === false) has no arrowheads.
-      markerEnd: info.directed === false ? undefined : { type: MarkerType.ArrowClosed, color },
-      markerStart: info.bidir ? { type: MarkerType.ArrowClosed, color } : undefined,
+      markerEnd: hasArrow(info) ? { type: MarkerType.ArrowClosed, color } : undefined,
+      markerStart: info.bidir && hasArrow(info) ? { type: MarkerType.ArrowClosed, color } : undefined,
       data: {
         ...e.data!,
         superseded,

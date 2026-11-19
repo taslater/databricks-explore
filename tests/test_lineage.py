@@ -125,7 +125,7 @@ def lines(out):
 def test_lineage_tool_lists_edges_by_hop_then_the_tables(agent, chain):
     out = agent.ok("lineage", table=O, direction="downstream", depth=2)
     assert out.splitlines()[0] == f"lineage of {O}, downstream, depth 2: 2 other table(s), 2 edge(s)"
-    assert lines(out) == [f"hop 1 view_dep {O} -> {V}", f"hop 2 lineage {V} -> {R}"]  # a view and its source are one edge
+    assert lines(out) == [f"hop 1 view_dep (flow) {O} -> {V}", f"hop 2 lineage (flow) {V} -> {R}"]  # a view and its source are one edge
     assert f"  {V} view (hop 1 down)" in out and f"  {R} managed (hop 2 down)" in out and f"  {O} managed (start)" in out
     assert "certification cache not loaded" in out
 
@@ -136,7 +136,7 @@ def test_lineage_tool_defaults_and_cycle(agent, chain):
     full = agent.ok("lineage", table=O, direction="both", depth=6)
     assert full.splitlines()[0].startswith(f"lineage of {O}, both, depth 6: 5 other table(s)")  # the cycle visits each table once
     up = agent.ok("lineage", table=O, direction="upstream", depth=1)
-    assert lines(up) == [f"hop 1 lineage {I} -> {O}"]
+    assert lines(up) == [f"hop 1 lineage (flow) {I} -> {O}"]
 
 
 def test_lineage_tool_json_and_certification_marks(agent, chain, monkeypatch):
@@ -147,8 +147,9 @@ def test_lineage_tool_json_and_certification_marks(agent, chain, monkeypatch):
     assert "certification cache not loaded" not in text
     out = json.loads(agent.ok("lineage", table=O, depth=2, format="json"))
     assert set(out) == {"nodes", "edges", "truncated", "errors"}
+    assert {e["family"] for e in out["edges"]} == {"flow"}  # a walk follows only lineage and view dependencies
     assert {n["table"]: n.get("certification") for n in out["nodes"]} == {O: None, V: "certified", R: "deprecated"}
-    assert all(set(e) == {"id", "kind", "source", "target", "hop"} for e in out["edges"])
+    assert all(set(e) == {"id", "kind", "family", "source", "target", "hop"} for e in out["edges"])
 
 
 def test_lineage_tool_without_lineage_and_validation(agent, chain):

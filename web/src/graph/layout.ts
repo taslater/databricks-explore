@@ -1,11 +1,13 @@
 // Layout ported from relayout() in static/app.js. Pure: no React Flow, no DOM.
 import dagre from '@dagrejs/dagre'
+import type { GraphEdgeKind } from '../api/types'
+import { familyOf } from './edgeStyles'
 
 export interface LayoutNode {
   id: string
   width: number
   height: number
-  /** The focus, or a node added on purpose. Never laid out as an FK-only node. */
+  /** The focus, or a node added on purpose. Never laid out as a reference-only node. */
   focus: boolean
   /** Current top-left position. Used only when a node has no dagre position. */
   x: number
@@ -25,9 +27,9 @@ export interface Point {
 
 const RANK_SEP = 110
 const NODE_SEP = 20
-/** Gap between FK-only nodes in their row. */
+/** Gap between reference-only nodes in their row. */
 const KID_GAP = 24
-/** Distance below the lowest main node for the FK-only row (center to center, as in the legacy code). */
+/** Distance below the lowest main node for the reference-only row (center to center, as in the legacy code). */
 const FK_ROW_OFFSET = 90
 /** Vertical gap between the bands of unconnected parts of the graph. */
 const COMPONENT_GAP = 60
@@ -35,13 +37,16 @@ const COMPONENT_GAP = 60
 /**
  * Returns the top-left position of every node.
  *
- * Rules, same as the legacy UI:
- * - An FK-only node is not the focus and has at least one edge, and all its edges are `fk`.
+ * Rules, from the legacy UI and the edge families (flow runs left to right, references hang above and below):
+ * - Only flow edges (lineage, view dependencies) set the left-to-right rank.
+ * - A reference-only node is not the focus and has at least one edge, none of them flow (foreign keys, joins and
+ *   meaning links all count).
  * - Everything else goes through dagre (rankdir LR, nodesep 20, ranksep 110). Hidden nodes are included,
- *   so showing them again does not move the layout.
- * - Each FK-only node sits in a row, centered under its child. The child is the source of the node's first edge.
+ *   so showing them again does not move the layout. A node with no flow edge takes the first rank, so a reference
+ *   between two main nodes never moves one right of the other.
+ * - Each reference-only node sits in a row, centered under its child. The child is the source of the node's first edge.
  * - Parts of the graph with no edge between them (an object added next to the graph) are laid out one by one and
- *   stacked top to bottom, in the order of their first node, so one part's FK row never lands on another part.
+ *   stacked top to bottom, in the order of their first node, so one part's reference row never lands on another part.
  *   The first part keeps the position the rules above give it.
  */
 export function computeLayout(nodes: LayoutNode[], edges: LayoutEdge[]): Map<string, Point> {
@@ -69,6 +74,8 @@ export function computeLayout(nodes: LayoutNode[], edges: LayoutEdge[]): Map<str
   }
   return out
 }
+
+const isFlow = (kind: string): boolean => familyOf(kind as GraphEdgeKind) === 'flow'
 
 /** Groups nodes joined by edges, in the order of each group's first node. */
 function components(nodes: LayoutNode[], edges: LayoutEdge[]): LayoutNode[][] {
@@ -103,12 +110,12 @@ function layoutPart(nodes: LayoutNode[], liveEdges: LayoutEdge[]): Map<string, P
     }
   }
 
-  const fkOnly = new Set<string>()
+  const fkOnly = new Set<string>() // reference-only nodes (the name is from when only foreign keys hung below)
   for (const n of nodes) {
     const kinds = kindsByNode.get(n.id) ?? []
-    if (!n.focus && kinds.length > 0 && kinds.every((k) => k === 'fk')) fkOnly.add(n.id)
+    if (!n.focus && kinds.length > 0 && !kinds.some(isFlow)) fkOnly.add(n.id)
   }
-  // A part made only of FK edges, with no focus in it, has no node for its FK row to hang under: lay it all out.
+  // A part with no flow edge and no focus has no node for its reference row to hang under: lay it all out.
   if (fkOnly.size === nodes.length) fkOnly.clear()
 
   const main = nodes.filter((n) => !fkOnly.has(n.id))
@@ -117,7 +124,7 @@ function layoutPart(nodes: LayoutNode[], liveEdges: LayoutEdge[]): Map<string, P
   g.setDefaultEdgeLabel(() => ({}))
   for (const n of main) g.setNode(n.id, { width: n.width, height: n.height })
   for (const e of liveEdges) {
-    if (!fkOnly.has(e.source) && !fkOnly.has(e.target)) g.setEdge(e.source, e.target)
+    if (isFlow(e.kind) && !fkOnly.has(e.source) && !fkOnly.has(e.target)) g.setEdge(e.source, e.target)
   }
   dagre.layout(g)
 
@@ -129,7 +136,7 @@ function layoutPart(nodes: LayoutNode[], liveEdges: LayoutEdge[]): Map<string, P
     bottom = Math.max(bottom, p.y + n.height / 2)
   }
 
-  // Group FK-only nodes by child. Insertion order is kept, as in the legacy code.
+  // Group reference-only nodes by child. Insertion order is kept, as in the legacy code.
   const groups = new Map<string, LayoutNode[]>()
   for (const n of nodes) {
     if (!fkOnly.has(n.id)) continue
@@ -153,7 +160,7 @@ function layoutPart(nodes: LayoutNode[], liveEdges: LayoutEdge[]): Map<string, P
     }
   }
 
-  // An FK-only node whose child is not laid out (or is itself FK-only, with no position) keeps its place.
+  // A reference-only node whose child is not laid out (or is itself reference-only, with no position) keeps its place.
   for (const n of nodes) if (!out.has(n.id)) out.set(n.id, { x: n.x, y: n.y })
   return out
 }

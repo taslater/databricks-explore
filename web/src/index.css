@@ -1548,6 +1548,28 @@ table.cols td {
   margin: 6px 0 0;
 }
 
+.edge-kinds {
+  margin: 2px 0 4px 8px;
+}
+
+.edge-legend {
+  margin: 8px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--border, #d0d7de);
+  font-size: 12px;
+}
+
+.edge-legend .kind-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.edge-from {
+  margin: 6px 0 0;
+}
+
 .edge-provenance,
 .edge-review {
   margin-top: 8px;

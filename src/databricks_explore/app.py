@@ -8,6 +8,7 @@ from flask import Flask, abort, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException, MethodNotAllowed, NotFound
 
 from . import __version__, canvases
+from . import cardinality
 from . import concepts
 from . import dbx
 from . import demo
@@ -435,6 +436,27 @@ def _stats_plan(e, names):
             reason = f"cannot read the table: {dbx.clean_error(err)}"
         (skipped.append({"table": t, "reason": reason}) if reason else eligible.append(t))
     return eligible, skipped
+
+
+@app.post("/api/relationships/cardinality")
+def relationship_cardinality():
+    """The crow's-foot ends of reference edges ({id, kind, source, target} each), from keys and nullability. Reads tables.get and the store; never the warehouse."""
+    body = request.get_json(silent=True)
+    edges = body.get("edges") if isinstance(body, dict) else None
+    if not isinstance(edges, list) or not all(isinstance(x, dict) for x in edges):
+        raise relationships.RelationshipInvalid("edges: expected a list of {id, kind, source, target}")
+    if len(edges) > 400:
+        raise relationships.RelationshipInvalid("edges: at most 400 at a time")
+    e = ex()
+
+    def object_of(t):
+        try:
+            return e.object(t)["data"] if nodefacts.table_name(t) else None
+        except Exception:
+            return None
+    with rel_store() as store:
+        out = cardinality.for_edges(edges, object_of, lambda t: relationships.join_keys(store, t, object_of(t)) if nodefacts.table_name(t) else None)
+    return jsonify({"cardinality": out})
 
 
 @app.post("/api/node-facts")
