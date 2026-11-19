@@ -12,6 +12,7 @@ except ImportError:  # an SDK without the class: the message decides
 _KINDS = {"persisted_view": "view", "view": "view", "materialized_view": "materialized_view", "metric_view": "metric_view",
           "streaming_table": "streaming_table", "table": "table", "managed": "table", "external": "table",
           "foreign": "table", "managed_shallow_clone": "table", "external_shallow_clone": "table"}
+CREATED_SLACK = 60  # seconds an event may precede the target's created_at and still belong to it (live: a CTAS's event was 0.3 s before it)
 _NOT_FOUND = re.compile(r"does not exist|not[ _]found|no such", re.I)
 
 
@@ -48,9 +49,12 @@ def parse_ts(value) -> Optional[datetime]:
 
 
 def view_sources(info: Optional[dict]) -> set:
-    """The lowercased names a view's current definition reads (tables.get `view_dependencies`); empty when it lists none."""
+    """The lowercased names a view's current definition reads (tables.get `view_dependencies`); empty when it lists none.
+
+    A materialized view lists only its internal backing table (`__materialization_...`), which says nothing about its
+    sources, so internal names are left out."""
     deps = ((info or {}).get("view_dependencies") or {}).get("dependencies") or []
-    return {t.lower() for d in deps if (t := (d.get("table") or {}).get("table_full_name"))}
+    return {t.lower() for d in deps if (t := (d.get("table") or {}).get("table_full_name")) and not t.split(".")[-1].startswith("__")}
 
 
 def is_superseded(source: str, ts, target_info: Optional[dict]) -> bool:
@@ -58,6 +62,7 @@ def is_superseded(source: str, ts, target_info: Optional[dict]) -> bool:
 
     A target that lists view dependencies is judged by them: a source it does not name is superseded. Any other target
     is judged by its creation time: an event from before the object was (re)created describes an earlier one.
+    The comparison allows `CREATED_SLACK` seconds: lineage times are whole seconds, and a CTAS's event can come before its table is committed.
     Without `target_info`, or a time to compare, the edge is kept. Age alone never makes an edge superseded."""
     if not target_info:
         return False
@@ -65,7 +70,7 @@ def is_superseded(source: str, ts, target_info: Optional[dict]) -> bool:
     if deps:
         return source.lower() not in deps
     created, seen = parse_ts(target_info.get("created_at")), parse_ts(ts)
-    return bool(created and seen and seen < created)
+    return bool(created and seen and (created - seen).total_seconds() > CREATED_SLACK)
 
 
 def is_not_found(exc: Exception) -> bool:

@@ -149,7 +149,7 @@ Response:
 - **Edge kinds:**
   - `fk`: `id = "fk:<child>-><parent>"`, plus `constraint`, `child_columns`, `parent_columns`, `label`.
   - `view_dep`: `id = "view_dep:<source>-><target>"`. Source is the dependency and target is the view. Read from the view's current definition, also when the object asked for is the dependency and the view a downstream neighbor. `last_read` is the lineage API's time for the same pair, when it has one: a pair with both is this one edge, never two.
-  - `lineage`: `id = "lineage:<a><-><b>"` with the names sorted. Fields: `bidir` (both directions seen), `last_seen`, `last_seen_by_dir` (map of `"src->dst"` to timestamp), and `superseded: true` when it no longer holds. A lineage edge into a view is superseded when the view's `view_dependencies` do not name the source; into any other object (or a view with none listed), when every event is older than the target's `created_at`. Age alone never makes an edge superseded.
+  - `lineage`: `id = "lineage:<a><-><b>"` with the names sorted. Fields: `bidir` (both directions seen), `last_seen`, `last_seen_by_dir` (map of `"src->dst"` to timestamp), and `superseded: true` when it no longer holds. A lineage edge into a view is superseded when the view's `view_dependencies` do not name the source; into any other object (or a view with none listed), when every event is more than a minute older than the target's `created_at` (lineage times are whole seconds, and a CTAS's event can precede the commit). A materialized view lists only its internal `__materialization_...` table, which names no source, so it counts as listing none. Age alone never makes an edge superseded.
 - **`errors`:** strings such as `"tables.get: ..."` or `"lineage: ..."`.
 
 ### `GET /api/edge?src=<name>&tgt=<name>`
