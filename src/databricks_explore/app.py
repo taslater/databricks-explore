@@ -21,6 +21,7 @@ from . import nodefacts
 from . import nodemeta
 from . import ontology
 from . import relationships
+from . import relprofile
 from . import sqltools
 from . import starexpand
 from . import tablestats
@@ -456,7 +457,8 @@ def relationship_cardinality():
         except Exception:
             return None
     with rel_store() as store:
-        out = cardinality.for_edges(edges, object_of, lambda t: relationships.join_keys(store, t, object_of(t)) if nodefacts.table_name(t) else None)
+        out = cardinality.for_edges(edges, object_of, lambda t: relationships.join_keys(store, t, object_of(t)) if nodefacts.table_name(t) else None,
+                                    relprofile.lookup(e.profile))
     return jsonify({"cardinality": out})
 
 
@@ -494,6 +496,58 @@ def table_stats_read():
         errors = {t: msg for t, msg in pool.map(one, eligible) if msg}
     return jsonify({"facts": nodefacts.facts(e, eligible), "skipped": skipped, "errors": errors})
 
+
+# ---------- relationship profile (relprofile.py): measured on demand, shown as SQL first, kept with its date ----------
+
+def _profile_specs(e, store, body):
+    """(specs, skipped) for the {id, kind, source, target} edges of a request body: what `relprofile.plan_edges` finds profilable, and why not for the rest."""
+    edges = body.get("edges") if isinstance(body, dict) else None
+    if not isinstance(edges, list) or not all(isinstance(x, dict) and isinstance(x.get("id"), str) and isinstance(x.get("source"), str)
+                                              and isinstance(x.get("target"), str) for x in edges):
+        raise relationships.RelationshipInvalid("edges: expected a list of {id, kind, source, target}")
+    if len(edges) > relprofile.MAX_EDGES:
+        raise relationships.RelationshipInvalid(f"edges: at most {relprofile.MAX_EDGES} at a time")
+
+    def object_of(t):
+        try:
+            return e.object(t)["data"] if nodefacts.table_name(t) else None
+        except Exception:
+            return None
+    return relprofile.plan_edges(edges, object_of, lambda t: relationships.join_keys(store, t, object_of(t)))
+
+
+@app.post("/api/relationships/profile/plan")
+def relationship_profile_plan():
+    """The statement `/profile/run` would run for each reference edge, the table sizes known so far, and the edges it would skip. Never queries."""
+    e = ex()
+    with rel_store() as store:
+        specs, skipped = _profile_specs(e, store, request.get_json(silent=True))
+    sizes = nodefacts.facts(e, sorted({t for s in specs for t in (s["source"], s["target"])}), fetch=False)
+    return jsonify({"statements": [{**s, "rows": {t: ((sizes.get(t) or {}).get("stats") or {}).get("rows") for t in (s["source"], s["target"])}} for s in specs],
+                    "skipped": skipped, "warehouse_id": e.warehouse_id})
+
+
+@app.post("/api/relationships/profile/run")
+def relationship_profile_run():
+    """Run the profiling statement of each reference edge (two at a time), keep every result with its date, and answer the profiles and the ends they give."""
+    e = ex()
+    if not e.warehouse_id:
+        raise ontology.NeedsWarehouse("Pick a SQL warehouse to profile relationships.")
+    with rel_store() as store:
+        specs, skipped = _profile_specs(e, store, request.get_json(silent=True))
+
+    def one(spec):
+        try:
+            return spec["id"], relprofile.run(e.sql, spec["source"], spec["target"], [tuple(x) for x in spec["pairs"]]), None
+        except Exception as err:
+            return spec["id"], None, dbx.clean_error(err)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(one, specs))
+    for spec, (_, p, _) in zip(specs, results):  # written here, one at a time: the file is read and replaced whole
+        if p:
+            relprofile.put(e.profile, spec["kind"], spec["source"], spec["target"], p)
+    return jsonify({"profiles": {i: p for i, p, _ in results if p}, "errors": {i: m for i, _, m in results if m}, "skipped": skipped,
+                    "cardinality": {i: relprofile.as_cardinality(p) for i, p, _ in results if p}})
 
 @app.post("/api/node-meta")
 def node_meta():

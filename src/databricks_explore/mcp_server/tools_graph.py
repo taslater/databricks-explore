@@ -7,6 +7,7 @@ from .. import graphs
 from ..edge_families import family_of
 from .. import nodefacts
 from .. import relationships
+from .. import relprofile
 
 from .tooling import B, ToolError, integer, obj, strings, text, tool
 
@@ -67,6 +68,11 @@ _END_MARK = {"one": "||", "zero_one": "o|", "one_many": "|<", "zero_many": "o<"}
 def _cardinalities(ctx, edges: list[dict], fetch: bool = False) -> dict[str, dict]:
     """{edge id: cardinality} for the reference edges: what the saved edge carries, else computed from the cached table metadata (never a warehouse)."""
     have = {e["id"]: e["cardinality"] for e in edges if e.get("cardinality") and e.get("id")}
+    measuring = ctx.explorer()
+    measured = relprofile.lookup(measuring.profile) if measuring else None  # a kept measurement wins over what a saved edge carries
+    if measured:
+        have.update({e["id"]: relprofile.as_cardinality(m) for e in edges if e.get("id") and e.get("kind") in cardinality.REFERENCE_KINDS
+                     and isinstance(e.get("source"), str) and isinstance(e.get("target"), str) and (m := measured(e["kind"], e["source"], e["target"]))})
     todo = [e for e in edges if e.get("id") and e["id"] not in have and e.get("kind") in cardinality.REFERENCE_KINDS]
     ex = ctx.explorer() if todo else None
     if ex:
@@ -83,7 +89,8 @@ def _cardinalities(ctx, edges: list[dict], fetch: bool = False) -> dict[str, dic
 def _ends_text(c: dict, e: dict) -> str:
     """` [orders o<, customers ||]`: the crow's-foot end at each table, for the ends that are known."""
     bits = [f"{e[side].rsplit('.', 1)[-1]} {_END_MARK[c[side]['end']]}" for side in ("source", "target") if c.get(side)]
-    return f" [{', '.join(bits)}]" if bits else ""
+    orphans = relprofile.orphan_sentence(c["profile"]) if c.get("profile") else None
+    return (f" [{', '.join(bits)}]" if bits else "") + (f" ({orphans})" if orphans else "")
 
 
 def _kinds_line(edges: list[dict]) -> str:

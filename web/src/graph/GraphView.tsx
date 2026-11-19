@@ -30,6 +30,7 @@ import { GraphToolbar } from './GraphToolbar'
 import { MineDialog } from './MineDialog'
 import { MiningPanel } from './MiningPanel'
 import { withGrainChanges, withNodeFacts } from './cardFacts'
+import { EdgeMenuHost, ProfileDialog, useEdgeContextMenu } from './ProfileDialog'
 import { useNeighborScan, withNeighborCounts } from './neighborScan'
 import { TableStatsDialog } from './TableStatsDialog'
 import { TableNode } from './TableNode'
@@ -82,6 +83,8 @@ export function GraphView() {
       {drawer && <MiningPanel drawer={drawer} />}
       {mineDialog && <MineDialog />}
       <TableStatsDialog />
+      <ProfileDialog />
+      <EdgeMenuHost />
     </div>
   )
 }
@@ -176,6 +179,7 @@ function GraphCanvas() {
   const onEdgeClick: EdgeMouseHandler<FlowEdge> = (_, edge) => {
     if (!isConceptEdge(edge.id)) useGraphStore.getState().setSelection({ kind: 'edge', id: edge.id })
   }
+  const onEdgeContextMenu = useEdgeContextMenu()
   const onNodeDoubleClick: NodeMouseHandler<FlowNode | ConceptFlowNode> = (_, node) => {
     if (node.type !== 'concept') void actions.expand(node.id)
   }
@@ -201,6 +205,7 @@ function GraphCanvas() {
       onEdgesChange={onEdgesChange}
       onNodeClick={onNodeClick}
       onEdgeClick={onEdgeClick}
+      onEdgeContextMenu={onEdgeContextMenu}
       onNodeDoubleClick={onNodeDoubleClick}
       onNodeMouseEnter={onNodeMouseEnter}
       onNodeMouseLeave={onNodeMouseLeave}

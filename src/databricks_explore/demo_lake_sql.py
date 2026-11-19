@@ -186,13 +186,15 @@ def _truth(a, b, rows_of):
 
 
 def _value(alias, t):
-    """The number a profile column holds, chosen by what its alias says (orphan, unused, null, distinct, p95, max, rows)."""
+    """The number a profile column holds, chosen by what its alias says (orphan, unused, repeated, null, distinct, p95, max, rows)."""
     n = alias.lower()
     b_side = bool(re.search(r"(^b_|_b$|parent|referenced|ref_|target|dim_|_to_)", n))
     if "orphan" in n:
         return t["orphan_keys"] if re.search(r"key|distinct", n) else t["orphan_rows"]
     if "unused" in n:
         return t["unused_keys"]
+    if "repeat" in n or "dup" in n:
+        return 0  # the lake's referenced keys are all unique
     if "p95" in n or "percentile" in n:
         return t["p95_fanout"]
     if "max" in n or "fan" in n:
