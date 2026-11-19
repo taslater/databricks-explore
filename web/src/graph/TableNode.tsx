@@ -15,6 +15,7 @@ export function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
     'tbl-node',
     data.focus && 'is-focus',
     data.external && 'is-external',
+    data.missing && 'is-missing',
     selected && 'is-selected',
     data.faded && 'is-faded',
     data.showColumns && 'with-columns',
@@ -33,7 +34,8 @@ export function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
 
   // Four handles per side. The edge picks the pair that matches its direction (see handlesFor in derive.ts).
   return (
-    <div className={classes} style={{ background: nodeFill(data.kind) }}>
+    <div className={classes} style={{ background: data.missing ? 'transparent' : nodeFill(data.kind) }}
+      title={data.missing ? `Does not exist${data.missingReason ? `: ${data.missingReason}` : ''}` : undefined}>
       <Handle type="target" position={Position.Left} id="tgt-l" className="tbl-handle" />
       <Handle type="target" position={Position.Right} id="tgt-r" className="tbl-handle" />
       <Handle type="target" position={Position.Top} id="tgt-t" className="tbl-handle" />
@@ -49,7 +51,7 @@ export function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
       </div>
       {data.showSchema && <div className="tbl-sub">{data.schema}</div>}
       {data.via && <div className="tbl-sub">via {data.via}</div>}
-      {!isPlaceholder(id) && (
+      {!isPlaceholder(id) && !data.missing && (
         <button
           className="tbl-cols-btn nodrag"
           title={data.showColumns ? 'Hide columns' : 'Show columns, with column lineage and mined joins'}

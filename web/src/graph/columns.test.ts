@@ -10,7 +10,6 @@ import type { FlowEdge, FlowNode } from './types'
 
 const A = 'main.sales.orders'
 const B = 'main.sales.customers'
-const NOW = Date.parse('2026-11-13T00:00:00Z')
 
 const cols = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `c${i}`, type: 'int' }))
 
@@ -46,7 +45,7 @@ const tableEdge = (): FlowEdge => ({
 })
 
 function derive(nodes: FlowNode[], columnEdges: FlowEdge[], edges: FlowEdge[] = [tableEdge()]) {
-  return deriveFlow({ nodes, edges, columnEdges, focusSchema: 'main.sales', filters: DEFAULT_FILTERS, staleDays: 7, hoverId: null, now: NOW })
+  return deriveFlow({ nodes, edges, columnEdges, focusSchema: 'main.sales', filters: DEFAULT_FILTERS, hoverId: null })
 }
 
 describe('columnsOf and findColumn', () => {
@@ -180,7 +179,7 @@ describe('deriveFlow with column edges', () => {
     expect(derive(nodes, [colEdge({ target_column: 'nope' })]).edges.find((e) => e.id === 'e_1')!.hidden).toBe(true)
     expect(derive(nodes, [colEdge({ status: 'rejected' })]).edges.find((e) => e.id === 'e_1')!.hidden).toBe(true)
     const noJoins = deriveFlow({
-      nodes, edges: [], columnEdges: [colEdge()], focusSchema: null, staleDays: 7, hoverId: null, now: NOW,
+      nodes, edges: [], columnEdges: [colEdge()], focusSchema: null, hoverId: null,
       filters: { ...DEFAULT_FILTERS, join_mined: false },
     })
     expect(noJoins.edges[0].hidden).toBe(true)
@@ -191,7 +190,7 @@ describe('deriveFlow with column edges', () => {
     expect(out.edges).toEqual([])
   })
 
-  it('draws a directed lineage column edge with an arrowhead, stale lineage in the stale style', () => {
+  it('draws a directed lineage column edge with an arrowhead, however old, and a superseded one in the superseded style', () => {
     const nodes = [
       node(A, { showColumns: true, columns: [{ name: 'amount', type: '' }] }),
       node(B, { showColumns: true, columns: [{ name: 'revenue', type: '' }] }),
@@ -200,7 +199,9 @@ describe('deriveFlow with column edges', () => {
     expect(fresh.edges[0].markerEnd).toBeDefined()
     expect(fresh.edges[0].type).toBe('lineage')
     const old = derive(nodes, [colEdge({ id: 'l1', kind: 'lineage', directed: true, status: 'derived', source_column: 'amount', target_column: 'revenue', last_seen: '2026-01-01' })], [])
-    expect(old.edges[0].type).toBe('stale')
+    expect(old.edges[0].type).toBe('lineage') // age alone dims nothing
+    const gone = derive(nodes, [colEdge({ id: 'l1', kind: 'lineage', directed: true, status: 'superseded', source_column: 'amount', target_column: 'revenue' })], [])
+    expect(gone.edges[0].hidden).toBe(true) // hidden until "superseded edges" is on
   })
 })
 

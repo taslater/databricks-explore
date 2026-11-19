@@ -94,7 +94,6 @@ function GraphCanvas() {
   const columnEdges = useGraphStore((s) => s.columnEdges)
   const focusSchema = useGraphStore((s) => s.focusSchema)
   const filters = useGraphStore((s) => s.filters)
-  const staleDays = useGraphStore((s) => s.staleDays)
   const hoverId = useGraphStore((s) => s.hoverId)
   const layoutPending = useGraphStore((s) => s.layoutPending)
   const fitPending = useGraphStore((s) => s.fitPending)
@@ -102,8 +101,8 @@ function GraphCanvas() {
   const connected = useUiStore((s) => s.connectedProfile)
 
   const flow = useMemo(
-    () => deriveFlow({ nodes: rawNodes, edges: rawEdges, columnEdges, focusSchema, filters, staleDays, hoverId }),
-    [rawNodes, rawEdges, columnEdges, focusSchema, filters, staleDays, hoverId],
+    () => deriveFlow({ nodes: rawNodes, edges: rawEdges, columnEdges, focusSchema, filters, hoverId }),
+    [rawNodes, rawEdges, columnEdges, focusSchema, filters, hoverId],
   )
 
   // The Concepts toggle: for the tables on the graph, their linked concepts, drawn above them. Never stored or laid out.

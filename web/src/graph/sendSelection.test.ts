@@ -39,9 +39,9 @@ describe('lineagePath', () => {
   })
   it('walks only the edges the filters show', () => {
     const hidden = edge('lineage', 'b', 'c', { status: 'rejected' })
-    const shown = [CHAIN[0], hidden, CHAIN[2]].filter((e) => edgeShown(e, DEFAULT_FILTERS, 7, Date.now()))
+    const shown = [CHAIN[0], hidden, CHAIN[2]].filter((e) => edgeShown(e, DEFAULT_FILTERS))
     expect(lineagePath('a', 'downstream', shown).tables).toEqual(['a', 'b'])
-    const noLineage = CHAIN.filter((e) => edgeShown(e, { ...DEFAULT_FILTERS, lineage: false }, 7, Date.now()))
+    const noLineage = CHAIN.filter((e) => edgeShown(e, { ...DEFAULT_FILTERS, lineage: false }))
     expect(lineagePath('c', 'downstream', noLineage).tables).toEqual(['c', 'd'])
   })
 })
