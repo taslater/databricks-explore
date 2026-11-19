@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { GraphEdge, Relationship, RelationshipsResponse } from '../api/types'
-import { COLUMN_LIMIT, columnHandleId, columnHandles, columnSides, columnsOf, newTableIds, findColumn, visibleColumns } from './columns'
+import { baseType, columnHandleId, columnHandles, columnLevel, columnSides, columnsOf, keyColumns, newTableIds, nextLevel, findColumn, rowsOf, visibleColumns } from './columns'
 import { deriveFlow } from './derive'
 import { nameOf, schemaOf } from './format'
 import { DEFAULT_FILTERS, useGraphStore } from './graphStore'
@@ -64,21 +64,55 @@ describe('columnsOf and findColumn', () => {
 })
 
 describe('visibleColumns', () => {
-  it('shows every column of a narrow table', () => {
-    expect(visibleColumns(cols(COLUMN_LIMIT), [], false)).toHaveLength(COLUMN_LIMIT)
+  const keyed = [
+    { name: 'order_id', type: 'bigint', pk: true },
+    { name: 'customer_id', type: 'bigint', fk: true },
+    { name: 'status', type: 'string' },
+    { name: 'region', type: 'string' },
+    { name: 'amount', type: 'decimal(10,2)' },
+  ]
+  it('at the keys level shows primary and foreign key columns and the ones with an edge, in table order, nothing else', () => {
+    expect(visibleColumns(keyed, [], false).map((c) => c.name)).toEqual(['order_id', 'customer_id'])
+    expect(visibleColumns(keyed, ['AMOUNT'], false).map((c) => c.name)).toEqual(['order_id', 'customer_id', 'amount'])
+    expect(visibleColumns(cols(60), [], false)).toEqual([]) // no keys, no edges: only the "+60 more" row
   })
-  it('on a wide table keeps columns with an edge first, then the first others, in table order', () => {
-    const got = visibleColumns(cols(60), ['c50', 'C55'], false).map((c) => c.name)
-    expect(got).toHaveLength(COLUMN_LIMIT)
-    expect(got).toContain('c50')
-    expect(got).toContain('c55')
-    expect(got.slice(0, 3)).toEqual(['c0', 'c1', 'c2'])
-    expect(got.indexOf('c50')).toBeLessThan(got.indexOf('c55'))
-  })
-  it('shows all on request, and every involved column even past the limit', () => {
+  it('shows every column at the all level, however wide the table', () => {
     expect(visibleColumns(cols(60), [], true)).toHaveLength(60)
-    const many = cols(60).map((c) => c.name).slice(0, 20)
-    expect(visibleColumns(cols(60), many, false)).toHaveLength(20)
+  })
+  it('draws rows only for a node that shows columns and has them', () => {
+    expect(rowsOf({ columns: keyed, showColumns: false })).toEqual([])
+    expect(rowsOf({ showColumns: true })).toEqual([])
+    expect(rowsOf({ columns: keyed, showColumns: true }).map((c) => c.name)).toEqual(['order_id', 'customer_id'])
+    expect(rowsOf({ columns: keyed, showColumns: true, allColumns: true })).toHaveLength(5)
+  })
+  it('cycles none, keys, all and back', () => {
+    expect(columnLevel({})).toBe('none')
+    expect(columnLevel({ showColumns: true })).toBe('keys')
+    expect(columnLevel({ showColumns: true, allColumns: true })).toBe('all')
+    expect(columnLevel({ showColumns: false, allColumns: true })).toBe('none')
+    expect(nextLevel('none')).toBe('keys')
+    expect(nextLevel('keys')).toBe('all')
+    expect(nextLevel('all')).toBe('none')
+  })
+  it('reads key columns from the constraints, composite keys included, whatever the case', () => {
+    const constraints = [
+      { primary_key_constraint: { name: 'pk', child_columns: ['Order_ID', 'line_no'] } },
+      { foreign_key_constraint: { name: 'fk', child_columns: ['order_id'], parent_table: 'a.b.orders', parent_columns: ['order_id'] } },
+      { named_table_constraint: { name: 'chk' } },
+    ]
+    const got = columnsOf({ table_constraints: constraints, columns: [{ name: 'order_id' }, { name: 'line_no' }, { name: 'sku' }] })
+    expect(got).toEqual([
+      { name: 'order_id', type: '', pk: true, fk: true }, // both marks on one column
+      { name: 'line_no', type: '', pk: true },
+      { name: 'sku', type: '' },
+    ])
+    expect(keyColumns(undefined)).toEqual({ pk: new Set(), fk: new Set() })
+  })
+  it('shortens a nested type to its base', () => {
+    expect(baseType('struct<a:int,b:array<string>>')).toBe('struct<…>')
+    expect(baseType('array<string>')).toBe('array<…>')
+    expect(baseType('decimal(10,2)')).toBe('decimal(10,2)')
+    expect(baseType('')).toBe('')
   })
 })
 

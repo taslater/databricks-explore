@@ -17,6 +17,7 @@ LOCK = threading.RLock()  # one writer at a time, so an agent's read-modify-writ
 NAME_MAX = 120
 LINEAGE_FLOW = FLOW_KINDS  # the flow kinds set the left-to-right order; the rest (references and meaning links) hang beside them
 DERIVED_KINDS = ("fk", "lineage", "view_dep")
+COLOR_BY_MODES = ("type", "schema", "catalog", "owner", "certification", "freshness")  # what a node's fill means; `tag:<key>` colors by a tag
 
 
 class GraphInvalid(ValueError):
@@ -123,13 +124,22 @@ def load_graph(name) -> dict:
     return data
 
 
+def check_color_by(value) -> str:
+    """The `color_by` of a diagram: one of COLOR_BY_MODES, or `tag:<key>`. GraphInvalid for anything else."""
+    if isinstance(value, str) and (value in COLOR_BY_MODES or (value.startswith("tag:") and 0 < len(value[4:].strip()) <= 200)):
+        return value
+    raise GraphInvalid(f"color_by: expected one of {', '.join(COLOR_BY_MODES)} or tag:<key>, got {value!r}")
+
+
 def check_body(data) -> str:
-    """Validate a diagram body: an object with a name, and lists for nodes and edges when present. Returns the stored name."""
+    """Validate a diagram body: an object with a name, lists for nodes and edges and a color_by when present. Returns the stored name."""
     if not isinstance(data, dict):
         raise GraphInvalid("(root): a diagram must be an object")
     for key in ("nodes", "edges"):
         if key in data and not isinstance(data[key], list):
             raise GraphInvalid(f"{key}: must be a list")
+    if "color_by" in data:
+        check_color_by(data["color_by"])
     return stem_of(data.get("name"))
 
 
@@ -357,12 +367,13 @@ def _clear_of(box, others) -> Optional[tuple]:
     return None
 
 
-def build_body(name: str, nodes: list[dict], edges: list[dict], previous: Optional[dict] = None, relayout: bool = False) -> dict:
-    """A diagram body from `nodes` ({id, kind, focus?, self_ref?, self_ref_last_seen?}, in the order to lay out) and graph `edges`.
+def build_body(name: str, nodes: list[dict], edges: list[dict], previous: Optional[dict] = None, relayout: bool = False,
+               color_by: Optional[str] = None) -> dict:
+    """A diagram body from `nodes` ({id, kind, focus?, self_ref?, self_ref_last_seen?, self_ref_fks?, files?}, in the order to lay out) and graph `edges`.
 
     Every node is pinned (added on purpose, so the Graph's edge filters never hide it). The focus schema is the focus
     node's, else the most common schema. With `previous` (a stored diagram), nodes already in it keep their positions
-    unless `relayout`; new nodes take the layout's positions, moved clear of the others."""
+    unless `relayout`; new nodes take the layout's positions, moved clear of the others. `color_by` is saved unless it is the default (type)."""
     focus = next((n for n in nodes if n.get("focus")), None)
     schemas = Counter(n["id"].rsplit(".", 1)[0] for n in nodes)
     focus_schema = (focus["id"].rsplit(".", 1)[0] if focus else max(schemas, key=lambda s: (schemas[s], -list(schemas).index(s)))) if nodes else None
@@ -405,8 +416,14 @@ def build_body(name: str, nodes: list[dict], edges: list[dict], previous: Option
             data["self_ref"] = True
             if n.get("self_ref_last_seen"):
                 data["self_ref_last_seen"] = n["self_ref_last_seen"]
+        for key in ("self_ref_fks", "files"):  # facts about the node itself, shown as markers
+            if n.get(key):
+                data[key] = n[key]
         if via.get(i):
             data["via"] = via[i]
         w, h = load[i]
         out_nodes.append({"data": data, "position": {"x": round(top_left[i][0] + w / 2), "y": round(top_left[i][1] + h / 2)}})
-    return {"name": name, "focus_schema": focus_schema, "nodes": out_nodes, "edges": [{"data": e} for e in edges]}
+    body = {"name": name, "focus_schema": focus_schema, "nodes": out_nodes, "edges": [{"data": e} for e in edges]}
+    if color_by and check_color_by(color_by) != "type":
+        body["color_by"] = color_by
+    return body

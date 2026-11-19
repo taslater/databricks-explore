@@ -16,6 +16,7 @@ import type { CanvasWindow } from '../api/types'
 import { useCanvasStore, DEFAULT_NOTE_SIZE, DEFAULT_QUERY_SIZE, type CanvasSize } from '../store/canvasStore'
 import { useUiStore } from '../store/uiStore'
 import { TABLE_DRAG_MIME } from '../shared/Picker'
+import { anchorEdges } from '../sketch/anchors'
 import { sketchEdgeTypes, sketchNodeTypes, toSketchFlowEdge, toSketchFlowNode } from '../sketch/flow'
 import { labelCenters } from '../sketch/labels'
 import { GRID, effectiveZ } from '../sketch/model'
@@ -253,12 +254,12 @@ function CanvasInner() {
       }
     }
     const picked = new Set(selectedEdgeIds)
-    return [
+    return anchorEdges([
       ...deriveLinks(windows).map((l) => derived(`${l.from}>${l.to}`, l.from, l.to, false)),
       // Table card to query window, for each table the query reads. Dashed to tell it from lineage.
       ...tableEdges(windows, tableReads).map((e) => derived(e.id, e.from, e.to, true)),
       ...sketchEdges.map((e) => toSketchFlowEdge(e, picked.has(e.id), centers[e.id])),
-    ]
+    ])
   }, [windows, tableReads, sketchEdges, selectedEdgeIds, centers])
 
   const wrapperBox = useCallback(() => wrapRef.current?.getBoundingClientRect(), [])

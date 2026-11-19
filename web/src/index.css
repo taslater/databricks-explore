@@ -191,8 +191,9 @@ button:disabled {
 
 .graph-toolbar {
   display: flex;
+  flex-wrap: wrap; /* the buttons wrap onto a second row instead of being cut off when the page is narrow */
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   min-width: 0;
@@ -273,6 +274,48 @@ button:disabled {
   color: #444;
 }
 
+/* Counts of neighbors not on the graph, outside the node's top corners, clear of where edges attach (neighbors.ts). */
+.tbl-more-count {
+  position: absolute;
+  top: 2px;
+  min-width: 14px;
+  padding: 0 3px;
+  border: 1px solid #b6c0ca;
+  border-radius: 8px;
+  background: #fff;
+  color: #667;
+  font-size: 9px;
+  line-height: 13px;
+  cursor: pointer;
+}
+
+.tbl-more-count.is-up {
+  right: 100%;
+  margin-right: 3px;
+}
+
+.tbl-more-count.is-down {
+  left: 100%;
+  margin-left: 3px;
+}
+
+.tbl-more-count:hover {
+  border-color: #dd6b20;
+  color: #222;
+}
+
+/* Small muted marks beside a node's name (nodeMarks.ts). */
+.tbl-mark {
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid #8a9aa9;
+  border-radius: 8px;
+  color: #556;
+  font-size: 9px;
+  font-weight: 400;
+  vertical-align: 1px;
+}
+
 /* Handles exist so edges have anchor points. They are not drawn. */
 .tbl-handle {
   opacity: 0;
@@ -337,6 +380,37 @@ button:disabled {
 .legend-kinds .miss {
   border-style: dashed;
   color: #6b7580;
+}
+
+.legend-kinds .other {
+  background: #d9dde1;
+}
+
+.color-legend .legend-group {
+  margin-top: 6px;
+}
+
+.color-legend .type-icons {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  color: #555;
+  font-size: 11px;
+}
+
+.type-icon-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* The kind of object, before the name. It sits in the text color and never takes the fill's meaning. */
+.type-icon {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: -1px;
+  color: #4a5568;
 }
 
 .details .btns {
@@ -1641,6 +1715,23 @@ table.cols td {
   white-space: nowrap;
 }
 
+.tbl-col-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  min-width: 12px;
+  margin-right: 3px;
+  vertical-align: -1px;
+}
+
+.tbl-key-pk {
+  color: #8a6d00;
+}
+
+.tbl-key-fk {
+  color: #3b6ea8;
+}
+
 .tbl-col-type {
   color: #666;
   overflow: hidden;
@@ -2090,6 +2181,17 @@ textarea.sk-editor {
   border: 2px solid #fff;
   opacity: 0;
   transition: opacity 0.1s;
+}
+
+/* The in and out anchors of a side (sketch/anchors.ts): where edges attach, never drawn or grabbed. */
+.sk-anchor.react-flow__handle {
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .react-flow__node:hover .sk-handle,

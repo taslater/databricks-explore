@@ -84,6 +84,18 @@ export interface TableInfo {
 
 // ---- Relationship graph ---------------------------------------------------
 
+export interface SelfRefFk {
+  constraint?: string | null
+  columns: string[]
+  parent_columns: string[]
+}
+
+export interface FileUpstream {
+  path: string
+  readable: boolean
+  last_seen?: string | null
+}
+
 export type GraphNodeKind = string // the object's lowercased table_type; "view" for PERSISTED_VIEW; default "table"
 
 export interface GraphNode {
@@ -93,6 +105,10 @@ export interface GraphNode {
   focus?: boolean
   self_ref?: boolean
   self_ref_last_seen?: string
+  /** Foreign keys of the object that point at itself (`self_ref` is set for these too). */
+  self_ref_fks?: SelfRefFk[]
+  /** File upstreams: the table is loaded from files. `path` is empty and `readable` false when the API hides it. */
+  files?: FileUpstream[]
   /** The object does not exist (renamed or dropped). `missing_reason` says why, `renamed_to` is a table of the same schema and name elsewhere. */
   missing?: boolean
   missing_reason?: string

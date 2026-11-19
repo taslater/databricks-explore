@@ -8,8 +8,11 @@ import { fetchCurrentEdge, messageOf, useGraphActions } from './actions'
 import { KIND_LABEL } from './edgeStyles'
 import { EdgeCardinality } from './EdgeEnds'
 import { ProfileDetails } from './ProfileDialog'
+import { ColorLegend } from './ColorByControl'
 import { EdgeFilterBoxes, EdgeFrom, EdgeLegend } from './EdgeFamilies'
 import { fmtAge, fmtTime, lastPart } from './format'
+import { NeighborDetails } from './NeighborDetails'
+import { NodeMarkDetails } from './NodeMarkDetails'
 import { useGraphStore } from './graphStore'
 import { canReview, patchIds } from './relationships'
 import { EdgeGrainDetails, NodeFactsDetails } from './NodeFacts'
@@ -60,11 +63,7 @@ export function GraphDetails() {
           superseded edges (no longer hold)
         </label>
         <EdgeLegend />
-        <div className="legend-kinds">
-          <span className="k tbl">table</span> <span className="k view">view / MV</span>{' '}
-          <span className="k st">streaming</span> <span className="k ext">other schema</span>{' '}
-          <span className="k miss">missing</span> <span className="k">↻ self-ref</span>
-        </div>
+        <ColorLegend />
       </section>
 
       <p className="hint">Click a node or edge for details. Shift-click to select several. Double-click a node to expand it. Drag to arrange.</p>
@@ -179,7 +178,8 @@ function NodeDetails({ id, node }: { id: string; node: FlowNode }) {
         {str(t.table_type)} · {str(t.data_source_format)} · owner {str(t.owner) || '?'}
       </div>
       <div className="hint">cached {payload.fetched_at}</div>
-      {node.data.selfRef && <p>↻ Reads its own data (e.g. MERGE). Last seen {fmtAge(node.data.selfRefLastSeen)}</p>}
+      <NodeMarkDetails data={node.data} />
+      <NeighborDetails id={id} />
       <p>{str(t.comment)}</p>
       <NodeFactsDetails id={id} />
       {constraints.length > 0 && (

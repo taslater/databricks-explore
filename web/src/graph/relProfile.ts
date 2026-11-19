@@ -11,7 +11,7 @@ export const MAX_PROFILE_EDGES = 10
 
 /** The edges a profile can be asked for: table-level reference edges. With `ticked`, only those between two ticked tables. */
 export function profilableEdges(edges: ReadonlyArray<FlowEdge>, ticked?: ReadonlySet<string>): ProfileEdge[] {
-  const all = endCandidates(edges)
+  const all = endCandidates(edges).filter((e) => !e.source_column)
   const some = ticked && ticked.size > 0 ? all.filter((e) => ticked.has(e.source) && ticked.has(e.target)) : all
   return some.filter((e) => e.source.toLowerCase() !== e.target.toLowerCase())
 }

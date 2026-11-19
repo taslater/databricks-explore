@@ -11,19 +11,19 @@ import type { FlowEdge, FlowNode } from './types'
 export const DIAGRAM_POLL_MS = 2000
 
 /**
- * What the page holds, as a string: the tables with their positions and pins, the edges, the focus schema.
+ * What the page holds, as a string: the tables with their positions and pins, the edges, the focus schema, what the fill means.
  * It is compared with the string taken when the graph was loaded or saved, to tell whether the person changed
  * anything since (a measured size or a selection is not a change).
  */
-export function graphSignature(nodes: FlowNode[], edges: FlowEdge[], focusSchema: string | null): string {
+export function graphSignature(nodes: FlowNode[], edges: FlowEdge[], focusSchema: string | null, colorBy: string = 'type'): string {
   const n = nodes.map((x) => `${x.id}@${Math.round(x.position.x)},${Math.round(x.position.y)}${x.data.pinned ? 'p' : ''}`).sort()
-  return JSON.stringify([focusSchema, n, edges.map((e) => e.id).sort()])
+  return JSON.stringify(colorBy === 'type' ? [focusSchema, n, edges.map((e) => e.id).sort()] : [focusSchema, n, edges.map((e) => e.id).sort(), colorBy])
 }
 
 /** The signature of what is on screen now. */
 export function currentSignature(): string {
   const g = useGraphStore.getState()
-  return graphSignature(g.nodes, g.edges, g.focusSchema)
+  return graphSignature(g.nodes, g.edges, g.focusSchema, g.colorBy)
 }
 
 export type DiagramSyncAction = 'none' | 'reload' | 'banner'

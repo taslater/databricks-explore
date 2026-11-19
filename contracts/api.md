@@ -145,7 +145,7 @@ Response:
 
 ```
 
-- **Node:** `{id, label, kind, focus?, self_ref?, self_ref_last_seen?, missing?, missing_reason?, renamed_to?}`. `kind` is the object's own lowercased `table_type` (`PERSISTED_VIEW` is `view`); when it could not be read, the lineage API's type normalized the same way (`table`, `view`, `materialized_view`, `streaming_table`, `metric_view`), default `"table"`. `focus` is `true` only on the requested object. `self_ref` is set when lineage shows the object feeding itself. `missing` is `true` for a neighbor that does not exist (renamed or dropped: `tables.get` says not found); `missing_reason` names the catalog, schema or table that is gone, and `renamed_to` is a table of the same schema and name in another catalog, when the cached object lists have one.
+- **Node:** `{id, label, kind, focus?, self_ref?, self_ref_last_seen?, self_ref_fks?, files?, missing?, missing_reason?, renamed_to?}`. `kind` is the object's own lowercased `table_type` (`PERSISTED_VIEW` is `view`); when it could not be read, the lineage API's type normalized the same way (`table`, `view`, `materialized_view`, `streaming_table`, `metric_view`), default `"table"`. `focus` is `true` only on the requested object. `self_ref` is set when lineage shows the object feeding itself or a foreign key of it points at itself; `self_ref_last_seen` is the lineage time, and `self_ref_fks` lists those keys as `{constraint, columns, parent_columns}`. `files` is set when the lineage API lists file upstreams (the table is loaded from files): `[{path, readable, last_seen}]`, with `path` empty and `readable` false when the API hides the path. A file makes no node or edge. `missing` is `true` for a neighbor that does not exist (renamed or dropped: `tables.get` says not found); `missing_reason` names the catalog, schema or table that is gone, and `renamed_to` is a table of the same schema and name in another catalog, when the cached object lists have one.
 - **Edge kinds:**
   - `fk`: `id = "fk:<child>-><parent>"`, plus `constraint`, `child_columns`, `parent_columns`, `label`.
   - `view_dep`: `id = "view_dep:<source>-><target>"`. Source is the dependency and target is the view. Read from the view's current definition, also when the object asked for is the dependency and the view a downstream neighbor. `last_read` is the lineage API's time for the same pair, when it has one: a pair with both is this one edge, never two.
@@ -173,7 +173,7 @@ Response:
 
 ### Diagrams
 
-A saved graph is `data/diagrams/<stem>.json`: `{"name", "saved_at", "focus_schema", "nodes": [{"data", "position"}], "edges": [{"data"}]}` (positions are node centers; see `web/src/graph/diagram.ts`). The stem is the name with anything but letters, digits, `_`, `.` and `-` turned into `_`. Everywhere a route or MCP tool takes a name, the name as typed (`Returns graph`) or as stored (`Returns_graph`) works. No connection needed. Agents read and change saved graphs over MCP (`contracts/mcp.md`, "Tools: saved graphs").
+A saved graph is `data/diagrams/<stem>.json`: `{"name", "saved_at", "focus_schema", "color_by"?, "nodes": [{"data", "position"}], "edges": [{"data"}]}` (positions are node centers; see `web/src/graph/diagram.ts`). `color_by` is what a node's fill means (see "Color by" below) and is left out for the default, `type`. The stem is the name with anything but letters, digits, `_`, `.` and `-` turned into `_`. Everywhere a route or MCP tool takes a name, the name as typed (`Returns graph`) or as stored (`Returns_graph`) works. No connection needed. Agents read and change saved graphs over MCP (`contracts/mcp.md`, "Tools: saved graphs").
 
 Every saved graph has a **revision**: a counter that every write bumps, by the page or by an agent. It lives beside the file in `data/diagram_history/<stem>/meta.json`, never inside the diagram, and outlives a delete. A graph saved before revisions existed is at revision 0.
 
@@ -187,7 +187,7 @@ Returns the saved diagram file as stored: `{"name": str, "saved_at": str, ...}` 
 
 ### `POST /api/diagrams`
 
-Body: the diagram object. `name` is required, `nodes` and `edges` must be lists when given (**400** otherwise). The server writes `data/diagrams/<stem>.json` with `{...body, "name", "saved_at": <now>}`: the server's time always wins. A name that differs from an existing graph's only by case is a **400**.
+Body: the diagram object. `name` is required, `nodes` and `edges` must be lists when given and `color_by` must be one of the values below (**400** otherwise). The server writes `data/diagrams/<stem>.json` with `{...body, "name", "saved_at": <now>}`: the server's time always wins. A name that differs from an existing graph's only by case is a **400**.
 
 Optional request header `X-Base-Revision: <n>`, the revision the sender started from. When the graph exists and is no longer at that revision, nothing is written and the answer is **409** `{"error": "graph g was saved by agent since revision 4 (now revision 6)", "name": "g", "revision": 6, "by": "agent"}`. A bad header value is 400. With no header the save is unchecked.
 
@@ -670,7 +670,7 @@ A cached copy is used when no warehouse is selected. When the system table canno
 
 ### `POST /api/relationships/cardinality`
 
-The crow's-foot ends of reference edges, from keys and nullability. Needs a connection; reads `tables.get` (cached) and the relationship store, never the warehouse. Body `{"edges": [{"id", "kind", "source", "target"}, ...]}` (at most 400; a `ph:` name has no ends). Response `{"cardinality": {"<edge id>": {"source": End | null, "target": End | null, "sentence": "..."} | null}}`, only for `fk`, `join_mined` and `manual` edges. An end sits at one table and says how many of its rows relate to one row of the other: `{"end": "one" | "zero_one" | "one_many" | "zero_many", "basis": "constraint" | "primary_key" | "profile", "why": "..."}`. An end is present only when it is known:
+The crow's-foot ends of reference edges, from keys and nullability. Needs a connection; reads `tables.get` (cached) and the relationship store, never the warehouse. Body `{"edges": [{"id", "kind", "source", "target", "source_column"?, "target_column"?}, ...]}` (at most 400; a `ph:` name has no ends). An edge with both columns is one pair of a key, and reads only the key sets that hold that pair (each pair of a composite foreign key shows the key's ends). Response `{"cardinality": {"<edge id>": {"source": End | null, "target": End | null, "sentence": "..."} | null}}`, only for `fk`, `join_mined` and `manual` edges. An end sits at one table and says how many of its rows relate to one row of the other: `{"end": "one" | "zero_one" | "one_many" | "zero_many", "basis": "constraint" | "primary_key" | "profile", "why": "..."}`. An end is present only when it is known:
 
 - **Foreign key**, parent end: when the FK columns are the parent's primary key (as a set, ignoring case), `one` if every FK column is NOT NULL, else `zero_one` (basis `constraint`). Child end: `zero_many`, or `zero_one` when the FK columns are also the child's primary key (basis `primary_key`).
 - **Mined or manual join**: an end is `one` (basis `primary_key`) only when that side's join columns are exactly its table's primary key.
@@ -710,6 +710,18 @@ The statement is one read-only `WITH ... SELECT`. It groups each side by its key
 | `max_fanout`, `p95_fanout` | source rows per key: the most, and the 95th percentile (`percentile_approx`) |
 
 A profile is those fields plus `source`, `target`, `pairs`, `measured_at` and `sql_hash` (a hash of the statement). Profiles are kept in `data/relationships/<profile>.profiles.json`, keyed by (kind, source, target) without regard to case, so a derived foreign key and a stored join keep them alike; a later run replaces the profile. `POST /api/relationships/cardinality` reads them, so a saved graph shows the ends and the orphan tick without running anything. The ends come from the numbers, with basis `profile`: at the target, `one` when `b_repeated_keys` is 0, else `one_many`, and the zero form (`zero_one`, `zero_many`) when some source row has a null key or no match; at the source, `one_many` when `unused_keys` is 0, else `zero_many`. With `orphan_rows` above 0 the Graph draws a small red tick across the line near the referenced table.
+
+### Color by: `POST /api/node-meta`, `POST /api/node-tags/plan`, `POST /api/node-tags/read`
+
+What a node's fill means. A saved graph's `color_by` is `type` (the default: each kind has its fill), `schema`, `catalog`, `owner`, `certification`, `freshness` or `tag:<key>` (nodes take the color of their value for that tag). The page works the values out from what it already has (names, the certification cache, the size and history read before) plus the two routes below; the object type is always an icon before the name. Body for all three: `{"tables": [...]}` as in "Card facts".
+
+`POST /api/node-meta` answers `{"meta": {"<table>": {"owner", "tags", "tags_fetched_at"}}}`. `owner` comes from the cached `tables.get` data (fetched when missing, a REST call). `tags` is the table's own `{tag: value}` as last read (`{}` when it has none), or `null` when its tags were never read. It **never runs a query**. A table that cannot be read and has no cached tags is left out.
+
+`POST /api/node-tags/plan` answers `{"statements": [{"table", "sql"}], "warehouse_id"}`: for each table, the one statement a read would run (its table tags and column tags from `<catalog>.information_schema`, the same as `describe_table`).
+
+`POST /api/node-tags/read` runs those statements on the selected warehouse (this can start a stopped warehouse), four tables at a time, replaces each table's cached tags (`tags/<table>.json`, shared with `describe_table`) and answers `{"meta": {...as node-meta, for the tables read}, "errors": {"<table>": "<message>"}}`. With no warehouse selected it answers **400** and runs nothing.
+
+Fills come from a palette of eight light colors. A value takes the slot its text hashes to and, when that is taken, the next free one, going through the values in sorted order; with more than eight values the eight on most nodes get a slot and the rest are "other" (grey). A node with no value stays white. Certification (certified green, deprecated red) and freshness (late amber, on time green) use fixed colors; a table is "on time" only when it has a write cadence.
 
 ## 6. Concepts
 
