@@ -124,8 +124,8 @@ def lines(out):
 
 def test_lineage_tool_lists_edges_by_hop_then_the_tables(agent, chain):
     out = agent.ok("lineage", table=O, direction="downstream", depth=2)
-    assert out.splitlines()[0] == f"lineage of {O}, downstream, depth 2: 2 other table(s), 3 edge(s)"
-    assert lines(out) == [f"hop 1 lineage {O} -> {V}", f"hop 1 view_dep {O} -> {V}", f"hop 2 lineage {V} -> {R}"]
+    assert out.splitlines()[0] == f"lineage of {O}, downstream, depth 2: 2 other table(s), 2 edge(s)"
+    assert lines(out) == [f"hop 1 view_dep {O} -> {V}", f"hop 2 lineage {V} -> {R}"]  # a view and its source are one edge
     assert f"  {V} view (hop 1 down)" in out and f"  {R} managed (hop 2 down)" in out and f"  {O} managed (start)" in out
     assert "certification cache not loaded" in out
 

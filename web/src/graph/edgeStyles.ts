@@ -8,8 +8,8 @@ export interface KindStyle {
   strokeWidth?: number
 }
 
-/** Legacy kinds keep their look (lineage solid, FK dashed, view dep solid purple, stale lineage dotted gray). New kinds differ by color and dash. */
-export const KIND_STYLE: Record<GraphEdgeKind | 'stale', KindStyle> = {
+/** Legacy kinds keep their look (lineage solid, FK dashed, view dep solid purple, superseded edges dotted gray). New kinds differ by color and dash. */
+export const KIND_STYLE: Record<GraphEdgeKind | 'superseded', KindStyle> = {
   lineage: { stroke: EDGE_COLORS.lineage },
   fk: { stroke: EDGE_COLORS.fk, strokeDasharray: '6 4' },
   view_dep: { stroke: EDGE_COLORS.view_dep },
@@ -18,7 +18,7 @@ export const KIND_STYLE: Record<GraphEdgeKind | 'stale', KindStyle> = {
   sketch: { stroke: EDGE_COLORS.sketch, strokeDasharray: '1 4' },
   concept_link: { stroke: EDGE_COLORS.concept_link, strokeDasharray: '12 4' },
   ontology: { stroke: EDGE_COLORS.ontology, strokeDasharray: '14 3 2 3 2 3' },
-  stale: { stroke: EDGE_COLORS.stale, strokeDasharray: '2 3' },
+  superseded: { stroke: EDGE_COLORS.superseded, strokeDasharray: '2 3' },
 }
 
 export const KIND_LABEL: Record<GraphEdgeKind, string> = {
