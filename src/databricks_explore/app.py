@@ -9,6 +9,7 @@ from werkzeug.exceptions import HTTPException, MethodNotAllowed, NotFound
 
 from . import __version__, canvases
 from . import cardinality
+from . import column_trace
 from . import graph_export
 from . import concepts
 from . import dbx
@@ -292,6 +293,20 @@ def relationships_for_table():
         out = relationships.unified(store, table, rel, times, level, columns)
     extra = {"column_lineage_source": columns["source"]} if columns and columns.get("source") else {}
     return jsonify({**out, **extra, "errors": [*out["errors"], *notes]})
+
+
+@app.get("/api/column-trace")
+def column_trace_route():
+    """One column's path through column lineage, with what each hop does to it (see column_trace.trace)."""
+    table = relationships.check_table(request.args.get("table", ""))
+    column = request.args.get("column", "").strip()
+    if table.startswith("ph:") or not column:
+        raise relationships.RelationshipInvalid("table and column are required, and a placeholder has no lineage")
+    try:
+        depth = int(request.args.get("depth", 3))
+        return jsonify(column_trace.trace(ex(), table, column, request.args.get("direction", "both"), depth))
+    except ValueError as e:
+        raise relationships.RelationshipInvalid(str(e)) from e
 
 
 @app.get("/api/relationships/joins")

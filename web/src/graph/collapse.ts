@@ -194,7 +194,7 @@ function findChains(nodes: FlowNode[], shown: FlowEdge[], visible: Set<string>, 
   const ends = new Map<string, { in: FlowEdge; out: FlowEdge }>()
   for (const n of nodes) {
     const d = n.data
-    if (!VIEW_KINDS.has(d.kind) || d.focus || d.pinned || d.missing || d.showColumns || d.selfRef || !visible.has(n.id)) continue
+    if (!VIEW_KINDS.has(d.kind) || d.focus || d.pinned || d.traced || d.missing || d.showColumns || d.selfRef || !visible.has(n.id)) continue
     const mine = touching.get(n.id) ?? []
     if (mine.length !== 2) continue
     const into = mine.filter((e) => e.target === n.id && e.source !== n.id)
@@ -268,12 +268,13 @@ export function collapseGraph(input: CollapseInput): CollapseView {
   if (active) {
     for (const [key, members] of keyed) {
       if (members.length < 2) continue
-      const defaultCollapsed = members.length > MAX_OPEN && !members.some((n) => n.data.focus || n.data.pinned)
+      const defaultCollapsed = members.length > MAX_OPEN && !members.some((n) => n.data.focus || n.data.pinned || n.data.traced)
       groups.push({ key, label: names.get(key) ?? key, members: members.map((n) => n.id), collapsed: grouping.overrides[key] ?? defaultCollapsed, defaultCollapsed, boxed: false, noun: nounOf(members) })
     }
   }
   const collapsedOf = new Map<string, string>() // member id to group key
-  for (const g of groups) if (g.collapsed) for (const id of g.members) collapsedOf.set(id, g.key)
+  // A table on a column trace stays where it is, outside its collapsed group.
+  for (const g of groups) if (g.collapsed) for (const id of g.members) if (!byId.get(id)!.data.traced) collapsedOf.set(id, g.key)
   const hidden = new Set<string>([...elidedViews, ...collapsedOf.keys()])
 
   // The edges: chains replace their views' edges, collapsed groups take their members' edges. Parallel ones merge per family.

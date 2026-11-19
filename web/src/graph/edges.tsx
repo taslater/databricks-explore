@@ -4,6 +4,7 @@ import { EdgeEnd } from './EdgeEnds'
 import { EdgeGrainGlyph } from './NodeFacts'
 import { OrphanTick } from './OrphanTick'
 import { hasOrphans } from './relProfile'
+import { EdgeTraceLabel } from './ColumnTrace'
 import { EdgeTransformGlyphs } from './EdgeTransforms'
 import { MergedEdgeLabel } from './CollapseMarks'
 import type { FlowEdge } from './types'
@@ -42,6 +43,7 @@ function makeEdge(family: EdgeFamily, superseded = false) {
           interactionWidth={EDGE_INTERACTION_WIDTH}
           style={{
             ...edgeStyle(family, data ? isInferred(data.info) : false, superseded),
+            ...(data?.trace ? { strokeWidth: 2.6 } : null),
             ...(selected ? { strokeWidth: 3.5 } : null),
             opacity: data?.faded ? 0.2 : rejected ? REJECTED_OPACITY : 1,
           }}
@@ -57,6 +59,7 @@ function makeEdge(family: EdgeFamily, superseded = false) {
         )}
         {data?.merged && <MergedEdgeLabel id={id} merged={data.merged} x={labelX} y={labelY} faded={data.faded} />}
         <EdgeGrainGlyph id={id} change={data?.transform?.glyphs.includes('aggregate') ? undefined : data?.grainChange} x={labelX} y={labelY} faded={data?.faded} />
+        <EdgeTraceLabel hop={data?.trace} x={targetX} y={targetY} side={targetPosition} faded={data?.faded} />
         <EdgeTransformGlyphs id={id} transform={data?.transform} x={targetX} y={targetY} side={targetPosition} faded={data?.faded} />
       </>
     )

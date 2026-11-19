@@ -21,6 +21,7 @@ EXPECTED_TOOLS = {
     "connect_known", "add_lineage", "run_window", "run_all_windows", "arrange", "tidy", "doctor", "render_canvas", "undo_canvas",
     "list_graphs", "get_graph", "create_graph", "update_graph", "rename_graph", "delete_graph", "export_graph",
     "profile_relationship",
+    "trace_column",
 }
 
 

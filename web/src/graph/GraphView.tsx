@@ -35,6 +35,8 @@ import { GraphToolbar } from './GraphToolbar'
 import { MineDialog } from './MineDialog'
 import { MiningPanel } from './MiningPanel'
 import { withGrainChanges, withNodeFacts } from './cardFacts'
+import { TraceBar, useActiveTrace } from './ColumnTrace'
+import { traceColumnEdges, traceFade, traceNodes } from './traceDraw'
 import { EdgeMenuHost, ProfileDialog, useEdgeContextMenu } from './ProfileDialog'
 import { useNeighborScan, withNeighborCounts } from './neighborScan'
 import { TableStatsDialog } from './TableStatsDialog'
@@ -84,6 +86,7 @@ export function GraphView() {
         <ReactFlowProvider>
           <GraphCanvas />
         </ReactFlowProvider>
+        <TraceBar />
       </div>
       {drawer && <MiningPanel drawer={drawer} />}
       {mineDialog && <MineDialog />}
@@ -115,12 +118,18 @@ function GraphCanvas() {
   const showConcepts = useGraphStore((s) => s.showConcepts)
   const connected = useUiStore((s) => s.connectedProfile)
 
-  // Collapsed groups and elided chains: the nodes and edges added to the graph, and the nodes it leaves out.
-  const view = useCollapseView()
+  const trace = useActiveTrace()
+  // Collapsed groups and elided chains: the nodes and edges added to the graph, and the nodes it leaves out. A traced table is never left out.
+  const tracedNodes = useMemo(() => traceNodes(rawNodes, trace), [rawNodes, trace])
+  const view = useCollapseView(tracedNodes)
   useGroupTags()
   const flow = useMemo(
-    () => deriveFlow({ nodes: view.nodes, edges: view.edges, columnEdges, focusSchema, filters, hoverId, forceHidden: view.hidden }),
-    [view, columnEdges, focusSchema, filters, hoverId],
+    () =>
+      traceFade(
+        deriveFlow({ nodes: view.nodes, edges: view.edges, columnEdges: traceColumnEdges(columnEdges, rawNodes, trace), focusSchema, filters, hoverId, forceHidden: view.hidden }),
+        trace,
+      ),
+    [view, rawNodes, columnEdges, focusSchema, filters, hoverId, trace],
   )
   const boxes = useMemo(() => groupBoxNodes(view, flow.nodes), [view, flow.nodes])
 

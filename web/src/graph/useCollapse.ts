@@ -3,9 +3,12 @@ import { useEffect, useMemo } from 'react'
 import { useNodeMeta } from '../api/nodeMeta'
 import { collapseGraph, type CollapseView } from './collapse'
 import { useGraphStore } from './graphStore'
+import type { FlowNode } from './types'
 
-export function useCollapseView(): CollapseView {
-  const nodes = useGraphStore((s) => s.nodes)
+/** `nodes` are the graph's nodes with anything the page adds to them (a column trace); the store's by default. */
+export function useCollapseView(drawn?: FlowNode[]): CollapseView {
+  const stored = useGraphStore((s) => s.nodes)
+  const nodes = drawn ?? stored
   const edges = useGraphStore((s) => s.edges)
   const filters = useGraphStore((s) => s.filters)
   const grouping = useGraphStore((s) => s.grouping)

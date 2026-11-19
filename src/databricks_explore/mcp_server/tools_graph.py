@@ -3,6 +3,7 @@ import base64
 import json
 
 from .. import cardinality
+from .. import column_trace
 from .. import dbx
 from .. import graph_collapse
 from .. import graph_export
@@ -313,6 +314,52 @@ def update_graph(ctx, args):
         stem, rev = _run(graphs.write_graph, body, "agent")
     changes = [f"added {len(new)}" if new else "", f"removed {len(gone)}" if gone else "", "laid out again" if args.get("relayout") else "", f"colored by {args['color_by']}" if args.get("color_by") else ""]
     return text(_result("updated", stem, rev, tables, edges, [", ".join(c for c in changes if c) + ".", *notes]))
+
+
+@tool("trace_column", "Trace one column through column lineage, several hops at once: where it comes from (upstream), what is built from it (downstream) or both. One line per hop, source to target as data flows, with what the target's SQL does to it: `=` (same column), `→` (renamed), `cast`, `ƒ` (function or expression), `Σ sum` (aggregate) or `case`. The SQL is a view's definition, or a table's writing statement already read in the Graph; a hop whose SQL is unknown has no class, and the tables to read are listed. Lists the dashboards and other readers that lineage names at the downstream ends. Reads the cache; a table never seen is read from Databricks (column lineage: the cached system table or one read-only query, else the REST API), at most 60 tables. With graph, also adds the traced tables to that saved graph, as update_graph add does.",
+      obj({"table": {"type": "string", "minLength": 1, "description": "full name catalog.schema.table"}, "column": {"type": "string", "minLength": 1},
+           "direction": {"type": "string", "enum": ["upstream", "downstream", "both"], "description": "both (default), upstream (where it comes from) or downstream (what breaks if it changes)"},
+           "depth": integer(1, column_trace.MAX_DEPTH, f"hops to follow on each side, default 3, at most {column_trace.MAX_DEPTH}"),
+           "graph": {**NAME, "description": "a saved graph to add the traced tables to"}, "format": {"type": "string", "enum": ["text", "json"]}}, ("table", "column")),
+      read_only=False)
+def trace_column(ctx, args):
+    e = ctx.need_explorer()
+    try:
+        table = relationships.check_table(args["table"])
+        if table.startswith("ph:"):
+            raise ToolError("a placeholder has no lineage")
+        out = column_trace.trace(e, table, args["column"], args.get("direction", "both"), args.get("depth", 3))
+    except (relationships.RelationshipInvalid, ValueError) as err:
+        raise ToolError(str(err)) from err
+    added = ""
+    if args.get("graph"):
+        data = _run(graphs.load_graph, args["graph"])
+        have = {n["id"].lower() for n in _nodes_of(data)}
+        new = [t for t in out["tables"] if t.lower() not in have]
+        added = "added to the graph: " + (", ".join(new) if new else "nothing, every table is already on it")
+        if new:
+            added += "\n" + update_graph(ctx, {"name": args["graph"], "add": new})[0]["text"]
+    if args.get("format") == "json":
+        return text(json.dumps({**out, **({"graph": added} if added else {})}, indent=1, default=str))
+    name = f"{table}.{out['column']}"
+    lines = [f"trace of {name}, {out['direction']}, depth {out['depth']}: {len(out['tables']) - 1} other table(s), {len(out['hops'])} hop(s)"]
+    for h in out["hops"]:
+        how = h["label"] or ("unknown (" + (h["note"] or "no sql") + ")")
+        lines.append(f"hop {h['hop']} {h['side']} {h['source']['table']}.{h['source']['column']} -> [{how}] -> {h['target']['table']}.{h['target']['column']}"
+                     + (f"  {h['expr']}" if h.get("expr") else ""))
+    if not out["hops"]:
+        lines.append("no column lineage found (lineage only shows queries run since it was enabled; with no warehouse only the REST API and view definitions are read)")
+    if out["readers"]:
+        lines.append("read by (lineage names readers of a table, not of one column):")
+        lines += [f"  {r['kind']} {r['id']} reads {r['table']}" for r in out["readers"]]
+    if out["unread"]:
+        lines.append("hops into these tables have no class yet, because the statement that wrote each was never read (read it in the Graph's Details): " + ", ".join(out["unread"]))
+    if out["truncated"]:
+        lines.append(f"stopped at {column_trace.NODE_CAP} tables or {column_trace.HOP_CAP} hops: use a smaller depth or one direction")
+    if added:
+        lines.append(added)
+    lines += [f"error: {x}" for x in out["errors"]]
+    return text("\n".join(lines))
 
 
 @tool("rename_graph", "Rename a saved graph. Fails if the new name is taken. The name may be typed or as stored.",

@@ -1,5 +1,6 @@
 import type { Edge, Node } from '@xyflow/react'
 import type { Cardinality, FileUpstream, GraphEdge, GraphEdgeKind, SelfRefFk } from '../api/types'
+import type { TraceHop } from '../api/columnTrace'
 import type { EdgeTransform } from '../api/edgeTransforms'
 import type { NodeFacts } from '../api/nodeFacts'
 import type { ColumnInfo } from './columns'
@@ -45,6 +46,9 @@ export type TableNodeData = {
   certification?: 'certified' | 'deprecated'
   /** The grain and the size and freshness last read, added at draw time (graph/nodeFacts.ts) and never saved. */
   facts?: NodeFacts
+  /** The columns a column trace goes through (lowercase), and the one it starts from, added at draw time and never saved. */
+  traced?: string[]
+  traceStart?: string
   /** The fill chosen by "Color by", added at draw time (graph/colorBy.ts) and never saved. Absent in type mode. */
   fill?: string
   /** Set on the node that stands for a collapsed group (graph/collapse.ts); never saved. */
@@ -96,6 +100,8 @@ export type EdgeData = {
   transform?: EdgeTransform
   /** Set on an edge that stands for others: its group's edges, or a chain of pass-through views (graph/collapse.ts). */
   merged?: MergedEdge
+  /** The hop of a column trace this edge draws, with what the SQL does to the column, added at draw time and never saved. */
+  trace?: TraceHop
 }
 
 export type FlowEdge = Edge<EdgeData>

@@ -15,6 +15,7 @@ import { NeighborDetails } from './NeighborDetails'
 import { NodeMarkDetails } from './NodeMarkDetails'
 import { useGraphStore } from './graphStore'
 import { canReview, patchIds } from './relationships'
+import { TraceButtons, TraceDetails } from './ColumnTrace'
 import { EdgeHow } from './EdgeTransforms'
 import { CollapseDetails, GroupsSection } from './CollapseControls'
 import { EdgeGrainDetails, NodeFactsDetails } from './NodeFacts'
@@ -119,6 +120,7 @@ export function GraphDetails() {
 
       <div className="details-body">
         <CollapseDetails />
+        <TraceDetails />
         {several && <SelectionDetails tables={pickedTables} />}
         {detailNode && (detailNode.data.missing ? <MissingDetails id={detailNode.id} node={detailNode} /> : <NodeDetails id={detailNode.id} node={detailNode} />)}
         {selectedEdge && <EdgeDetails edge={selectedEdge} />}
@@ -204,6 +206,9 @@ function NodeDetails({ id, node }: { id: string; node: FlowNode }) {
             <tr key={`${str(c.name)}-${i}`}>
               <td>{str(c.name)}</td>
               <td>{str(c.type_text)}</td>
+              <td>
+                <TraceButtons table={id} column={str(c.name)} />
+              </td>
             </tr>
           ))}
         </tbody>

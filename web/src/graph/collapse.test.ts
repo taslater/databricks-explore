@@ -90,6 +90,18 @@ describe('groups', () => {
     expect(run(extra, only).groups.find((g) => g.key === 'lake.bronze')?.members).toHaveLength(11)
   })
 
+  it('keeps a table on a column trace out of its collapsed group, and its view out of a chain', () => {
+    const { nodes, edges } = lake()
+    const traced = nodes.map((n) => (n.id === 'lake.bronze.t3' ? { ...n, data: { ...n.data, traced: ['id'] } } : n))
+    const v = run(traced, edges)
+    expect(v.groups.find((g) => g.key === 'lake.bronze')?.collapsed).toBe(false)
+    const pinned = run(traced, edges, { ...DEFAULT_GROUPING, overrides: { 'lake.bronze': true } })
+    expect(pinned.hidden.has('lake.bronze.t3')).toBe(false)
+    expect(pinned.hidden.size).toBe(9)
+    const c = [node('d.s.a'), node('d.s.v', 'view', { traced: ['x'] }), node('d.s.b')]
+    expect(run(c, [edge('d.s.a', 'd.s.v'), edge('d.s.v', 'd.s.b')]).chains).toHaveLength(0)
+  })
+
   it('groups by a tag, and not at all', () => {
     const { nodes, edges } = lake()
     const tags = Object.fromEntries(nodes.map((n, i) => [n.id, i % 2 ? 'pii' : 'plain']))
