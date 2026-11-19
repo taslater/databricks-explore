@@ -994,23 +994,36 @@ def _expression_class(node: exp.Expression) -> dict:
     return {"class": "func", "agg": None}
 
 
+def _insert_names(tree: exp.Expression, target_columns: Iterable[str] | None) -> list[str] | None:
+    """The names an INSERT gives its query's outputs by position: its column list, else the table's columns; None for any other statement."""
+    if not isinstance(tree, exp.Insert):
+        return None
+    schema = tree.this
+    listed = [c.name for c in schema.expressions] if isinstance(schema, exp.Schema) else []
+    return listed or list(target_columns or [])
+
+
 def column_expressions(sql: str, default_catalog: str | None = None, default_schema: str | None = None,
-                       known: Iterable[str] | None = None) -> dict[str, dict]:
+                       known: Iterable[str] | None = None, target_columns: Iterable[str] | None = None) -> dict[str, dict]:
     """How each output column of a statement's query is made: {column name (lowercase): {"class", "agg", "sql"}}.
 
     The statement is a SELECT (a view's definition), CREATE ... AS SELECT, INSERT ... SELECT or MERGE (its USING query);
     the first one with a query is used. class is ref (a column read as it is, possibly renamed), agg (an aggregate
     function, "agg" names it), cast, case, or func (any other function or expression); sql is the expression, cut when
-    long. A `*` names no column. Empty when the statement has no query. Raises ValueError when the SQL does not parse."""
+    long. A `*` names no column. Empty when the statement has no query. An INSERT names its outputs by position: by its column
+    list, else by `target_columns` (the table's columns, in order) when there are as many; otherwise by the query's own names.
+    Raises ValueError when the SQL does not parse."""
     try:
         for tree in sqlglot.parse(sql, read=_DIALECT):
             select = _top_select(tree) if tree is not None else None
             if select is None:
                 continue
             out: dict[str, dict] = {}
-            for item in select.expressions:
+            names = _insert_names(tree, target_columns)
+            names = names if names and len(names) == len(select.expressions) else None
+            for i, item in enumerate(select.expressions):
                 inner = item.this if isinstance(item, exp.Alias) else item
-                name = item.alias_or_name
+                name = names[i] if names else item.alias_or_name
                 if not name or isinstance(inner, exp.Star) or (isinstance(inner, exp.Column) and isinstance(inner.this, exp.Star)):
                     continue
                 out.setdefault(name.lower(), {**_expression_class(inner), "sql": _short_sql(inner)})
