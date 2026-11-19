@@ -1,6 +1,6 @@
 # MCP server contract
 
-A Model Context Protocol server inside the Flask app, so a coding agent (Claude Code, for example) can explore the catalog and work on canvases next to the person using the browser UI. Implemented in `mcp_server/`. It adds `/mcp` and the two `/api/agent-access` routes to `app.py` and changes nothing else about the API, except for the canvas revision routes in `contracts/api.md` section 3.
+A Model Context Protocol server inside the Flask app, so a coding agent (Claude Code, for example) can explore the catalog and work on canvases and saved graphs next to the person using the browser UI. Implemented in `mcp_server/`. It adds `/mcp` and the two `/api/agent-access` routes to `app.py` and changes nothing else about the API, except for the canvas revision routes in `contracts/api.md` section 3.
 
 **Scope.** Read access, local edits, and read-only SQL. **No tool writes to the Databricks workspace, and no tool connects or chooses a profile or warehouse.** The agent uses whatever the person connected in the UI. A tool that needs a connection returns an error result that says "Not connected: connect a profile in the app first."
 
@@ -42,7 +42,7 @@ For the "Agent access" panel in the top bar. Same Host and Origin checks as `/mc
 ```json
 {"url": "http://127.0.0.1:8765/mcp", "token": "...",
  "command": "claude mcp add --transport http databricks-explore http://127.0.0.1:8765/mcp --header \"Authorization: Bearer ...\"",
- "tools": 39}
+ "tools": 45}
 ```
 
 ### `POST /api/agent-access/token`
@@ -170,3 +170,22 @@ Canvas "d": 2 nodes (2 shape), 1 connectors; extent x 0..580, y 0..80 px. Layout
 **Undo.** Before each agent write, the file it replaces is kept as a snapshot in `data/canvas_history/<name>/` (the last 20 per canvas). A canvas that did not exist before has nothing to undo. `undo_canvas` and the page's "Undo agent change" button (`POST /api/canvases/<name>/undo`) restore the newest snapshot.
 
 **Live sync.** Each canvas has a revision number (`GET /api/canvases/<name>/revision`, `contracts/api.md` section 3). Every save, by the page or by an agent, increments it. The page polls it every 2 seconds. With no unsaved edits it reloads the canvas in place and keeps its viewport. With unsaved edits it shows "An agent changed this canvas" with Reload and Keep mine, and its autosave waits for the choice. The page sends `X-Base-Revision` with a save, and the server answers `409` when the canvas moved on (`contracts/api.md`), so the page cannot overwrite an agent's save unseen. An agent write is never refused: MCP writes always go to the saved file.
+
+## Tools: saved graphs
+
+A saved graph is a diagram saved from the Graph tab: `data/diagrams/<name>.json` (`contracts/api.md`, "Diagrams"). It is a different store from a canvas, and `list_canvases` and `get_canvas` never see it (when a canvas name is missing but a graph has that name, `get_canvas` says to use `get_graph`; `list_canvases` with nothing to list points to `list_graphs`). The tools need no warehouse, write only local files, and the five that change a graph name **tables**, never edges or coordinates. A graph name is accepted as typed (`Returns graph`) or as stored (`Returns_graph`; other characters than letters, digits, `_`, `.` and `-` become `_`). Names that differ only by case are refused, as for canvases.
+
+| Tool | Input | Output |
+| --- | --- | --- |
+| `list_graphs` | none | `name: N tables, M edges, revision R (by), saved <time>` per graph, plus `named 'Returns graph'` when the title differs from the stored name |
+| `get_graph` | `*name`, `format` (`text` default, `json`) | Text: the header (counts, revision, who wrote last, saved time), the focus schema, one line per table (`catalog.schema.table [kind] focus pinned`) and one per edge (`source -> target  kind status (join columns)`; `<->` for lineage both ways). The Graph's filters are not saved with a graph, so there are none to report. `json`: `{name, title, revision, by, saved_at, focus_schema, nodes: [{table, kind, focus?, pinned?, x, y}], edges: [{id, kind, source, target, status, directed, bidir?, columns?, parent_columns?, note?}]}`, compact |
+| `create_graph` | `*name`, `*tables` (1-60), `focus` | Saves a graph with a node for each table and an edge for each relationship the app knows between two of them. An existing name is an error. Needs a connected profile |
+| `update_graph` | `*name`, `add`, `remove`, `relayout` | Adds or removes tables (their edges go with them), derives the edges again for the new set, keeps the positions of tables that stay unless `relayout`, and places added tables clear of them. Removing every table is an error (use `delete_graph`). Needs a connected profile |
+| `rename_graph` | `*name`, `*new_name` | Renames the graph (and the title inside the file). A taken name is an error |
+| `delete_graph` | `*name` | Moves the file to `diagrams/.trash/<name>.<time>.r<revision>.json` in the data folder, so the person can restore it by hand. Not read-only (`destructiveHint` is true) |
+
+**Edges** are what the Graph tab draws for exactly those tables (no neighbors are added): the edges of `GET /api/relationships` (Unity Catalog foreign keys, view dependencies, lineage, and stored joins) with both ends in the set. Following the Graph's default filters, rejected edges are left out, and so are joins nobody has accepted yet (status `proposed`); manual and accepted ones are drawn. One edge per pair of tables: a lineage edge is left out where the pair also has a view dependency, and so is one into a view whose definition no longer reads its source. The result says how many were left out, and names tables that have no relationship to the others. Every node is pinned (added on purpose), so the Graph's edge filters never hide it. The focus is `focus` (its schema becomes the focus schema), else none, with the most common schema as the focus schema.
+
+**Layout** is left to right. Lineage and view dependencies set the columns (a source is left of what is built from it). A table that has only references (foreign keys, joins) takes the column of the table it refers to or is referred by, one above the other. Parts of the graph with no edge between them are stacked in bands. It is deterministic.
+
+**Live sync and revisions.** Each saved graph has a revision, kept in `data/diagram_history/<name>/meta.json` (it survives a delete, so a later graph of that name keeps counting). Every write bumps it: the page's Save, and an agent's `create_graph`, `update_graph` and `rename_graph` (`by` is `agent`). The Graph tab polls the open graph's revision every 2 seconds. With nothing changed on the page since it loaded or saved the graph, an agent's change is loaded in place; otherwise the page shows "<name> was changed by agent" with Reload and Keep mine. A Save over a newer revision asks "Overwrite newer save?" first (the page sends `X-Base-Revision`, `contracts/api.md`). An agent write is never refused. There is no undo for graphs; `delete_graph` leaves the copy in the trash folder.
