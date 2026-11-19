@@ -668,6 +668,16 @@ A cached copy is used when no warehouse is selected. When the system table canno
 ---
 
 
+### `POST /api/relationships/cardinality`
+
+The crow's-foot ends of reference edges, from keys and nullability. Needs a connection; reads `tables.get` (cached) and the relationship store, never the warehouse. Body `{"edges": [{"id", "kind", "source", "target"}, ...]}` (at most 400; a `ph:` name has no ends). Response `{"cardinality": {"<edge id>": {"source": End | null, "target": End | null, "sentence": "..."} | null}}`, only for `fk`, `join_mined` and `manual` edges. An end sits at one table and says how many of its rows relate to one row of the other: `{"end": "one" | "zero_one" | "one_many" | "zero_many", "basis": "constraint" | "primary_key" | "profile", "why": "..."}`. An end is present only when it is known:
+
+- **Foreign key**, parent end: when the FK columns are the parent's primary key (as a set, ignoring case), `one` if every FK column is NOT NULL, else `zero_one` (basis `constraint`). Child end: `zero_many`, or `zero_one` when the FK columns are also the child's primary key (basis `primary_key`).
+- **Mined or manual join**: an end is `one` (basis `primary_key`) only when that side's join columns are exactly its table's primary key.
+- Several key sets between the same two tables give an end only when every set gives the same one. A measured end (`profile`) will replace a metadata end.
+
+The edge is `null` when no end is known. MCP `get_graph` reports the same as `cardinality` on each reference edge.
+
 ### Card facts: `POST /api/node-facts`, `POST /api/table-stats/plan`, `POST /api/table-stats/read`
 
 What the Graph shows on a card besides its name. Body for all three: `{"tables": ["cat.sch.tbl", ...]}` (at most 100; placeholders and names that are not `catalog.schema.table` are skipped; 400 when `tables` is not a list of strings).

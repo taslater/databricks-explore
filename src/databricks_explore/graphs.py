@@ -11,10 +11,11 @@ from collections import Counter
 from typing import Optional
 
 from . import dbx
+from .edge_families import FLOW_KINDS
 
 LOCK = threading.RLock()  # one writer at a time, so an agent's read-modify-write cannot interleave with a save
 NAME_MAX = 120
-LINEAGE_FLOW = ("lineage", "view_dep")  # the kinds that set the left-to-right order; the rest are references
+LINEAGE_FLOW = FLOW_KINDS  # the flow kinds set the left-to-right order; the rest (references and meaning links) hang beside them
 DERIVED_KINDS = ("fk", "lineage", "view_dep")
 
 

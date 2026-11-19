@@ -91,7 +91,7 @@ export function conceptOverlay(
           target: table.id,
           sourceHandle: 'src-b',
           targetHandle: column ? columnHandleId('t', 'l', column.name) : 'tgt-t',
-          type: 'concept_link',
+          type: 'meaning',
           selectable: false,
           focusable: false,
           markerEnd: { type: MarkerType.ArrowClosed, color: EDGE_COLORS.concept_link },

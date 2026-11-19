@@ -1,14 +1,17 @@
 // Display helpers ported from static/app.js. Pure functions, no React.
 
+/** One color per edge family (see edgeStyles.ts): flow is the strongest, meaning the lightest. */
+export const FAMILY_COLORS = { flow: '#2d3748', reference: '#2c7a7b', meaning: '#a0aec0' } as const
+
 export const EDGE_COLORS: Record<string, string> = {
-  lineage: '#2b6cb0',
-  fk: '#c05621',
-  view_dep: '#6b46c1',
-  join_mined: '#2c7a7b',
-  manual: '#2f855a',
-  sketch: '#b83280',
-  concept_link: '#b7791f',
-  ontology: '#4a5568',
+  lineage: FAMILY_COLORS.flow,
+  view_dep: FAMILY_COLORS.flow,
+  fk: FAMILY_COLORS.reference,
+  join_mined: FAMILY_COLORS.reference,
+  manual: FAMILY_COLORS.reference,
+  sketch: FAMILY_COLORS.meaning,
+  concept_link: FAMILY_COLORS.meaning,
+  ontology: FAMILY_COLORS.meaning,
   superseded: '#bbb',
 }
 

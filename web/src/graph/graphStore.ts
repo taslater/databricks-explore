@@ -12,6 +12,9 @@ import type { DiagramRevision } from '../api/diagrams'
 import type { EdgeFilters, FlowEdge, FlowNode, Selection } from './types'
 
 export const DEFAULT_FILTERS: EdgeFilters = {
+  flow: true,
+  reference: true,
+  meaning: false,
   lineage: true,
   fk: true,
   view_dep: true,

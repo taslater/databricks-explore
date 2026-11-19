@@ -1,7 +1,8 @@
 import type { Edge, Node } from '@xyflow/react'
-import type { FileUpstream, GraphEdge, GraphEdgeKind, SelfRefFk } from '../api/types'
+import type { Cardinality, FileUpstream, GraphEdge, GraphEdgeKind, SelfRefFk } from '../api/types'
 import type { NodeFacts } from '../api/nodeFacts'
 import type { ColumnInfo } from './columns'
+import type { EdgeFamily } from './edgeStyles'
 
 /** Data stored on a React Flow node. Fields marked "derived" are filled in by deriveFlow and never saved. */
 export type TableNodeData = {
@@ -68,14 +69,16 @@ export type EdgeData = {
   faded?: boolean
   /** `per a → per b`: the target is a GROUP BY of a different grain than the source (added at draw time, never saved). */
   grainChange?: string
+  /** The crow's-foot ends read from keys and nullability, added at draw time (graph/EdgeEnds.tsx) and never saved. */
+  cardinality?: Cardinality
 }
 
 export type FlowEdge = Edge<EdgeData>
 
 export type Selection = { kind: 'node' | 'edge'; id: string } | null
 
-/** One checkbox per edge kind, plus superseded and rejected edges (hidden unless asked for). */
-export type EdgeFilters = Record<GraphEdgeKind, boolean> & {
+/** One checkbox per edge family and per kind (an edge shows when both are on), plus superseded and rejected edges (hidden unless asked for). */
+export type EdgeFilters = Record<GraphEdgeKind, boolean> & Record<EdgeFamily, boolean> & {
   showSuperseded: boolean
   showRejected: boolean
 }

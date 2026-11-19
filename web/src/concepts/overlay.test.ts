@@ -77,7 +77,7 @@ describe('conceptOverlay', () => {
       target: A,
       sourceHandle: 'src-b',
       targetHandle: 'tgt-t',
-      type: 'concept_link',
+      type: 'meaning',
       selectable: false,
     })
     expect(isConceptEdge(out.edges[0].id)).toBe(true)

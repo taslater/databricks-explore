@@ -5,6 +5,7 @@ import pytest
 
 from databricks_explore import dbx
 from databricks_explore import graphs
+from databricks_explore import relationships
 from mcp_helpers import connected, env  # noqa: F401
 
 
@@ -116,6 +117,17 @@ def test_the_layout_flows_left_to_right_and_stacks_unconnected_parts():
     assert at["d"][0] == at["a"][0] and at["d"][1] != at["a"][1]  # a reference joins its partner's column
     assert at["e"][1] > max(at[i][1] for i in "abcd")  # a part with no edge is a band below
     assert graphs.layout_positions(sizes, [("a", "b", "lineage"), ("b", "a", "lineage")])["b"][0] > 0  # a cycle still lays out
+
+
+def test_only_flow_edges_set_the_rank_and_every_kind_has_a_family():
+    from databricks_explore.edge_families import FAMILY_OF, family_of
+    assert family_of("lineage") == family_of("view_dep") == "flow" and family_of("join_mined") == "reference"
+    assert family_of("sketch") == family_of("concept_link") == "meaning" and family_of("nope") is None
+    assert set(FAMILY_OF) == set(relationships.Kind.__args__)  # a new kind must pick a family
+    sizes = {i: (100, 40) for i in "abc"}
+    for kind in ("fk", "join_mined", "manual", "sketch"):
+        at = graphs.layout_positions(sizes, [("a", "b", "lineage"), ("c", "b", kind)])
+        assert at["b"][0] > at["a"][0] and at["c"][0] == at["b"][0], kind
 
 
 def test_adapt_merges_lineage_both_ways_into_one_bidir_edge():
