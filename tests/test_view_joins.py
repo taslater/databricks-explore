@@ -308,6 +308,6 @@ def test_view_column_lineage_traces_expressions_and_skips_what_it_cannot_name():
     sql = "SELECT o.order_id, o.amount * 2 AS dbl, concat(o.a, s.b) AS cc, count(*) AS n, 1 AS one FROM raw.orders o JOIN core.dim_store s ON o.store_id = s.store_id"
     got = sqltools.view_column_lineage(sql, ["order_id", "dbl", "cc", "n", "one", "missing"], "main", "gold")
     assert got == [("main.raw.orders", "order_id", "order_id"), ("main.raw.orders", "amount", "dbl"),
-                   ("main.raw.orders", "a", "cc"), ("main.core.dim_store", "b", "cc")]
+                   ("main.core.dim_store", "b", "cc"), ("main.raw.orders", "a", "cc")]  # sorted per column
     assert sqltools.view_column_lineage("SELECT * FROM a.b.c", ["x"]) == []
     assert sqltools.view_column_lineage("not sql (", ["x"]) == []

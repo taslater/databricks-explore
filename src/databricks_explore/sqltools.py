@@ -562,12 +562,13 @@ def view_column_lineage(sql: str, columns: Iterable[str], default_catalog: str |
             leaves = [n for n in tree.walk() if not n.downstream]
         except Exception:  # sqlglot raises several kinds of error for SQL it cannot trace
             continue
+        found = set()  # sqlglot walks a column's sources in no fixed order, so sort them
         for leaf in leaves:
             table = leaf.expression if isinstance(leaf.expression, exp.Table) else None
             source = names.qualify(table) if table is not None else None
-            if source is None or source.count(".") != 2:
-                continue
-            row = (source, leaf.name.rsplit(".", 1)[-1].lower(), str(column))
+            if source is not None and source.count(".") == 2:
+                found.add((source, leaf.name.rsplit(".", 1)[-1].lower(), str(column)))
+        for row in sorted(found):
             if row not in seen:
                 seen.add(row)
                 out.append(row)
