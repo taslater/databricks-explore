@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 // Dev: `npm run dev` serves on :5173 and forwards /api to the Flask server.
