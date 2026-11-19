@@ -1800,6 +1800,10 @@ button.link {
   width: 5em;
 }
 
+.orphan-note {
+  color: #d1242f;
+}
+
 .mine-sql {
   white-space: pre-wrap;
   font-size: 11px;

@@ -7,6 +7,7 @@ import type { EdgeFlow, GraphEdge, JoinKey, Producer, RelationshipStatus } from 
 import { fetchCurrentEdge, messageOf, useGraphActions } from './actions'
 import { KIND_LABEL } from './edgeStyles'
 import { EdgeCardinality } from './EdgeEnds'
+import { ProfileDetails } from './ProfileDialog'
 import { EdgeFilterBoxes, EdgeFrom, EdgeLegend } from './EdgeFamilies'
 import { fmtAge, fmtTime, lastPart } from './format'
 import { useGraphStore } from './graphStore'
@@ -220,6 +221,7 @@ function EdgeDetails({ edge }: { edge: FlowEdge }) {
       <EdgeBody info={info} />
       <EdgeFrom info={info} />
       <EdgeCardinality info={info} />
+      <ProfileDetails edge={edge} />
       <EdgeGrainDetails edge={edge} />
       <EdgeProvenance info={info} />
       <EdgeReview key={edge.id} info={info} />
