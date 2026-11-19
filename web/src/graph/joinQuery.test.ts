@@ -139,6 +139,43 @@ describe('planJoins', () => {
   })
 })
 
+describe('a join a view defines', () => {
+  const view = (pairs: Array<[string, string]>) =>
+    key(pairs, { source: 'view', status: 'derived', runs: null, views: ['demo.sales.v_returned_orders'] })
+
+  it('writes the views ON clause with no mined history and no foreign key', async () => {
+    const data: Record<string, JoinsResponse['joins']> = {
+      [A]: [{ table: C, keys: [view([['order_id', 'order_id']])] }],
+      [C]: [],
+    }
+    const plan = ok(await planJoins([A, C], async (t) => data[t] ?? []))
+    expect(joinSql(plan)).toBe(
+      'SELECT *\nFROM demo.sales.returns r\nJOIN demo.sales.orders o\n  ON r.order_id = o.order_id\nLIMIT 100',
+    )
+  })
+
+  it('wins over a key proposed from query history, and a mined key a view also defines counts as the views', async () => {
+    const mined = key([['customer_id', 'customer_id']], { runs: 500 })
+    const alsoInView = key([['order_id', 'order_id']], { runs: 2, views: ['demo.sales.v'] })
+    const data: Record<string, JoinsResponse['joins']> = { [A]: [{ table: C, keys: [mined, alsoInView] }], [C]: [] }
+    const plan = ok(await planJoins([A, C], async (t) => data[t] ?? []))
+    expect(plan.steps[0].key.pairs).toEqual([{ here: 'order_id', there: 'order_id' }])
+  })
+
+  it('ranks after a declared foreign key and before an accepted mined join', async () => {
+    const accepted = key([['a', 'a']], { status: 'accepted', runs: 90 })
+    const declared = fk([['b', 'b']])
+    const data: Record<string, JoinsResponse['joins']> = {
+      [A]: [{ table: C, keys: [accepted, view([['c', 'c']]), declared] }],
+      [C]: [],
+    }
+    const plan = ok(await planJoins([A, C], async (t) => data[t] ?? []))
+    expect(plan.steps[0].key).toBe(declared)
+    const rest = await planJoins([A, C], async (t) => (t === A ? [{ table: C, keys: [accepted, view([['c', 'c']])] }] : []))
+    expect(ok(rest).steps[0].key.pairs[0].here).toBe('c')
+  })
+})
+
 describe('aliasesFor', () => {
   it('uses initials, and stays distinct and clear of keywords', () => {
     const a = aliasesFor(['c.s.order_items', 'c.s.returns', 'c.s.orders', 'c.s.owners', 'c.s.on', 'c.s.x-ray'])

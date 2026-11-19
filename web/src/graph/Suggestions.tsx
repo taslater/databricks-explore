@@ -4,7 +4,7 @@ import type { StoredStatus } from '../api/types'
 import { messageOf, useGraphActions } from './actions'
 import { dayOf, pairLabel } from './mining'
 import { shortestNames } from './names'
-import { groupSuggestions, type SuggestionRow } from './suggestionGroups'
+import { groupSuggestions, viewsOfRow, type SuggestionRow } from './suggestionGroups'
 
 const STATUSES: StoredStatus[] = ['proposed', 'accepted', 'rejected']
 
@@ -20,6 +20,7 @@ export function Suggestions() {
   const rows = useMemo(() => groupSuggestions(edges), [edges])
   const name = useMemo(() => shortestNames(edges.flatMap((e) => [e.source.table, e.target.table])), [edges])
   const counts = list.data?.counts
+  const views = list.data?.views
 
   async function review(ids: string[], to: StoredStatus) {
     if (ids.length === 0) return
@@ -106,6 +107,7 @@ export function Suggestions() {
                 row={r}
                 name={name}
                 status={status}
+                views={viewsOfRow(r, views)}
                 picked={picked.has(r.key)}
                 onToggle={() => toggle(r.key)}
                 onReview={review}
@@ -122,6 +124,7 @@ function Row({
   row,
   name,
   status,
+  views,
   picked,
   onToggle,
   onReview,
@@ -129,6 +132,7 @@ function Row({
   row: SuggestionRow
   name: (table: string) => string
   status: StoredStatus
+  views: string[]
   picked: boolean
   onToggle: () => void
   onReview: (ids: string[], to: StoredStatus) => Promise<void>
@@ -152,6 +156,11 @@ function Row({
         {labels.map((l) => (
           <div key={l}>{l}</div>
         ))}
+        {views.length > 0 && (
+          <div className="hint" title={views.join('\n')}>
+            also joined in view {views.map((v) => v.split('.').pop()).join(', ')}
+          </div>
+        )}
       </td>
       <td>{row.runs}</td>
       <td>{row.users || ''}</td>

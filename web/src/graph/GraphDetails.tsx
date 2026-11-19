@@ -218,6 +218,7 @@ function NodeDetails({ id, node }: { id: string; node: FlowNode }) {
           </ul>
         </>
       )}
+      <ViewJoins id={id} />
       <h4>Columns ({cols.length})</h4>
       <table className="cols">
         <tbody>
@@ -331,6 +332,24 @@ function EdgeBody({ info }: { info: GraphEdge }) {
 }
 
 const lastOf = (table: string) => table.split('.').pop() ?? table
+
+/** The joins a view's own SQL defines, between its base tables. Nothing for a table, or a view that joins nothing. */
+function ViewJoins({ id }: { id: string }) {
+  const joins = useJoinKeys(id).data?.view_joins
+  if (!joins || joins.length === 0) return null
+  return (
+    <>
+      <h4>Joins in this view</h4>
+      <ul className="constraints">
+        {joins.map((j, i) => (
+          <li key={i} title={`${j.left} and ${j.right}`}>
+            {j.pairs.map((p) => `${lastOf(j.left)}.${p.left} = ${lastOf(j.right)}.${p.right}`).join(' AND ')}
+          </li>
+        ))}
+      </ul>
+    </>
+  )
+}
 
 /**
  * The key sets a mined or manual table edge stands for, one per way the tables were joined: which columns, and

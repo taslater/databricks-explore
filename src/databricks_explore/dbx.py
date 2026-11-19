@@ -1,5 +1,6 @@
 """Databricks access + local JSON cache. Every remote call is logged to calls.jsonl in the data folder's logs/."""
 import configparser, json, os, re, subprocess, time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,6 +39,8 @@ WHERE (target_table_full_name = :t OR source_table_full_name = :t)
 GROUP BY 1, 2, 3, 4
 ORDER BY last_seen DESC
 LIMIT 5000"""
+
+MAX_API_COLUMNS = 60  # columns asked of the REST column-lineage API per table (one call each)
 
 # Unity Catalog tags of one table and of its columns, read from the table's own catalog. Same column shape as the other tag queries.
 TABLE_TAGS_SQL = """SELECT 'table' AS scope, catalog_name, schema_name, table_name, CAST(NULL AS STRING) AS column_name, tag_name, tag_value
@@ -355,17 +358,84 @@ class Explorer:
                             lambda: self._call("lineage-tracking/table-lineage", fetch, full_name=full_name), refresh)
 
     def column_lineage(self, full_name, refresh=False):
-        """Column-level lineage rows touching one table, from system.access.column_lineage (one warehouse query).
+        """Column-level lineage rows touching one table: {"fetched_at", "data": [rows], "source"}.
 
+        The source is "system_table" (system.access.column_lineage, one warehouse query) or, when that cannot be read
+        (no warehouse selected, it will not start, no access) and the fallback finds something, "api" (the REST
+        column-lineage API, plus the view's own SQL when the table is a view; see column_lineage_api).
         Cached like the other metadata, and a cached copy is returned even when no warehouse is selected.
-        Raises RuntimeError without a warehouse and no cache, and whatever the warehouse says (no access) otherwise.
+        Raises RuntimeError without a warehouse when the fallback finds nothing, and whatever the warehouse says
+        (no access) when the fallback finds nothing either.
         """
         def fetch():
             if not self.warehouse_id:
-                raise RuntimeError("Column lineage is read with a SQL warehouse (system.access.column_lineage). "
-                                   "Pick one.")
+                raise RuntimeError("No column lineage found without a warehouse (REST API, view definitions). "
+                                   "Pick a SQL warehouse to read system.access.column_lineage.")
             return self.sql(COLUMN_LINEAGE_SQL, t=full_name)
-        return self._cached(f"{self._dir(full_name)}/column_lineage/{safe(full_name)}.json", fetch, refresh)
+        try:
+            return {**self._cached(f"{self._dir(full_name)}/column_lineage/{safe(full_name)}.json", fetch, refresh),
+                    "source": "system_table"}
+        except Exception:
+            fallback = self.column_lineage_api(full_name, refresh)
+            if not fallback["data"]:
+                raise
+            return {**fallback, "source": "api"}
+
+    def column_lineage_api(self, full_name, refresh=False):
+        """Column lineage with no warehouse: the REST API (one call per column) and the view's SQL. Cached, never raises.
+
+        Rows have the shape of system.access.column_lineage's (source and target table and column, last_seen).
+        The REST rows say what Unity Catalog recorded; the view's SQL adds the columns it names, for lineage the
+        recorded events do not hold. A column the API cannot answer for is skipped.
+        """
+        def fetch():
+            try:
+                info = self.object(full_name, refresh)["data"]
+            except Exception:
+                return []
+            rows = self._column_lineage_rest(full_name, [c["name"] for c in info.get("columns") or [] if c.get("name")])
+            seen = {tuple(str(r[k]).lower() for k in ("source_table_full_name", "source_column_name",
+                                                       "target_table_full_name", "target_column_name")) for r in rows}
+            if str(info.get("table_type") or "").upper() in sqltools.VIEW_TYPES and info.get("view_definition"):
+                catalog, schema, _ = full_name.split(".", 2)
+                known = [(d.get("table") or {}).get("table_full_name") for d in (info.get("view_dependencies") or {}).get("dependencies", [])]
+                traced = sqltools.view_column_lineage(info["view_definition"], [c["name"] for c in info.get("columns") or [] if c.get("name")],
+                                                      catalog, schema, [k for k in known if k])
+                for source, source_column, column in traced:
+                    key = (source, source_column, full_name.lower(), column.lower())
+                    if key not in seen and not is_internal(source):
+                        seen.add(key)
+                        rows.append({"source_table_full_name": source, "source_column_name": source_column,
+                                     "target_table_full_name": full_name, "target_column_name": column, "last_seen": None})
+            return rows
+        return self._cached(f"{self._dir(full_name)}/column_lineage_api/{safe(full_name)}.json", fetch, refresh)
+
+    def _column_lineage_rest(self, full_name, columns):
+        """Rows from GET /api/2.0/lineage-tracking/column-lineage, one call per column (at most MAX_API_COLUMNS)."""
+        def one(column):
+            try:
+                return column, self._call("lineage-tracking/column-lineage", lambda: self.w.api_client.do(
+                    "GET", "/api/2.0/lineage-tracking/column-lineage",
+                    body={"table_name": full_name, "column_name": column}), full_name=full_name, column=column)
+            except Exception:
+                return column, {}
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            answers = list(pool.map(one, columns[:MAX_API_COLUMNS]))
+        rows = []
+
+        def table_of(c):
+            parts = [c.get("catalog_name"), c.get("schema_name"), c.get("table_name")]
+            return ".".join(parts) if all(parts) and not is_internal(parts[2]) else None
+        for column, answer in answers:
+            for up in (answer or {}).get("upstream_cols") or []:
+                if table_of(up) and up.get("name"):
+                    rows.append({"source_table_full_name": table_of(up), "source_column_name": up["name"],
+                                 "target_table_full_name": full_name, "target_column_name": column, "last_seen": None})
+            for down in (answer or {}).get("downstream_cols") or []:
+                if table_of(down) and down.get("name"):
+                    rows.append({"source_table_full_name": full_name, "source_column_name": column,
+                                 "target_table_full_name": table_of(down), "target_column_name": down["name"], "last_seen": None})
+        return rows
 
     def tags(self, full_name, refresh=False):
         """Unity Catalog tags of one table and its columns: {"table": {tag: value}, "columns": {column: {tag: value}}}.

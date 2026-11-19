@@ -535,7 +535,7 @@ Response: `{"imported": 12, "created": 10, "updated": 2, "overlays": 1, "concept
 
 Implemented in `mining.py` and `sqltools.join_pairs`. Mining is always an explicit, user-triggered batch run through the selected SQL warehouse. It reads `system.query.history` (finished SELECT, INSERT, MERGE and CREATE statements) and `system.access.table_lineage` (the tables each statement read, joined by `statement_id`), extracts the column pairs each statement joins on, and stores them as `join_mined` edges with status `proposed`. **Statement text and user names are never stored or logged.** Stored per edge: the two column endpoints, a run count, a distinct-user *count*, first and last seen as dates, and up to 5 statement ids. All routes *need a connection*.
 
-Facts the design rests on: `statement_text` reads `<REDACTED>` unless the reader is an account admin or in `databricks_pii_access`; query history keeps 365 days and rows usually appear within an hour; lineage tables keep 395 days. The REST column-lineage endpoint is undocumented, so column lineage comes from the system tables.
+Facts the design rests on: `statement_text` reads `<REDACTED>` unless the reader is an account admin or in `databricks_pii_access`; query history keeps 365 days and rows usually appear within an hour; lineage tables keep 395 days. Column lineage comes from the system tables (one warehouse query); with no warehouse, or when it fails, the REST column-lineage endpoint (one call per column) and the view's own SQL answer instead (section 5, `level=column`).
 
 ### `GET /api/mining/plan?window_days=30&full=0`
 
@@ -599,10 +599,11 @@ Top tables by runs and top table pairs read together, for the mined window. Comp
 Stored `join_mined` edges at column level, most evidence first (runs, then users, then last seen). `status` is a comma-separated list of `proposed` (default), `accepted`, `rejected`. `table` optionally keeps edges with that table at either end. `counts` is over all `join_mined` edges, whatever the filter.
 
 ```json
-{"edges": [<edge>, ...], "counts": {"proposed": 7, "accepted": 1, "rejected": 0}}
+{"edges": [<edge>, ...], "counts": {"proposed": 7, "accepted": 1, "rejected": 0},
+ "views": {"e_...": ["demo.sales.v_daily_revenue"]}}
 ```
 
-Errors: 400 for an unknown status.
+`views` maps an edge id to the views whose SQL joins on the same column pair (see `joins` below); edges no view joins on are absent. Errors: 400 for an unknown status.
 
 > **Rolled-up runs.** At `level=table`, a rolled `join_mined` edge's `evidence.runs` is the sum over its column-pair members. A statement that joined on a composite key is counted once for each column of it, so the sum is larger than the number of statements (and than the runs of any one key set). Use `GET /api/relationships/joins` for runs per key set.
 
@@ -618,7 +619,7 @@ How one table is known to join to others, for completion and for listing a pair'
  "errors": []}
 ```
 
-`source` is `fk` (a foreign key this table declares, one key per constraint, `status` `derived`, `name` the constraint), `mined` or `manual`. A key lists every column pair of one join condition, so a composite key is one key. A mined single-pair key's `runs` counts every statement that used the pair, composite ones included, as the suggestions list does; a composite key's `runs` counts the statements that used exactly that set. A composite key's `status` is `rejected` if any member edge is, `accepted` if all are, else `proposed`. Rejected keys are returned and marked. A `manual` table-level edge has no pairs. Foreign keys that other tables declare against this one are found from those tables. When the table cannot be read, the stored keys still come back and `errors` says why. Errors: 400 for a missing or malformed table.
+`source` is `fk` (a foreign key this table declares, one key per constraint, `status` `derived`, `name` the constraint), `view` (a join a view's SQL defines, `status` `derived`, no `runs`), `mined` or `manual`. A key that a view also defines, whatever its source, carries `views`: the full names of those views, lowercase (the field is absent otherwise). View joins are read from the `view_definition` of a view or materialized view when the app reads it, with no warehouse and no history window: the table's own views, and the views built from it that its lineage shows (at most 20, from the cache or one `tables.get` each). They are kept in the store's `view_join` table, replaced each time the view is read, and are never edges: nothing is drawn on the Graph for them. They make "Query these tables" and `ON` completion prefer the view's key (after a declared foreign key), and the suggestions list mark a mined pair "also joined in view X". When the table is itself a view, `view_joins` lists the joins its own SQL defines, `[{"left": "demo.sales.orders", "right": "demo.sales.returns", "pairs": [{"left": "order_id", "right": "order_id"}]}]` (the field is absent when there are none). A key lists every column pair of one join condition, so a composite key is one key. A mined single-pair key's `runs` counts every statement that used the pair, composite ones included, as the suggestions list does; a composite key's `runs` counts the statements that used exactly that set. A composite key's `status` is `rejected` if any member edge is, `accepted` if all are, else `proposed`. Rejected keys are returned and marked. A `manual` table-level edge has no pairs. Foreign keys that other tables declare against this one are found from those tables. When the table cannot be read, the stored keys still come back and `errors` says why. Errors: 400 for a missing or malformed table.
 
 ### `POST /api/relationships/bulk`
 
@@ -642,7 +643,7 @@ One connector per pair of the given tables, `source` to `target`: child to paren
 
 Section 4's route, now with column lineage. At `level=column`, derived `lineage` edges with column endpoints are added from `system.access.column_lineage` (one warehouse query for the table, **cached** like the other metadata, `?refresh=1` re-reads it). The edge `id` is `lineage:<table>#<column>-><table>#<column>`, `status` `derived`, `provenance.origin` `unity_catalog:column_lineage`, `evidence.last_seen` the latest event. Stored `join_mined`, `manual` and other edges come back as stored, each with its column endpoints, and FK edges come back one per column pair. At `level=table` nothing changes.
 
-A cached copy is used when no warehouse is selected. With no warehouse and no cache, or without access to the system table, the response is still 200 with everything else and `errors` gains `"column_lineage: <reason>"`.
+A cached copy is used when no warehouse is selected. When the system table cannot be read (no warehouse, one that will not start, no access) the lineage comes from the REST column-lineage API instead (`GET /api/2.0/lineage-tracking/column-lineage`, one call per column, at most 60, cached separately and re-read with `?refresh=1`) plus, when the table is a view, the columns its SQL names, traced with sqlglot, with no catalog calls. A column the API cannot answer for is skipped. The response then has `"column_lineage_source": "api"` (`"system_table"` otherwise; absent when no column lineage was read) and `evidence.last_seen` is null on those edges. Only when that finds nothing too is the response still 200 with everything else and `errors` gains `"column_lineage: <reason>"`.
 
 ---
 
