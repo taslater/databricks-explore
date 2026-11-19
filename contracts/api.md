@@ -674,9 +674,9 @@ The crow's-foot ends of reference edges, from keys and nullability. Needs a conn
 
 - **Foreign key**, parent end: when the FK columns are the parent's primary key (as a set, ignoring case), `one` if every FK column is NOT NULL, else `zero_one` (basis `constraint`). Child end: `zero_many`, or `zero_one` when the FK columns are also the child's primary key (basis `primary_key`).
 - **Mined or manual join**: an end is `one` (basis `primary_key`) only when that side's join columns are exactly its table's primary key.
-- Several key sets between the same two tables give an end only when every set gives the same one. A measured end (`profile`) will replace a metadata end.
+- Several key sets between the same two tables give an end only when every set gives the same one. A measured end (`profile`, see below) replaces a metadata end.
 
-The edge is `null` when no end is known. MCP `get_graph` reports the same as `cardinality` on each reference edge.
+The edge is `null` when no end is known. MCP `get_graph` reports the same as `cardinality` on each reference edge. For a relationship that was profiled, the answer also has `"profile": <profile>` (below), and `source` and `target` are the measured ends.
 
 ### Card facts: `POST /api/node-facts`, `POST /api/table-stats/plan`, `POST /api/table-stats/read`
 
@@ -690,6 +690,39 @@ What the Graph shows on a card besides its name. Body for all three: `{"tables":
 `POST /api/table-stats/plan` answers `{"statements": [{"table", "name": "detail"|"history", "sql"}], "skipped": [{"table", "reason"}], "warehouse_id"}`: the statements a read would run (`DESCRIBE DETAIL <t>` and `DESCRIBE HISTORY <t> LIMIT 50`), and the tables it would not (views, metric views, non-Delta tables, tables that cannot be read).
 
 `POST /api/table-stats/read` runs those statements on the selected warehouse (this can start a stopped warehouse), four tables at a time, replaces each table's cached answer (`stats/<table>.json` in the profile's cache folder, `{"fetched_at", "data"}`) and answers `{"facts": {...as node-facts, for the tables read}, "skipped": [...], "errors": {"<table>": "<message>"}}`. A table whose statements fail is listed in `errors` and its cache is left as it was; when only DESCRIBE HISTORY fails the size is kept and `history_error` says why. With no warehouse selected it answers **400** and runs nothing.
+
+### Edge transforms: `POST /api/edge-transforms`, `POST /api/edge-transforms/plan`, `POST /api/edge-transforms/read`
+
+What a flow edge does with its source: the glyphs on the edge (Σ aggregate, ⋈ joined in, ∪ union, 1 dedupe, ▽ filter) and the "How" section of its Details. Implemented in `transforms.py` and `sqltools.transform_analysis`.
+
+`POST /api/edge-transforms` takes `{"edges": [{"id", "source", "target"}]}` (at most 400; only `catalog.schema.table` names are answered) and answers `{"edges": {"<id>": {"transform", "note", "error"}}, "origins": {"<target>": {"kind", "sql", "note", "statement", "writer", "read_at"}}}`. It reads `tables.get` (a REST call when not cached) and the cache, and **never runs a query**. The SQL behind a target is its view or materialized view definition, or, for a table, the statement that last wrote it, once read (below). `origins.<target>.kind` is `view` or `statement`; `sql` is the text; `statement` is `{"id", "type", "run_by", "at", "redacted"}`.
+
+- `transform` is `null` or the facts for the edge's source in that SQL: `driving` (it is the `FROM`), `joined` (`{"type": inner|left|right|full|cross, "keys": [{"column", "other"}]}`, `other` being `table.column` of the table it meets, or `null` after `USING` over several tables), `union` (`{"branches"}`), `filters` (`[{"kind": where|qualify|semi|anti, "sql"}]`, predicates on this source's columns, shortened to 160 characters; `EXISTS`, `IN` and `LEFT SEMI/ANTI JOIN` tables are `semi` or `anti` filters, not lookups), `aggregate` (`{"keys", "functions", "having"}`; no keys for a global aggregate), `dedupe` (`{"keys"}` from `row_number() = 1`), `distinct`, `window`, `pivot`, `merge` (`{"keys", "actions"}` of a `MERGE`, keys from its `ON`), `statement` (`select`, `create`, `insert`, `merge`) and `glyphs`: at most two of `aggregate`, `join`, `union`, `dedupe`, `filter`, in that priority. No glyph means the source passes through, or nothing is known (`transform` is then `null`). A source inside a CTE or subquery takes what the query around it does too (a table in a derived table that is joined is joined). Names are matched lowercase; short names are qualified from the target's catalog and schema, or from its other sources.
+- `note` says why `transform` is `null`: `unread` (a table whose statement was never read), `no_sql` (a notebook, job or pipeline wrote it with no SQL statement; `origins.<target>.writer` is `{"type", "id"}`), `redacted` (the statement text reads `<REDACTED>`), `unparsed` (`error` has sqlglot's message), `not_read` (the SQL does not name the source), `metric_view` (its definition is YAML) or `unreadable`.
+
+`POST /api/edge-transforms/plan` takes `{"tables": [...]}` (as the card facts) and answers `{"statements": [{"table", "sql"}], "skipped": [{"table", "reason"}], "warehouse_id"}`: the one statement a read would run per table (the latest rows of `system.access.table_lineage` for the table as target, left-joined to `system.query.history` on `statement_id`, text cut at 20000 characters), and the tables it would skip (views and metric views).
+
+`POST /api/edge-transforms/read` runs it on the selected warehouse (four tables at a time), caches the answer per table (`statement/<table>.json` in the profile's cache folder, `{"fetched_at", "data": {"statement", "writer"}}`, replacing what was cached) and answers `{"read": [...], "skipped": [...], "errors": {"<table>": "<message>"}}`. The newest lineage row decides: with a `statement_id` the statement is kept, without one the writer is. A table whose read fails is in `errors` and its cache is left as it was. With no warehouse selected it answers **400** and runs nothing.
+
+### Relationship profile: `POST /api/relationships/profile/plan`, `POST /api/relationships/profile/run`
+
+Measures how a reference edge `A.(k) -> B.(k)` behaves. Opt-in: nothing here runs unless the page or an agent asks, and the plan shows the SQL first. Body for both: `{"edges": [{"id", "kind", "source", "target"}, ...]}` (at most 10; 400 otherwise). `kind` must be `fk`, `join_mined` or `manual`; the key is the first usable join key from `source` to `target` of that kind (`relationships.join_keys`; rejected keys are not used), so a composite key compares every column.
+
+`plan` answers `{"statements": [{"id", "kind", "source", "target", "pairs": [[source column, target column]], "sql", "rows": {"<table>": rows | null}}], "skipped": [{"id", "reason"}], "warehouse_id"}`. `rows` is what the cached size read says (section 5, node facts), `null` when unknown. It reads `tables.get` and the cache and never runs a query. Skipped: not a reference edge, a table's reference to itself, a table that cannot be read, no usable key.
+
+`run` runs each statement on the selected warehouse (two at a time; this can start a stopped warehouse), keeps each result, and answers `{"profiles": {"<edge id>": <profile>}, "errors": {"<edge id>": "<message>"}, "skipped": [...], "cardinality": {"<edge id>": <cardinality>}}`. With no warehouse selected it answers **400** and runs nothing. A failing statement is listed in `errors` and its earlier profile is left as it was.
+
+The statement is one read-only `WITH ... SELECT`. It groups each side by its key (rows with a null in any key column are left out of the keys, and counted as null keys on the source side), then counts `LEFT ANTI JOIN`s both ways. One row, with these columns:
+
+| field | meaning |
+| --- | --- |
+| `a_rows`, `a_null_rows`, `a_distinct_keys` | rows of the source, rows with a null key column, distinct keys |
+| `b_rows`, `b_distinct_keys`, `b_repeated_keys` | rows of the target with a key, distinct keys, keys that appear more than once (0: the target's key is unique) |
+| `orphan_rows`, `orphan_keys` | source rows, and distinct keys, with no match in the target |
+| `unused_keys` | target keys no source row uses |
+| `max_fanout`, `p95_fanout` | source rows per key: the most, and the 95th percentile (`percentile_approx`) |
+
+A profile is those fields plus `source`, `target`, `pairs`, `measured_at` and `sql_hash` (a hash of the statement). Profiles are kept in `data/relationships/<profile>.profiles.json`, keyed by (kind, source, target) without regard to case, so a derived foreign key and a stored join keep them alike; a later run replaces the profile. `POST /api/relationships/cardinality` reads them, so a saved graph shows the ends and the orphan tick without running anything. The ends come from the numbers, with basis `profile`: at the target, `one` when `b_repeated_keys` is 0, else `one_many`, and the zero form (`zero_one`, `zero_many`) when some source row has a null key or no match; at the source, `one_many` when `unused_keys` is 0, else `zero_many`. With `orphan_rows` above 0 the Graph draws a small red tick across the line near the referenced table.
 
 ### Color by: `POST /api/node-meta`, `POST /api/node-tags/plan`, `POST /api/node-tags/read`
 
@@ -707,7 +740,7 @@ Fills come from a palette of eight light colors. A value takes the slot its text
 
 Mermaid text for what the Graph shows, for a pull request, wiki or README (GitHub renders it). Body `{"lens": "flow" | "model", "nodes": [{"id", "kind"}], "edges": [<graph edge>], "glyphs"?: {"<edge id>": ["aggregate", "join", ...]}}` (at most 400 each; the page sends the nodes and edges it draws). Answers `{"mermaid": "..."}`. It reads `tables.get` (a REST call when not cached) and the relationship store, never the warehouse. Meaning, rejected and superseded edges are left out (the page's defaults).
 
-- `flow`: `flowchart LR`. A node is `n1`, `n2`, ... (sorted by table name) labelled with the table's name, or `schema.name` for every table when two share a name; a view is `([...])`, a materialized or streaming table `[[...]]`. A flow edge is `-->` (`<-->` for lineage both ways, `-.->` when proposed) and is labelled with the glyphs of `glyphs` (Σ aggregate, ⋈ join, ∪ union, 1 dedupe, ▽ filter) when given; a reference edge is `---` (`-.-` when proposed) labelled with its join columns.
+- `flow`: `flowchart LR`. A node is `n1`, `n2`, ... (sorted by table name) labelled with the table's name, or `schema.name` for every table when two share a name; a view is `([...])`, a materialized or streaming table `[[...]]`. A flow edge is `-->` (`<-->` for lineage both ways, `-.->` when proposed) and is labelled with the glyphs of `glyphs` (the page sends each flow edge's transform glyphs from `POST /api/edge-transforms`; Σ aggregate, ⋈ join, ∪ union, 1 dedupe, ▽ filter) when given; a reference edge is `---` (`-.-` when proposed) labelled with its join columns.
 - `model`: `erDiagram`. Each table lists its primary and foreign key columns (`type name PK, FK`, the type without its arguments). Each reference edge is one line with the referenced table first (a foreign key's parent; for a join, the side known to be one) and the crow's-foot ends of `POST /api/relationships/cardinality`, `..` instead of `--` when proposed, and the join columns as the label. An end that is not known is written as zero or more, which claims nothing, and a `%%` comment under `erDiagram` lists those edges.
 
 400 for an unknown lens or a malformed body. MCP `export_graph` returns the same text for a saved graph, or a PNG.

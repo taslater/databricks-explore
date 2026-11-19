@@ -5,6 +5,7 @@ from typing import Any, Optional
 from .. import dbx
 
 from . import tools_canvas, tools_data, tools_graph  # noqa: F401  (importing registers the tools)
+from . import tools_profile  # noqa: F401
 from .schema import validate
 from .tooling import REGISTRY, Context, ToolError
 

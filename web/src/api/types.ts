@@ -141,11 +141,37 @@ export interface CardinalityEnd {
   why: string
 }
 
+/** What one profiling statement measured for a reference edge A.(k) -> B.(k) (POST /api/relationships/profile/run), with its date. */
+export interface RelationshipProfile {
+  source: string
+  target: string
+  /** The key columns profiled: [column of the source, column of the target]. */
+  pairs: Array<[string, string]>
+  a_rows: number
+  a_null_rows: number
+  a_distinct_keys: number
+  b_rows: number
+  b_distinct_keys: number
+  /** Keys that appear more than once in the target. */
+  b_repeated_keys: number
+  /** Source rows (and distinct keys) whose key has no match in the target. */
+  orphan_rows: number
+  orphan_keys: number
+  /** Target keys no source row uses. */
+  unused_keys: number
+  max_fanout: number
+  p95_fanout: number
+  measured_at: string
+  sql_hash: string
+}
+
 /** The known ends of a reference edge (POST /api/relationships/cardinality). An unknown end is null, never "one". */
 export interface Cardinality {
   source: CardinalityEnd | null
   target: CardinalityEnd | null
   sentence: string
+  /** The measurement the ends come from, when the relationship was profiled. */
+  profile?: RelationshipProfile
 }
 
 /** What the graph draws and saves for one edge. The first group is the legacy shape, the second comes from /api/relationships. */

@@ -17,6 +17,7 @@ import {
   type KindStyle,
 } from './edgeStyles'
 import { hasEnds, useCardinality } from './EdgeEnds'
+import { anyOrphans } from './relProfile'
 import { useGraphStore } from './graphStore'
 import type { GraphEdge } from '../api/types'
 
@@ -83,7 +84,9 @@ export function EdgeLegend() {
     () => legendOf(edges.map((e) => e.data!.info).filter((info) => edgeShown(info, filters))),
     [edges, filters],
   )
-  const ends = hasEnds(useCardinality().data) && families.includes('reference')
+  const measured = useCardinality().data
+  const ends = hasEnds(measured) && families.includes('reference')
+  const orphans = anyOrphans(measured) && families.includes('reference')
   if (families.length === 0 && !inferred && !superseded) return null
   return (
     <div className="edge-legend" aria-label="Legend">
@@ -102,6 +105,11 @@ export function EdgeLegend() {
       {ends && (
         <div className="kind-filter" title="Drawn only where keys and nullability say so. Click an edge for the reason.">
           ends: || exactly one, o| zero or one, o&lt; zero or more
+        </div>
+      )}
+      {orphans && (
+        <div className="kind-filter" title="Measured: some keys have no match in the referenced table. Click the edge for the numbers.">
+          <span style={{ color: '#d1242f', fontWeight: 700 }}>/</span> orphans: keys with no match
         </div>
       )}
       {superseded && (

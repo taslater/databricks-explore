@@ -7,6 +7,7 @@ import { messageOf } from './actions'
 import { useNodeColors } from './ColorByControl'
 import { deriveFlow } from './derive'
 import { useCardinality } from './EdgeEnds'
+import { useEdgeTransforms } from './EdgeTransforms'
 import {
   canvasBlob,
   dateLine,
@@ -17,6 +18,16 @@ import {
   type PictureScope,
 } from './exportPicture'
 import { useGraphStore } from './graphStore'
+
+/** {edge id: glyph names} for the flow edges whose transform is known, as the Mermaid route labels them. */
+function glyphsOf(edges: Array<{ id: string }>, transforms: Record<string, { transform: { glyphs: string[] } | null }> | undefined): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const e of edges) {
+    const g = transforms?.[e.id]?.transform?.glyphs
+    if (g && g.length > 0) out[e.id] = g
+  }
+  return out
+}
 
 /** The toolbar's Export button and its dialog. */
 export function GraphExportButton() {
@@ -59,6 +70,7 @@ function ExportDialog({ onClose }: { onClose: () => void }) {
 
   const { colorBy, colors } = useNodeColors()
   const ends = useCardinality().data
+  const transforms = useEdgeTransforms().data?.edges
   const flow = useMemo(() => deriveFlow({ nodes, edges, columnEdges, focusSchema, filters, hoverId: null }), [nodes, edges, columnEdges, focusSchema, filters])
   const shownNodes = flow.nodes.filter((n) => !n.hidden)
   const shownEdges = flow.edges.filter((e) => !e.hidden).map((e) => e.data!.info)
@@ -111,7 +123,7 @@ function ExportDialog({ onClose }: { onClose: () => void }) {
 
   const copyMermaid = (lens: 'flow' | 'model') =>
     run(async () => {
-      const text = await api.getMermaid({ lens, nodes: shownNodes.map((n) => ({ id: n.id, kind: n.data.kind })), edges: shownEdges })
+      const text = await api.getMermaid({ lens, nodes: shownNodes.map((n) => ({ id: n.id, kind: n.data.kind })), edges: shownEdges, glyphs: glyphsOf(shownEdges, transforms) })
       setMermaid(text)
       try {
         await navigator.clipboard.writeText(text)
