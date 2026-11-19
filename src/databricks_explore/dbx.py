@@ -1,5 +1,6 @@
 """Databricks access + local JSON cache. Every remote call is logged to calls.jsonl in the data folder's logs/."""
 import configparser, json, os, re, subprocess, time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from platformdirs import user_data_path
 from databricks.sdk.service.sql import StatementParameterListItem, StatementState
 
 from . import demo
-from . import search_terms, sqltools
+from . import neighbors, search_terms, sqltools
 
 
 def default_data_dir(demo: bool = False) -> Path:
@@ -26,6 +27,8 @@ CACHE, LOGS, DIAGRAMS = DATA / "cache", DATA / "logs", DATA / "diagrams"
 for d in (CACHE, LOGS, DIAGRAMS):
     d.mkdir(parents=True, exist_ok=True)
 
+MAX_NEIGHBOR_READS = 40  # tables.get calls one relations() makes for neighbors that are not cached
+
 # Column lineage for one table, either end. One row per column pair; event_time is reduced to the latest.
 COLUMN_LINEAGE_SQL = """SELECT source_table_full_name, source_column_name, target_table_full_name, target_column_name,
        max(event_time) AS last_seen
@@ -36,6 +39,8 @@ WHERE (target_table_full_name = :t OR source_table_full_name = :t)
 GROUP BY 1, 2, 3, 4
 ORDER BY last_seen DESC
 LIMIT 5000"""
+
+MAX_API_COLUMNS = 60  # columns asked of the REST column-lineage API per table (one call each)
 
 # Unity Catalog tags of one table and of its columns, read from the table's own catalog. Same column shape as the other tag queries.
 TABLE_TAGS_SQL = """SELECT 'table' AS scope, catalog_name, schema_name, table_name, CAST(NULL AS STRING) AS column_name, tag_name, tag_value
@@ -134,6 +139,7 @@ class Explorer:
         self.root = CACHE / safe(profile)
         self.warehouse_id = None
         self.workspace_id = None
+        self._gone = {}  # neighbors found not to exist (see _resolve), until a refresh
         self.jobs = {}  # async statement_id -> {max_rows, can_detect, t0}; lives only as long as the process
 
     def whoami(self):
@@ -299,6 +305,16 @@ class Explorer:
         return self._cached(f"{safe(catalog)}/{safe(schema)}/objects.json",
                             lambda: self._call("tables.list", fetch, catalog=catalog, schema=schema), refresh)
 
+    def functions(self, catalog, schema, refresh=False):
+        """The user-defined functions in a schema, cached like objects(). Rows look like objects, with `type` "FUNCTION"."""
+        def fetch():
+            return sorted([{"name": f.name, "full_name": f.full_name, "type": "FUNCTION", "comment": f.comment}
+                           for f in self.w.functions.list(catalog_name=catalog, schema_name=schema)
+                           if not is_internal(f.name)],
+                          key=lambda x: x["name"])
+        return self._cached(f"{safe(catalog)}/{safe(schema)}/functions.json",
+                            lambda: self._call("functions.list", fetch, catalog=catalog, schema=schema), refresh)
+
     def search(self, q):
         """Name search. information_schema if a warehouse is set, else whatever schemas are cached locally.
 
@@ -307,19 +323,24 @@ class Explorer:
         term = search_terms.parse_term(q)
         if self.warehouse_id:
             params = term.patterns()
-            conditions = "".join(f"\n                  AND lower({col}) LIKE :{key} ESCAPE '{search_terms.ESCAPE}'"
-                                 for key, col in (("cat", "table_catalog"), ("sch", "table_schema"), ("q", "table_name"))
-                                 if key in params)
+            def conditions(cat, sch, name):
+                return "".join(f"\n                  AND lower({col}) LIKE :{key} ESCAPE '{search_terms.ESCAPE}'"
+                               for key, col in (("cat", cat), ("sch", sch), ("q", name)) if key in params)
+            # Functions come from information_schema.routines, in the same statement, so one warehouse round trip serves both.
             rows = self.sql(f"""
                 SELECT table_catalog, table_schema, table_name, table_type
                 FROM system.information_schema.tables
-                WHERE left(table_name, 2) <> '__'  -- not NOT startswith(): on information_schema that filter drops every row{conditions}
+                WHERE left(table_name, 2) <> '__'  -- not NOT startswith(): on information_schema that filter drops every row{conditions("table_catalog", "table_schema", "table_name")}
+                UNION ALL
+                SELECT routine_catalog, routine_schema, routine_name, 'FUNCTION'
+                FROM system.information_schema.routines
+                WHERE left(routine_name, 2) <> '__'{conditions("routine_catalog", "routine_schema", "routine_name")}
                 ORDER BY table_name, table_catalog, table_schema
                 LIMIT 300""", **params)
             return {"source": "information_schema", "data": [
                 {"full_name": f"{r['table_catalog']}.{r['table_schema']}.{r['table_name']}",
                  "name": r["table_name"], "type": r["table_type"]} for r in rows]}
-        hits = [o for p in self.root.glob("*/*/objects.json")
+        hits = [o for p in (*self.root.glob("*/*/objects.json"), *self.root.glob("*/*/functions.json"))
                 for o in json.loads(p.read_text(encoding="utf-8"))["data"] if (q.lower() in o["name"].lower() if term.simple else _path_matches(term, o["full_name"]))]
         return {"source": "cached schemas only (pick a SQL warehouse to search everything)",
                 "data": sorted(hits, key=lambda x: (x["name"], x["full_name"]))[:300]}
@@ -337,17 +358,84 @@ class Explorer:
                             lambda: self._call("lineage-tracking/table-lineage", fetch, full_name=full_name), refresh)
 
     def column_lineage(self, full_name, refresh=False):
-        """Column-level lineage rows touching one table, from system.access.column_lineage (one warehouse query).
+        """Column-level lineage rows touching one table: {"fetched_at", "data": [rows], "source"}.
 
+        The source is "system_table" (system.access.column_lineage, one warehouse query) or, when that cannot be read
+        (no warehouse selected, it will not start, no access) and the fallback finds something, "api" (the REST
+        column-lineage API, plus the view's own SQL when the table is a view; see column_lineage_api).
         Cached like the other metadata, and a cached copy is returned even when no warehouse is selected.
-        Raises RuntimeError without a warehouse and no cache, and whatever the warehouse says (no access) otherwise.
+        Raises RuntimeError without a warehouse when the fallback finds nothing, and whatever the warehouse says
+        (no access) when the fallback finds nothing either.
         """
         def fetch():
             if not self.warehouse_id:
-                raise RuntimeError("Column lineage is read with a SQL warehouse (system.access.column_lineage). "
-                                   "Pick one.")
+                raise RuntimeError("No column lineage found without a warehouse (REST API, view definitions). "
+                                   "Pick a SQL warehouse to read system.access.column_lineage.")
             return self.sql(COLUMN_LINEAGE_SQL, t=full_name)
-        return self._cached(f"{self._dir(full_name)}/column_lineage/{safe(full_name)}.json", fetch, refresh)
+        try:
+            return {**self._cached(f"{self._dir(full_name)}/column_lineage/{safe(full_name)}.json", fetch, refresh),
+                    "source": "system_table"}
+        except Exception:
+            fallback = self.column_lineage_api(full_name, refresh)
+            if not fallback["data"]:
+                raise
+            return {**fallback, "source": "api"}
+
+    def column_lineage_api(self, full_name, refresh=False):
+        """Column lineage with no warehouse: the REST API (one call per column) and the view's SQL. Cached, never raises.
+
+        Rows have the shape of system.access.column_lineage's (source and target table and column, last_seen).
+        The REST rows say what Unity Catalog recorded; the view's SQL adds the columns it names, for lineage the
+        recorded events do not hold. A column the API cannot answer for is skipped.
+        """
+        def fetch():
+            try:
+                info = self.object(full_name, refresh)["data"]
+            except Exception:
+                return []
+            rows = self._column_lineage_rest(full_name, [c["name"] for c in info.get("columns") or [] if c.get("name")])
+            seen = {tuple(str(r[k]).lower() for k in ("source_table_full_name", "source_column_name",
+                                                       "target_table_full_name", "target_column_name")) for r in rows}
+            if str(info.get("table_type") or "").upper() in sqltools.VIEW_TYPES and info.get("view_definition"):
+                catalog, schema, _ = full_name.split(".", 2)
+                known = [(d.get("table") or {}).get("table_full_name") for d in (info.get("view_dependencies") or {}).get("dependencies", [])]
+                traced = sqltools.view_column_lineage(info["view_definition"], [c["name"] for c in info.get("columns") or [] if c.get("name")],
+                                                      catalog, schema, [k for k in known if k])
+                for source, source_column, column in traced:
+                    key = (source, source_column, full_name.lower(), column.lower())
+                    if key not in seen and not is_internal(source):
+                        seen.add(key)
+                        rows.append({"source_table_full_name": source, "source_column_name": source_column,
+                                     "target_table_full_name": full_name, "target_column_name": column, "last_seen": None})
+            return rows
+        return self._cached(f"{self._dir(full_name)}/column_lineage_api/{safe(full_name)}.json", fetch, refresh)
+
+    def _column_lineage_rest(self, full_name, columns):
+        """Rows from GET /api/2.0/lineage-tracking/column-lineage, one call per column (at most MAX_API_COLUMNS)."""
+        def one(column):
+            try:
+                return column, self._call("lineage-tracking/column-lineage", lambda: self.w.api_client.do(
+                    "GET", "/api/2.0/lineage-tracking/column-lineage",
+                    body={"table_name": full_name, "column_name": column}), full_name=full_name, column=column)
+            except Exception:
+                return column, {}
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            answers = list(pool.map(one, columns[:MAX_API_COLUMNS]))
+        rows = []
+
+        def table_of(c):
+            parts = [c.get("catalog_name"), c.get("schema_name"), c.get("table_name")]
+            return ".".join(parts) if all(parts) and not is_internal(parts[2]) else None
+        for column, answer in answers:
+            for up in (answer or {}).get("upstream_cols") or []:
+                if table_of(up) and up.get("name"):
+                    rows.append({"source_table_full_name": table_of(up), "source_column_name": up["name"],
+                                 "target_table_full_name": full_name, "target_column_name": column, "last_seen": None})
+            for down in (answer or {}).get("downstream_cols") or []:
+                if table_of(down) and down.get("name"):
+                    rows.append({"source_table_full_name": full_name, "source_column_name": column,
+                                 "target_table_full_name": table_of(down), "target_column_name": down["name"], "last_seen": None})
+        return rows
 
     def tags(self, full_name, refresh=False):
         """Unity Catalog tags of one table and its columns: {"table": {tag: value}, "columns": {column: {tag: value}}}.
@@ -445,9 +533,61 @@ class Explorer:
         return {"flows": list(merged.values())}
 
     # ---- graph assembly ----
+    def _names(self, rel):
+        """The lowercased names in a cached catalogs.json or schemas.json; None when it was never fetched."""
+        try:
+            return {x["name"].lower() for x in json.loads((self.root / rel).read_text(encoding="utf-8"))["data"]}
+        except (OSError, ValueError, KeyError):
+            return None
+
+    def _resolve(self, name, need_info=False, budget=None):
+        """What is known about a neighbor: {"exists": True | False | None, "info", "type", "reason", "renamed_to"}.
+
+        Reads the cache first (the object, then the schema's object list, unless `need_info`) and only then calls
+        tables.get, at most `budget[0]` times. A failure that means "not there" is remembered for the process and
+        is not an error; any other failure leaves `exists` None."""
+        if name in self._gone:
+            return self._gone[name]
+        cached = self.root / f"{self._dir(name)}/obj/{safe(name)}.json"
+        if not cached.exists():
+            if not need_info:
+                try:
+                    listed = json.loads((self.root / f"{self._dir(name)}/objects.json").read_text(encoding="utf-8"))["data"]
+                    for o in listed:
+                        if (o.get("full_name") or "").lower() == name.lower():
+                            return {"exists": True, "info": None, "type": o.get("type")}
+                except (OSError, ValueError, KeyError):
+                    pass
+            if budget is not None:
+                if budget[0] <= 0:
+                    return {"exists": None, "info": None, "type": None}
+                budget[0] -= 1
+        try:
+            info = self.object(name)["data"]
+            return {"exists": True, "info": info, "type": info.get("table_type")}
+        except Exception as e:
+            if not neighbors.is_not_found(e):
+                return {"exists": None, "info": None, "type": None}
+            cat, sch, tbl = name.split(".", 2)
+            reason = neighbors.missing_reason(name, clean_error(e), self._names("catalogs.json"),
+                                              self._names(f"{safe(cat)}/schemas.json"))
+            twins = sorted(o["full_name"] for p in self.root.glob(f"*/{safe(sch)}/objects.json") if p.parent.parent.name != safe(cat)
+                           for o in _read_list(p) if (o.get("name") or "").lower() == tbl.lower() and o.get("full_name"))
+            out = {"exists": False, "info": None, "type": None, "reason": reason, "renamed_to": twins[0] if twins else None}
+            self._gone[name] = out
+            return out
+
     def relations(self, full_name, refresh=False):
-        """Nodes + edges for one object: lineage, foreign keys, view dependencies."""
+        """Nodes + edges for one object: lineage, foreign keys, view dependencies.
+
+        Every neighbor is looked up (cache first, at most MAX_NEIGHBOR_READS tables.get calls), which gives it its real
+        kind and, when it does not exist, `missing` with `missing_reason` and maybe `renamed_to`. A lineage edge that
+        no longer holds is marked `superseded` (see neighbors.is_superseded). A pair that has a view dependency and
+        lineage is one `view_dep` edge, whose `last_read` is the lineage time."""
         nodes, edges, errors = {}, {}, []
+        if refresh:
+            self._gone.clear()
+        infos = {}  # lowercased name -> tables.get data, for the object and the neighbors that were read
 
         def node(fid, kind="table", **extra):
             nodes.setdefault(fid, {"id": fid, "label": fid.split(".")[-1], "kind": kind, **extra})
@@ -456,7 +596,8 @@ class Explorer:
 
         try:
             info = self.object(full_name, refresh)["data"]
-            nodes[full_name]["kind"] = (info.get("table_type") or "table").lower()
+            infos[full_name.lower()] = info
+            nodes[full_name]["kind"] = neighbors.kind_of(info.get("table_type"))
             for con in info.get("table_constraints") or []:
                 fk = con.get("foreign_key_constraint")
                 if fk and not is_internal(fk["parent_table"]):
@@ -476,6 +617,9 @@ class Explorer:
         except Exception as e:
             errors.append(f"tables.get: {clean_error(e)}")
 
+        flows = {}  # (source, target) -> lineage time, in the order met
+        hints = {}  # neighbor -> the lineage API's table type, a guess for its kind
+        downstream = set()
         try:
             lin = self.lineage(full_name, refresh)["data"]
             for direction in ("upstreams", "downstreams"):
@@ -491,23 +635,60 @@ class Explorer:
                         nodes[full_name]["self_ref"] = True
                         nodes[full_name]["self_ref_last_seen"] = max(filter(None, [nodes[full_name].get("self_ref_last_seen"), ts]), default=None)
                         continue
-                    node(other, (ti.get("table_type") or "table").lower())
+                    node(other)
+                    hints.setdefault(other, ti.get("table_type"))
                     src, dst = (other, full_name) if direction == "upstreams" else (full_name, other)
-                    # one edge per pair; a link both ways becomes bidir
-                    key = "lineage:" + "<->".join(sorted([src, dst]))
-                    e = edges.get(key)
-                    if e is None:
-                        edges[key] = {"id": key, "source": src, "target": dst, "kind": "lineage",
-                                      "bidir": False, "last_seen": ts, "last_seen_by_dir": {f"{src}->{dst}": ts}}
-                    else:
-                        e["last_seen_by_dir"][f"{src}->{dst}"] = ts
-                        if (e["source"], e["target"]) != (src, dst):
-                            e["bidir"] = True
-                        e["last_seen"] = max(filter(None, [e["last_seen"], ts]), default=None)
+                    flows[(src, dst)] = max(filter(None, [flows.get((src, dst)), ts]), default=None)
+                    if direction == "downstreams":
+                        downstream.add(other)
         except Exception as e:
             errors.append(f"lineage: {clean_error(e)}")
 
+        # Look every neighbor up. A downstream neighbor's own metadata says whether the edge into it still holds.
+        budget = [MAX_NEIGHBOR_READS]
+        for nid in [n for n in nodes if n != full_name]:
+            r = self._resolve(nid, nid in downstream, budget)
+            if r["info"]:
+                infos[nid.lower()] = r["info"]
+            nodes[nid]["kind"] = neighbors.kind_of(r["type"], hints.get(nid))
+            if r["exists"] is False:
+                nodes[nid].update(missing=True, missing_reason=r["reason"])
+                if r.get("renamed_to"):
+                    nodes[nid]["renamed_to"] = r["renamed_to"]
+        # A downstream view whose current definition reads this object has that dependency even when this object's
+        # own metadata does not say so.
+        for nid in downstream:
+            if full_name.lower() in neighbors.view_sources(infos.get(nid.lower())):
+                edges.setdefault(f"view_dep:{full_name}->{nid}", {
+                    "id": f"view_dep:{full_name}->{nid}", "source": full_name, "target": nid, "kind": "view_dep"})
+
+        pairs = {}  # sorted pair -> {"source", "target", "dirs": {(src, dst): (time, superseded)}}
+        for (src, dst), ts in flows.items():
+            view_dep = edges.get(f"view_dep:{src}->{dst}")
+            if view_dep:  # one edge per pair: the view dependency, with the time the lineage API last saw it read
+                view_dep["last_read"] = max(filter(None, [view_dep.get("last_read"), ts]), default=None)
+                continue
+            gone = neighbors.is_superseded(src, ts, infos.get(dst.lower()))
+            p = pairs.setdefault("<->".join(sorted([src, dst])), {"source": src, "target": dst, "dirs": {}})
+            p["dirs"][(src, dst)] = (ts, gone)
+        for pair, p in pairs.items():
+            key = "lineage:" + pair
+            times = {f"{s}->{t}": ts for (s, t), (ts, _) in p["dirs"].items()}
+            edges[key] = {"id": key, "source": p["source"], "target": p["target"], "kind": "lineage",
+                          "bidir": len(times) > 1, "last_seen": max(filter(None, times.values()), default=None),
+                          "last_seen_by_dir": times}
+            if all(gone for _, gone in p["dirs"].values()):
+                edges[key]["superseded"] = True
+
         return {"nodes": list(nodes.values()), "edges": list(edges.values()), "errors": errors}
+
+
+def _read_list(path):
+    """The rows of a cached objects.json; [] when unreadable."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))["data"] or []
+    except (OSError, ValueError, KeyError):
+        return []
 
 
 # ---------- relationship store support (see relationships.py) ----------
@@ -562,6 +743,17 @@ def _path_matches(term, full_name):
     return len(parts) == 3 and term.matches(*parts)
 
 
+def _cached_functions(explorer):
+    """Every function row in the local cache (data/cache/<profile>/<catalog>/<schema>/functions.json)."""
+    out = []
+    for p in explorer.root.glob("*/*/functions.json"):
+        try:
+            out += [o for o in json.loads(p.read_text(encoding="utf-8")).get("data") or [] if o.get("full_name")]
+        except (OSError, ValueError):
+            continue
+    return out
+
+
 def cached_search(explorer, q, limit=300):
     """Search table names across everything in the local cache: every catalog and schema ever browsed, and every table
     whose object was ever fetched. `q` matches the table name or the full `catalog.schema.table` name, any case.
@@ -572,6 +764,9 @@ def cached_search(explorer, q, limit=300):
     hits = [{"full_name": t["table"], "name": t["table"].rsplit(".", 1)[-1], "type": t["type"]}
             for t in cached_metadata(explorer)
             if needle and (needle in t["table"].lower() if term.simple else _path_matches(term, t["table"]))]
+    hits += [{"full_name": o["full_name"], "name": o["name"], "type": "FUNCTION"}
+             for o in _cached_functions(explorer)
+             if needle and (needle in o["full_name"].lower() if term.simple else _path_matches(term, o["full_name"]))]
     hits.sort(key=lambda h: (needle not in h["name"].lower(), h["name"], h["full_name"]))
     return {"source": "tables already browsed (pick a SQL warehouse to search everything, or type the full name)",
             "data": hits[:limit]}

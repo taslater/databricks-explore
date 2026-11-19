@@ -123,6 +123,9 @@ export const getSchemas = (catalog: string, refresh = false) =>
 export const getObjects = (catalog: string, schema: string, refresh = false) =>
   get<Cached<ObjectSummary[]>>(`/api/objects${qs({ catalog, schema, refresh })}`)
 
+export const getFunctions = (catalog: string, schema: string, refresh = false) =>
+  get<Cached<ObjectSummary[]>>(`/api/functions${qs({ catalog, schema, refresh })}`)
+
 export const search = (q: string) => get<SearchResponse>(`/api/search${qs({ q })}`)
 
 export const getObject = (name: string, refresh = false) =>

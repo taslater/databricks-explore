@@ -88,6 +88,17 @@ export function useObjects(catalog: string | null, schema: string | null) {
   })
 }
 
+/** The schema's functions, shaped like objects (type "FUNCTION"). A failure does not hide the tables, so callers read `isError`. */
+export function useFunctions(catalog: string | null, schema: string | null) {
+  const profile = useConnectedProfile()
+  return useQuery({
+    queryKey: ['functions', profile, catalog, schema],
+    queryFn: () => api.getFunctions(catalog!, schema!),
+    enabled: profile !== null && catalog !== null && schema !== null,
+    retry: false,
+  })
+}
+
 export function useSearch(q: string) {
   const profile = useConnectedProfile()
   const warehouseId = useUiStore((s) => s.warehouseId)

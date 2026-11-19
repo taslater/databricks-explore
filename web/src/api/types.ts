@@ -84,7 +84,7 @@ export interface TableInfo {
 
 // ---- Relationship graph ---------------------------------------------------
 
-export type GraphNodeKind = string // lowercased table_type, default "table"
+export type GraphNodeKind = string // the object's lowercased table_type; "view" for PERSISTED_VIEW; default "table"
 
 export interface GraphNode {
   id: string
@@ -93,6 +93,10 @@ export interface GraphNode {
   focus?: boolean
   self_ref?: boolean
   self_ref_last_seen?: string
+  /** The object does not exist (renamed or dropped). `missing_reason` says why, `renamed_to` is a table of the same schema and name elsewhere. */
+  missing?: boolean
+  missing_reason?: string
+  renamed_to?: string
 }
 
 /** Derived from Unity Catalog at read time: `fk`, `lineage`, `view_dep`. The rest are stored. */
@@ -108,7 +112,8 @@ export type RelationshipKind =
 
 export type GraphEdgeKind = RelationshipKind
 
-export type RelationshipStatus = 'derived' | 'proposed' | 'accepted' | 'rejected'
+/** `derived` and `superseded` (a derived edge that no longer holds) are only ever on edges read from Unity Catalog. */
+export type RelationshipStatus = 'derived' | 'superseded' | 'proposed' | 'accepted' | 'rejected'
 
 /** What the graph draws and saves for one edge. The first group is the legacy shape, the second comes from /api/relationships. */
 export interface GraphEdge {
@@ -214,24 +219,40 @@ export interface RelationshipsResponse {
   nodes: GraphNode[]
   edges: Relationship[]
   errors: string[]
+  /** At column level: where the column lineage came from, `api` meaning no warehouse (REST API and view SQL). */
+  column_lineage_source?: 'system_table' | 'api'
 }
 
 /** One way two tables join: every column pair of one join condition, read from the asked table's side. */
 export interface JoinKey {
   pairs: Array<{ here: string; there: string }>
-  /** `fk` is a declared foreign key, `mined` came from query history, `manual` was drawn by the user. */
-  source: 'fk' | 'mined' | 'manual'
+  /**
+   * `fk` is a declared foreign key, `view` is a join a view's SQL defines, `mined` came from query history,
+   * `manual` was drawn by the user.
+   */
+  source: 'fk' | 'view' | 'mined' | 'manual'
   status: RelationshipStatus
   /** Statements that used this key (mined only). */
   runs: number | null
   /** The constraint name (fk only). */
   name: string | null
+  /** The views whose SQL joins on exactly this key, whatever its source. Absent when none does. */
+  views?: string[]
+}
+
+/** One join condition a view's own SQL defines, between two of its base tables (`left` sorts first). */
+export interface ViewJoin {
+  left: string
+  right: string
+  pairs: Array<{ left: string; right: string }>
 }
 
 /** GET /api/relationships/joins: the tables one table is known to join to, with the keys. */
 export interface JoinsResponse {
   table: string
   joins: Array<{ table: string; keys: JoinKey[] }>
+  /** When the table is a view: the joins its SQL defines. */
+  view_joins?: ViewJoin[]
   errors: string[]
 }
 
@@ -243,7 +264,7 @@ export interface RelationshipCreate {
 }
 
 export interface RelationshipPatch {
-  status?: Exclude<RelationshipStatus, 'derived'>
+  status?: StoredStatus
   note?: string
 }
 
@@ -340,11 +361,13 @@ export interface UsageSummary {
   pairs: UsagePair[]
 }
 
-export type StoredStatus = Exclude<RelationshipStatus, 'derived'>
+export type StoredStatus = Exclude<RelationshipStatus, 'derived' | 'superseded'>
 
 export interface SuggestionsResponse {
   edges: Relationship[]
   counts: Record<StoredStatus, number>
+  /** Edge id to the views whose SQL joins on the same column pair. Edges no view joins on are absent. */
+  views?: Record<string, string[]>
 }
 
 export interface BulkStatusBody {

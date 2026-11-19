@@ -10,8 +10,6 @@ import type { DiagramPayload } from './diagram'
 import type { DiagramRevision } from '../api/diagrams'
 import type { EdgeFilters, FlowEdge, FlowNode, Selection } from './types'
 
-export const DEFAULT_STALE_DAYS = 7
-
 export const DEFAULT_FILTERS: EdgeFilters = {
   lineage: true,
   fk: true,
@@ -21,7 +19,7 @@ export const DEFAULT_FILTERS: EdgeFilters = {
   sketch: true,
   concept_link: true,
   ontology: true,
-  showStale: true,
+  showSuperseded: false,
   showRejected: false,
 }
 
@@ -50,7 +48,6 @@ interface GraphState {
   focusSchema: string | null
   selection: Selection
   hoverId: string | null
-  staleDays: number
   filters: EdgeFilters
   status: { text: string; error: boolean }
   /** Run dagre on the next render where every visible node has been measured. */
@@ -75,7 +72,6 @@ interface GraphState {
   setStatus: (text: string, error?: boolean) => void
   setSelection: (selection: Selection) => void
   setHover: (id: string | null) => void
-  setStaleDays: (days: number) => void
   setFilter: (key: keyof EdgeFilters, value: boolean) => void
   /** Changes fields of one edge's info (status, note) after the server accepted the change. */
   updateEdgeInfo: (id: string, patch: Partial<GraphEdge>) => void
@@ -112,7 +108,6 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   focusSchema: null,
   selection: null,
   hoverId: null,
-  staleDays: DEFAULT_STALE_DAYS,
   filters: DEFAULT_FILTERS,
   status: { text: '', error: false },
   layoutPending: false,
@@ -131,7 +126,6 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   setStatus: (text, error = false) => set({ status: { text, error } }),
   setSelection: (selection) => set({ selection }),
   setHover: (hoverId) => set({ hoverId }),
-  setStaleDays: (staleDays) => set({ staleDays }),
   setFilter: (key, value) => set((s) => ({ filters: { ...s.filters, [key]: value } })),
   updateEdgeInfo: (id, patch) => {
     const apply = (list: FlowEdge[]) =>
@@ -175,6 +169,14 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       for (const n of resp.nodes) {
         const idx = indexById.get(n.id)
         if (idx !== undefined) {
+          // The object's own response knows its kind. A neighbor's was a guess, however well it was resolved.
+          if (n.focus) nodes[idx] = { ...nodes[idx], data: { ...nodes[idx].data, kind: n.kind } }
+          if (n.missing) {
+            nodes[idx] = {
+              ...nodes[idx],
+              data: { ...nodes[idx].data, missing: true, missingReason: n.missing_reason, renamedTo: n.renamed_to },
+            }
+          }
           if (n.self_ref) {
             nodes[idx] = {
               ...nodes[idx],
@@ -194,6 +196,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
             focus: first && !!n.focus,
             selfRef: !!n.self_ref,
             selfRefLastSeen: n.self_ref_last_seen,
+            ...(n.missing ? { missing: true, missingReason: n.missing_reason, renamedTo: n.renamed_to } : null),
           },
         })
         indexById.set(n.id, nodes.length - 1)

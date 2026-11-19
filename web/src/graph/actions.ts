@@ -67,6 +67,12 @@ export function useGraphActions() {
      */
     async function expand(name: string, refresh = false) {
       const store = useGraphStore.getState()
+      const gone = store.nodes.find((n) => n.id === name)?.data
+      if (gone?.missing) {
+        // Nothing to read: say so, plainly, without the error styling.
+        store.setStatus(`${name} does not exist${gone.missingReason ? ` (${gone.missingReason})` : ''}`)
+        return
+      }
       store.setStatus(`loading ${name}…`)
       try {
         const profile = useUiStore.getState().connectedProfile
@@ -319,8 +325,7 @@ export function useGraphActions() {
     /** Sends the chain of lineage and view dependencies the graph shows from one table, downstream or upstream. */
     async function sendPath(id: string, direction: PathDirection) {
       const g = useGraphStore.getState()
-      const now = Date.now()
-      const shown = g.edges.map((e) => e.data!.info).filter((info) => edgeShown(info, g.filters, g.staleDays, now))
+      const shown = g.edges.map((e) => e.data!.info).filter((info) => edgeShown(info, g.filters))
       const path = lineagePath(id, direction, shown)
       if (path.tables.length === 1) {
         g.setStatus(
