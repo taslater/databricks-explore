@@ -76,6 +76,18 @@ def test_each_kind_of_expression_has_its_class(select, column, klass, agg):
     assert (found["class"], found["agg"]) == (klass, agg)
 
 
+def test_an_insert_names_its_outputs_by_position():
+    # live on dbx-free: INSERT INTO orders SELECT o.o_orderkey, o.o_custkey, ... FROM samples.tpch.orders o names no output order_id or customer_id
+    sql = "INSERT INTO c.s.orders SELECT o.o_orderkey, CAST(o.o_totalprice AS DECIMAL(18,2)), 'x' FROM samples.tpch.orders o"
+    by_table = sqltools.column_expressions(sql, "c", "s", target_columns=["order_id", "total_price", "status"])
+    assert {k: v["class"] for k, v in by_table.items()} == {"order_id": "ref", "total_price": "cast", "status": "func"}
+    by_list = sqltools.column_expressions("INSERT INTO c.s.orders (status, order_id) SELECT 'x', o.o_orderkey FROM samples.tpch.orders o", "c", "s",
+                                          target_columns=["order_id", "total_price", "status"])
+    assert {k: v["class"] for k, v in by_list.items()} == {"status": "func", "order_id": "ref"}
+    assert list(sqltools.column_expressions(sql, "c", "s", target_columns=["a", "b"])) == ["o_orderkey", "o_totalprice", "x"]  # not as many: its own names
+    assert "o_orderkey" in sqltools.column_expressions(sql, "c", "s")
+
+
 def test_a_star_names_no_column_and_sql_with_no_query_gives_nothing():
     assert sqltools.column_expressions("SELECT *, t.* FROM t") == {}
     assert sqltools.column_expressions("COPY INTO a.b.c FROM 's3://x/' FILEFORMAT = CSV") == {}

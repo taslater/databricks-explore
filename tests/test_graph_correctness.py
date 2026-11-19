@@ -220,3 +220,52 @@ def test_walk_and_connectors_skip_superseded_edges():
     out = lineage.walk(lambda t: rel, "a", "downstream", 1)
     assert [n["table"] for n in out["nodes"]] == ["a", "c"]
     assert [(p["source"], p["target"]) for p in lineage.among(lambda t: rel, ["a", "b", "c"])] == [("a", "c")]
+
+
+def test_a_refresh_notices_a_cached_neighbor_that_was_dropped_since(workspace):
+    # live on dbx-free: a view's source dropped after the graph was read stayed a plain table (its object was cached) until the cache was cleared
+    ex = workspace({V: info(V, "VIEW", [A]), A: info(A, "MANAGED")}, {})
+    assert "missing" not in {n["id"]: n for n in ex.relations(V)["nodes"]}[A]
+    del ex.client.tables.infos[A]
+    assert "missing" not in {n["id"]: n for n in ex.relations(V)["nodes"]}[A]  # an ordinary read keeps what it cached
+    node = {n["id"]: n for n in ex.relations(V, refresh=True)["nodes"]}[A]
+    assert node["missing"] is True and node["missing_reason"] == f"table `{A}` does not exist"
+
+
+def test_a_refresh_reads_cached_neighbors_again_within_the_budget(workspace, monkeypatch):
+    ex = workspace({V: info(V, "VIEW", [A, B]), A: info(A, "MANAGED"), B: info(B, "MANAGED")}, {})
+    ex.relations(V)
+    ex.client.tables.gets.clear()
+    monkeypatch.setattr(dbx, "MAX_NEIGHBOR_READS", 1)
+    ex.relations(V, refresh=True)
+    assert sorted(ex.client.tables.gets) == sorted([V, A])  # the object itself, then one neighbor; the other keeps its cached copy
+
+
+def test_a_dropped_object_reports_not_found_and_not_the_lineage_apis_permission_answer(workspace):
+    ex = workspace({A: info(A, "MANAGED"), B: info(B, "MANAGED")}, {})
+
+    def lineage_for_a_dropped_table(method, path, body=None, **_):  # as the lineage API answered live for a table that was dropped
+        raise PermissionError("This user does not have permission to query table c.s.gone in unity catalog.")
+    ex.client.api_client.do = lineage_for_a_dropped_table
+    rel = ex.relations("c.s.gone")
+    assert rel["errors"] == ["tables.get: Table 'c.s.gone' does not exist"]
+
+
+def test_a_ctas_event_a_fraction_of_a_second_before_created_at_is_not_superseded(workspace):
+    # live on dbx-free: orders_daily was created at 13:00:27.300 and its lineage event was stamped 13:00:27.0
+    created = 1795093227300  # ms
+    ex = workspace({A: info(A, "MANAGED"), B: info(B, "MANAGED", created=created)}, {A: {"downstreams": [item(B, ts="2026-11-19 13:00:27.0")]}})
+    (edge,) = ex.relations(A)["edges"]
+    assert edge["kind"] == "lineage" and not edge.get("superseded")
+    ex = workspace({A: info(A, "MANAGED"), B: info(B, "MANAGED", created=created)}, {A: {"downstreams": [item(B, ts="2026-11-19 12:50:00.0")]}}, profile="q")
+    assert ex.relations(A)["edges"][0]["superseded"] is True  # ten minutes older: an earlier table
+
+
+def test_a_materialized_view_is_judged_by_its_creation_time_not_by_its_backing_table(workspace):
+    # live: a materialized view's view_dependencies name only __materialization_..., never its sources
+    mv = "c.s.mv"
+    backing = "c.s.__materialization_mat_c68c7ebe_mv_1"
+    ex = workspace({A: info(A, "MANAGED"), mv: info(mv, "MATERIALIZED_VIEW", [backing], created=1795093302241)},
+                   {A: {"downstreams": [item(mv, "MATERIALIZED_VIEW", ts="2026-11-19 13:01:55.0")]}})
+    (edge,) = ex.relations(A)["edges"]
+    assert edge["kind"] == "lineage" and not edge.get("superseded")

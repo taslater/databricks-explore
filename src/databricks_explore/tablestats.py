@@ -31,8 +31,8 @@ def statements(full_name: str) -> list[dict]:
 def skip_reason(info: dict) -> Optional[str]:
     """Why a table (its `tables.get` data) has no size and history to read, or None when it does."""
     kind = str(info.get("table_type") or "").upper()
-    if kind in ("VIEW", "METRIC_VIEW"):
-        return "a metric view has no history" if kind == "METRIC_VIEW" else "a view has no size"
+    if kind in ("VIEW", "METRIC_VIEW", "MATERIALIZED_VIEW"):  # DESCRIBE DETAIL answers EXPECT_TABLE_NOT_VIEW for all three
+        return {"METRIC_VIEW": "a metric view has no history", "MATERIALIZED_VIEW": "a materialized view has no size to read"}.get(kind, "a view has no size")
     fmt = str(info.get("data_source_format") or "").upper()
     if fmt and fmt != "DELTA":
         return f"not a Delta table ({fmt.lower()})"
@@ -76,7 +76,7 @@ def data_writes(history: list[dict]) -> list[dict]:
         out.append({"at": at.isoformat(timespec="seconds"), "operation": op,
                     "rows": _int(_json(h.get("operationMetrics")).get("numOutputRows")),
                     "replaces": _is_replace(op, _json(h.get("operationParameters"))),
-                    "job": job.get("jobName") or None, "job_id": job.get("jobId") or None,
+                    "job": job.get("jobName") or job.get("jobId") or None, "job_id": job.get("jobId") or None,
                     "notebook": notebook.get("notebookId") or None, "user": h.get("userName") or None})
     out.sort(key=lambda w: w["at"], reverse=True)
     return out
