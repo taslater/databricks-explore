@@ -43,7 +43,7 @@ def test_list_graphs_and_list_canvases_point_at_each_other_when_empty_or_missing
 def test_create_graph_makes_nodes_for_the_tables_and_the_edges_the_app_knows(agent):
     out = agent.ok("create_graph", name="Sales path", tables=[ITEMS, ORDERS, CUSTOMERS, VIEW], focus=ORDERS)
     assert out.startswith("created graph Sales_path: 4 tables, 3 edges (fk 2, view_dep 1). revision 1.")
-    assert "left out" in out  # the lineage edge duplicates the view dependency
+    assert "lineage" not in out  # the pair is drawn once, as the view dependency (relations() keeps one edge per pair)
     j = graph_json(agent, "Sales path")
     assert {n["table"] for n in j["nodes"]} == {ORDERS, ITEMS, CUSTOMERS, VIEW}
     assert [n["table"] for n in j["nodes"] if n.get("focus")] == [ORDERS] and all(n["pinned"] for n in j["nodes"])

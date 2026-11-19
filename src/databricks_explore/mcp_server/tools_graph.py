@@ -111,9 +111,8 @@ def derive(ctx, tables: list[str]) -> tuple[list[dict], dict[str, dict], list[st
     """What the Graph tab would draw for exactly these tables: (graph edges, node facts by table, notes).
 
     The edges are the relationships the app knows with both ends in the set (foreign keys, view dependencies, lineage,
-    and joins that are accepted or manual), read as the Graph reads them (relationships.unified). Rejected and proposed
-    edges are left out, a lineage edge is left out where the pair has a view dependency, and so is one into a view
-    that no longer reads its source. Raises ToolError for a table that cannot be read."""
+    and joins that are accepted or manual), read as the Graph reads them (relationships.unified). Rejected, proposed and
+    superseded edges are left out (relations() already draws one edge per pair and marks lineage that no longer holds). Raises ToolError for a table that cannot be read."""
     ex = ctx.need_explorer()
     memo: dict = {}
 
@@ -127,32 +126,26 @@ def derive(ctx, tables: list[str]) -> tuple[list[dict], dict[str, dict], list[st
             f"{t}: {next(e for e in relations_of(t)['errors'] if str(e).startswith('tables.get:'))}" for t in unreadable[:3]))
     wanted = {t.lower(): t for t in tables}
     found: dict[str, dict] = {}
+    left_out = 0
     with ctx.store() as store:
         for t in tables:
             out = relationships.unified(store, t, relations_of(t), dbx.cache_times(ex, t), "table")
             for e in out["edges"]:
                 a, b = e["source"]["table"].lower(), e["target"]["table"].lower()
-                if e["kind"] in GRAPH_KINDS and e["status"] in SHOWN and a != b and a in wanted and b in wanted:
-                    e["source"]["table"], e["target"]["table"] = wanted[a], wanted[b]
-                    found.setdefault(e["id"], e)
-    rels, notes = list(found.values()), []
-    views = {t: {e["source"].lower() for e in relations_of(t).get("edges", []) if e["kind"] == "view_dep" and e["target"].lower() == t.lower()}
-             for t in tables}
-    pairs_with_view = {frozenset((e["source"]["table"].lower(), e["target"]["table"].lower())) for e in rels if e["kind"] == "view_dep"}
-    kept, dropped = [], 0
-    for e in rels:
-        s, t = e["source"]["table"], e["target"]["table"]
-        if e["kind"] == "lineage" and (frozenset((s.lower(), t.lower())) in pairs_with_view or (views.get(t) and s.lower() not in views[t])):
-            dropped += 1
-            continue
-        kept.append(e)
-    if dropped:
-        notes.append(f"{dropped} lineage edge(s) left out: the pair is a view dependency, or the view no longer reads that source")
+                if e["kind"] in GRAPH_KINDS and a != b and a in wanted and b in wanted and e["id"] not in found:
+                    if e["status"] in SHOWN:
+                        e["source"]["table"], e["target"]["table"] = wanted[a], wanted[b]
+                        found[e["id"]] = e
+                    elif e["status"] == "superseded":
+                        found[e["id"]] = None  # counted once
+                        left_out += 1
+    rels = [e for e in found.values() if e]
+    notes = [f"{left_out} superseded lineage edge(s) left out (the view no longer reads that source)"] if left_out else []
     facts = {}
     for t in tables:
         node = next((n for n in relations_of(t).get("nodes", []) if n["id"] == t), {})
         facts[t] = {"id": t, "kind": node.get("kind", "table"), "self_ref": node.get("self_ref"), "self_ref_last_seen": node.get("self_ref_last_seen")}
-    return graphs.graph_edges(kept), facts, notes
+    return graphs.graph_edges(rels), facts, notes
 
 
 def _lonely(tables: list[str], edges: list[dict]) -> list[str]:
