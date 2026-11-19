@@ -1,0 +1,954 @@
+{
+ "note": "Python: graph_collapse.plan. TypeScript: collapseGraph in web/src/graph/collapse.ts, with the page's default filters. Compared: the groups (key, label, tables, collapsed, default_collapsed) and the chains (id, source, target, views, edges).",
+ "cases": [
+  {
+   "name": "a big schema collapses by default and a small one stays open",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.big.t0",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t1",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t2",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t3",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t4",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t5",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t6",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t7",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t8",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t9",
+      "kind": "table"
+     },
+     {
+      "id": "c.small.x",
+      "kind": "table"
+     },
+     {
+      "id": "c.small.y",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "lineage",
+      "source": "c.big.t0",
+      "target": "c.small.x",
+      "status": "derived"
+     },
+     {
+      "id": "e2",
+      "kind": "lineage",
+      "source": "c.big.t1",
+      "target": "c.small.y",
+      "status": "derived"
+     }
+    ],
+    "grouping": {}
+   },
+   "expected": {
+    "groups": [
+     {
+      "key": "c.big",
+      "label": "big",
+      "tables": [
+       "c.big.t0",
+       "c.big.t1",
+       "c.big.t2",
+       "c.big.t3",
+       "c.big.t4",
+       "c.big.t5",
+       "c.big.t6",
+       "c.big.t7",
+       "c.big.t8",
+       "c.big.t9"
+      ],
+      "collapsed": true,
+      "default_collapsed": true
+     },
+     {
+      "key": "c.small",
+      "label": "small",
+      "tables": [
+       "c.small.x",
+       "c.small.y"
+      ],
+      "collapsed": false,
+      "default_collapsed": false
+     }
+    ],
+    "chains": []
+   }
+  },
+  {
+   "name": "a pinned table keeps its big group open; the person can still collapse it",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.big.t0",
+      "kind": "table",
+      "pinned": true
+     },
+     {
+      "id": "c.big.t1",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t2",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t3",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t4",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t5",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t6",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t7",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t8",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t9",
+      "kind": "table"
+     },
+     {
+      "id": "c.small.x",
+      "kind": "table"
+     },
+     {
+      "id": "c.small.y",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "lineage",
+      "source": "c.big.t0",
+      "target": "c.small.x",
+      "status": "derived"
+     }
+    ],
+    "grouping": {}
+   },
+   "expected": {
+    "groups": [
+     {
+      "key": "c.big",
+      "label": "big",
+      "tables": [
+       "c.big.t0",
+       "c.big.t1",
+       "c.big.t2",
+       "c.big.t3",
+       "c.big.t4",
+       "c.big.t5",
+       "c.big.t6",
+       "c.big.t7",
+       "c.big.t8",
+       "c.big.t9"
+      ],
+      "collapsed": false,
+      "default_collapsed": false
+     },
+     {
+      "key": "c.small",
+      "label": "small",
+      "tables": [
+       "c.small.x",
+       "c.small.y"
+      ],
+      "collapsed": false,
+      "default_collapsed": false
+     }
+    ],
+    "chains": []
+   }
+  },
+  {
+   "name": "collapsed and expanded names win over the default",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.big.t0",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t1",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t2",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t3",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t4",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t5",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t6",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t7",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t8",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t9",
+      "kind": "table"
+     },
+     {
+      "id": "c.small.x",
+      "kind": "table"
+     },
+     {
+      "id": "c.small.y",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "lineage",
+      "source": "c.big.t0",
+      "target": "c.small.x",
+      "status": "derived"
+     }
+    ],
+    "grouping": {
+     "collapsed": [
+      "c.small"
+     ],
+     "expanded": [
+      "c.big"
+     ]
+    }
+   },
+   "expected": {
+    "groups": [
+     {
+      "key": "c.big",
+      "label": "big",
+      "tables": [
+       "c.big.t0",
+       "c.big.t1",
+       "c.big.t2",
+       "c.big.t3",
+       "c.big.t4",
+       "c.big.t5",
+       "c.big.t6",
+       "c.big.t7",
+       "c.big.t8",
+       "c.big.t9"
+      ],
+      "collapsed": false,
+      "default_collapsed": true
+     },
+     {
+      "key": "c.small",
+      "label": "small",
+      "tables": [
+       "c.small.x",
+       "c.small.y"
+      ],
+      "collapsed": true,
+      "default_collapsed": false
+     }
+    ],
+    "chains": []
+   }
+  },
+  {
+   "name": "one schema alone has nothing to summarize",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.big.t0",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t1",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t2",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t3",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t4",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t5",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t6",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t7",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t8",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t9",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "lineage",
+      "source": "c.big.t0",
+      "target": "c.big.t1",
+      "status": "derived"
+     }
+    ],
+    "grouping": {}
+   },
+   "expected": {
+    "groups": [],
+    "chains": []
+   }
+  },
+  {
+   "name": "a chain of pass-through views is one edge",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.a.src",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.v1",
+      "kind": "view"
+     },
+     {
+      "id": "c.b.v2",
+      "kind": "materialized_view"
+     },
+     {
+      "id": "c.b.out",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "view_dep",
+      "source": "c.a.src",
+      "target": "c.a.v1",
+      "status": "derived"
+     },
+     {
+      "id": "e2",
+      "kind": "view_dep",
+      "source": "c.a.v1",
+      "target": "c.b.v2",
+      "status": "derived"
+     },
+     {
+      "id": "e3",
+      "kind": "lineage",
+      "source": "c.b.v2",
+      "target": "c.b.out",
+      "status": "derived"
+     }
+    ],
+    "grouping": {}
+   },
+   "expected": {
+    "groups": [],
+    "chains": [
+     {
+      "id": "chain:e1",
+      "source": "c.a.src",
+      "target": "c.b.out",
+      "views": [
+       "c.a.v1",
+       "c.b.v2"
+      ],
+      "edges": [
+       "e1",
+       "e2",
+       "e3"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "chains off, a chain with a direct edge, and a focus view are not elided",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.a.src",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.v1",
+      "kind": "view"
+     },
+     {
+      "id": "c.b.out",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.src2",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.v2",
+      "kind": "view",
+      "focus": true
+     },
+     {
+      "id": "c.b.out2",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.s3",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.v3",
+      "kind": "view"
+     },
+     {
+      "id": "c.b.o3",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "view_dep",
+      "source": "c.a.src",
+      "target": "c.a.v1",
+      "status": "derived"
+     },
+     {
+      "id": "e2",
+      "kind": "view_dep",
+      "source": "c.a.v1",
+      "target": "c.b.out",
+      "status": "derived"
+     },
+     {
+      "id": "e3",
+      "kind": "view_dep",
+      "source": "c.a.src2",
+      "target": "c.a.v2",
+      "status": "derived"
+     },
+     {
+      "id": "e4",
+      "kind": "view_dep",
+      "source": "c.a.v2",
+      "target": "c.b.out2",
+      "status": "derived"
+     },
+     {
+      "id": "e5",
+      "kind": "view_dep",
+      "source": "c.a.s3",
+      "target": "c.a.v3",
+      "status": "derived"
+     },
+     {
+      "id": "e6",
+      "kind": "view_dep",
+      "source": "c.a.v3",
+      "target": "c.b.o3",
+      "status": "derived"
+     },
+     {
+      "id": "e7",
+      "kind": "lineage",
+      "source": "c.a.s3",
+      "target": "c.b.o3",
+      "status": "derived"
+     }
+    ],
+    "grouping": {
+     "chains": false
+    }
+   },
+   "expected": {
+    "groups": [
+     {
+      "key": "c.a",
+      "label": "a",
+      "tables": [
+       "c.a.src",
+       "c.a.v1",
+       "c.a.src2",
+       "c.a.v2",
+       "c.a.s3",
+       "c.a.v3"
+      ],
+      "collapsed": false,
+      "default_collapsed": false
+     },
+     {
+      "key": "c.b",
+      "label": "b",
+      "tables": [
+       "c.b.out",
+       "c.b.out2",
+       "c.b.o3"
+      ],
+      "collapsed": false,
+      "default_collapsed": false
+     }
+    ],
+    "chains": []
+   }
+  },
+  {
+   "name": "the same graph with chains on: a direct edge and a focus keep their views",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.a.src2",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.v2",
+      "kind": "view",
+      "focus": true
+     },
+     {
+      "id": "c.b.out2",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.s3",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.v3",
+      "kind": "view"
+     },
+     {
+      "id": "c.b.o3",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e3",
+      "kind": "view_dep",
+      "source": "c.a.src2",
+      "target": "c.a.v2",
+      "status": "derived"
+     },
+     {
+      "id": "e4",
+      "kind": "view_dep",
+      "source": "c.a.v2",
+      "target": "c.b.out2",
+      "status": "derived"
+     },
+     {
+      "id": "e5",
+      "kind": "view_dep",
+      "source": "c.a.s3",
+      "target": "c.a.v3",
+      "status": "derived"
+     },
+     {
+      "id": "e6",
+      "kind": "view_dep",
+      "source": "c.a.v3",
+      "target": "c.b.o3",
+      "status": "derived"
+     },
+     {
+      "id": "e7",
+      "kind": "lineage",
+      "source": "c.a.s3",
+      "target": "c.b.o3",
+      "status": "derived"
+     }
+    ],
+    "grouping": {}
+   },
+   "expected": {
+    "groups": [
+     {
+      "key": "c.a",
+      "label": "a",
+      "tables": [
+       "c.a.src2",
+       "c.a.v2",
+       "c.a.s3",
+       "c.a.v3"
+      ],
+      "collapsed": false,
+      "default_collapsed": false
+     },
+     {
+      "key": "c.b",
+      "label": "b",
+      "tables": [
+       "c.b.out2",
+       "c.b.o3"
+      ],
+      "collapsed": false,
+      "default_collapsed": false
+     }
+    ],
+    "chains": []
+   }
+  },
+  {
+   "name": "a view that a second edge touches ends the chain; a superseded edge does not count",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.a.s",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.v",
+      "kind": "view"
+     },
+     {
+      "id": "c.b.t",
+      "kind": "table"
+     },
+     {
+      "id": "c.b.u",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "view_dep",
+      "source": "c.a.s",
+      "target": "c.a.v",
+      "status": "derived"
+     },
+     {
+      "id": "e2",
+      "kind": "view_dep",
+      "source": "c.a.v",
+      "target": "c.b.t",
+      "status": "derived"
+     },
+     {
+      "id": "e3",
+      "kind": "view_dep",
+      "source": "c.a.v",
+      "target": "c.b.u",
+      "status": "superseded"
+     }
+    ],
+    "grouping": {}
+   },
+   "expected": {
+    "groups": [],
+    "chains": [
+     {
+      "id": "chain:e1",
+      "source": "c.a.s",
+      "target": "c.b.t",
+      "views": [
+       "c.a.v"
+      ],
+      "edges": [
+       "e1",
+       "e2"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "two schemas with the same last name are labelled in full",
+   "input": {
+    "nodes": [
+     {
+      "id": "x.raw.a",
+      "kind": "table"
+     },
+     {
+      "id": "x.raw.b",
+      "kind": "table"
+     },
+     {
+      "id": "y.raw.a",
+      "kind": "table"
+     },
+     {
+      "id": "y.raw.b",
+      "kind": "table"
+     },
+     {
+      "id": "x.gold.a",
+      "kind": "table"
+     },
+     {
+      "id": "x.gold.b",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "lineage",
+      "source": "x.raw.a",
+      "target": "x.gold.a",
+      "status": "derived"
+     },
+     {
+      "id": "e2",
+      "kind": "lineage",
+      "source": "y.raw.a",
+      "target": "x.gold.b",
+      "status": "derived"
+     }
+    ],
+    "grouping": {}
+   },
+   "expected": {
+    "groups": [
+     {
+      "key": "x.raw",
+      "label": "x.raw",
+      "tables": [
+       "x.raw.a",
+       "x.raw.b"
+      ],
+      "collapsed": false,
+      "default_collapsed": false
+     },
+     {
+      "key": "y.raw",
+      "label": "y.raw",
+      "tables": [
+       "y.raw.a",
+       "y.raw.b"
+      ],
+      "collapsed": false,
+      "default_collapsed": false
+     },
+     {
+      "key": "x.gold",
+      "label": "gold",
+      "tables": [
+       "x.gold.a",
+       "x.gold.b"
+      ],
+      "collapsed": false,
+      "default_collapsed": false
+     }
+    ],
+    "chains": []
+   }
+  },
+  {
+   "name": "grouping by a tag, and tables without it are in no group",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.a.t1",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.t2",
+      "kind": "table"
+     },
+     {
+      "id": "c.b.t3",
+      "kind": "table"
+     },
+     {
+      "id": "c.b.t4",
+      "kind": "table"
+     },
+     {
+      "id": "c.b.t5",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "lineage",
+      "source": "c.a.t1",
+      "target": "c.b.t3",
+      "status": "derived"
+     }
+    ],
+    "grouping": {
+     "by": "tag:domain"
+    },
+    "tags": {
+     "c.a.t1": "sales",
+     "c.a.t2": "sales",
+     "c.b.t3": "ops",
+     "c.b.t4": "ops"
+    }
+   },
+   "expected": {
+    "groups": [
+     {
+      "key": "sales",
+      "label": "sales",
+      "tables": [
+       "c.a.t1",
+       "c.a.t2"
+      ],
+      "collapsed": false,
+      "default_collapsed": false
+     },
+     {
+      "key": "ops",
+      "label": "ops",
+      "tables": [
+       "c.b.t3",
+       "c.b.t4"
+      ],
+      "collapsed": false,
+      "default_collapsed": false
+     }
+    ],
+    "chains": []
+   }
+  },
+  {
+   "name": "grouping off",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.big.t0",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t1",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t2",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t3",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t4",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t5",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t6",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t7",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t8",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t9",
+      "kind": "table"
+     },
+     {
+      "id": "c.small.x",
+      "kind": "table"
+     },
+     {
+      "id": "c.small.y",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "lineage",
+      "source": "c.big.t0",
+      "target": "c.small.x",
+      "status": "derived"
+     }
+    ],
+    "grouping": {
+     "by": "none"
+    }
+   },
+   "expected": {
+    "groups": [],
+    "chains": []
+   }
+  }
+ ]
+}

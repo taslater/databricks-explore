@@ -8,6 +8,7 @@ export type EdgeFamily = 'flow' | 'reference' | 'meaning'
 
 export const FAMILIES: readonly EdgeFamily[] = ['flow', 'reference', 'meaning']
 
+// Python twin: edge_families.FAMILY_OF (checked by web/src/parity.test.ts and tests/test_parity.py).
 export const FAMILY_OF: Record<GraphEdgeKind, EdgeFamily> = {
   lineage: 'flow',
   view_dep: 'flow',

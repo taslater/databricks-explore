@@ -45,10 +45,8 @@ export interface DiagramPayload {
 
 export function toDiagramBody(name: string, payload: DiagramPayload): DiagramBody {
   const via = viaMap(payload.edges)
-  const sizes = new Map<string, { width: number; height: number }>()
   const nodes: SavedNode[] = payload.nodes.map((n) => {
     const size = nodeSize(n, payload.focusSchema, via.get(n.id))
-    sizes.set(n.id, size)
     const c = nodeCenter(n, size)
     const data: SavedNodeData = {
       id: n.id,
@@ -68,6 +66,9 @@ export function toDiagramBody(name: string, payload: DiagramPayload): DiagramBod
   })
   const edges = payload.edges.map((e) => ({ data: e.data!.info }))
   const grouping = payload.grouping && groupingBody(payload.grouping)
+  // The other lenses' positions were read as top-left corners with the estimated size (fromDiagram), so they are written back with that same size:
+  // the size a node has now says nothing about where a lens that is not showing had it, and any other size would move them at every save.
+  const sizes = new Map(payload.nodes.map((n) => [n.id, estimateSize([n.data.name, n.data.schema])]))
   const others: Record<string, Record<string, { x: number; y: number }>> = {}
   for (const [lens, positions] of Object.entries(payload.lensPositions ?? {})) {
     if (lens === payload.lens) continue
@@ -135,14 +136,13 @@ export function fromDiagram(d: DiagramFile): DiagramPayload {
   // Positions another lens left behind are centers too: top-left again, with the size the page estimates for a node it has not measured.
   const lensPositions: LensPositions = {}
   for (const [lens, positions] of Object.entries(parseLensPositions(d.lens_positions))) {
-    lensPositions[lens as Lens] = Object.fromEntries(
-      Object.entries(positions).flatMap(([id, p]) => {
-        const node = nodes.find((n) => n.id === id)
-        if (!node) return []
-        const size = estimateSize([node.data.name, node.data.schema])
-        return [[id, { x: p.x - size.width / 2, y: p.y - size.height / 2 }] as const]
-      }),
-    )
+    const placed = Object.entries(positions).flatMap(([id, p]) => {
+      const node = nodes.find((n) => n.id === id)
+      if (!node) return []
+      const size = estimateSize([node.data.name, node.data.schema])
+      return [[id, { x: p.x - size.width / 2, y: p.y - size.height / 2 }] as const]
+    })
+    if (placed.length > 0) lensPositions[lens as Lens] = Object.fromEntries(placed)
   }
   return { nodes, edges, focusSchema, colorBy: parseColorBy(d.color_by), grouping: parseGrouping(d.grouping), lens: parseLens(d.lens), lensPositions }
 }

@@ -1,0 +1,459 @@
+{
+ "note": "Python: graph_collapse.scene. TypeScript: exportScene in web/src/graph/exportPicture.ts, with the page's default filters. Compared: the nodes drawn (id, and the label of a collapsed group) and the edges (id, source, target).",
+ "cases": [
+  {
+   "name": "a big schema is one node and its edges merge per family",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.big.t0",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t1",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t2",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t3",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t4",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t5",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t6",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t7",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t8",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t9",
+      "kind": "table"
+     },
+     {
+      "id": "c.small.x",
+      "kind": "table"
+     },
+     {
+      "id": "c.small.y",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "lineage",
+      "source": "c.big.t0",
+      "target": "c.small.x",
+      "status": "derived"
+     },
+     {
+      "id": "e2",
+      "kind": "lineage",
+      "source": "c.big.t1",
+      "target": "c.small.x",
+      "status": "derived"
+     },
+     {
+      "id": "e3",
+      "kind": "fk",
+      "source": "c.small.y",
+      "target": "c.big.t2",
+      "status": "derived"
+     },
+     {
+      "id": "e4",
+      "kind": "lineage",
+      "source": "c.big.t3",
+      "target": "c.big.t4",
+      "status": "derived"
+     }
+    ],
+    "grouping": {}
+   },
+   "expected": {
+    "nodes": [
+     {
+      "id": "c.small.x"
+     },
+     {
+      "id": "c.small.y"
+     },
+     {
+      "id": "summary:c.big",
+      "label": "big (10 tables)"
+     }
+    ],
+    "edges": [
+     {
+      "id": "merged:c.small.y|summary:c.big|reference",
+      "source": "c.small.y",
+      "target": "summary:c.big"
+     },
+     {
+      "id": "merged:summary:c.big|c.small.x|flow",
+      "source": "summary:c.big",
+      "target": "c.small.x"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a chain of views is one edge; the second case turns chains off",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.a.src",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.v1",
+      "kind": "view"
+     },
+     {
+      "id": "c.b.v2",
+      "kind": "materialized_view"
+     },
+     {
+      "id": "c.b.out",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "view_dep",
+      "source": "c.a.src",
+      "target": "c.a.v1",
+      "status": "derived"
+     },
+     {
+      "id": "e2",
+      "kind": "view_dep",
+      "source": "c.a.v1",
+      "target": "c.b.v2",
+      "status": "derived"
+     },
+     {
+      "id": "e3",
+      "kind": "lineage",
+      "source": "c.b.v2",
+      "target": "c.b.out",
+      "status": "derived"
+     }
+    ],
+    "grouping": {}
+   },
+   "expected": {
+    "nodes": [
+     {
+      "id": "c.a.src"
+     },
+     {
+      "id": "c.b.out"
+     }
+    ],
+    "edges": [
+     {
+      "id": "chain:e1",
+      "source": "c.a.src",
+      "target": "c.b.out"
+     }
+    ]
+   }
+  },
+  {
+   "name": "chains and grouping off draw every table and edge",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.big.t0",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t1",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t2",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.src",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.v1",
+      "kind": "view"
+     },
+     {
+      "id": "c.b.out",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "view_dep",
+      "source": "c.a.src",
+      "target": "c.a.v1",
+      "status": "derived"
+     },
+     {
+      "id": "e2",
+      "kind": "lineage",
+      "source": "c.a.v1",
+      "target": "c.b.out",
+      "status": "derived"
+     },
+     {
+      "id": "e3",
+      "kind": "fk",
+      "source": "c.big.t0",
+      "target": "c.big.t1",
+      "status": "derived"
+     }
+    ],
+    "grouping": {
+     "by": "none",
+     "chains": false
+    }
+   },
+   "expected": {
+    "nodes": [
+     {
+      "id": "c.a.src"
+     },
+     {
+      "id": "c.a.v1"
+     },
+     {
+      "id": "c.b.out"
+     },
+     {
+      "id": "c.big.t0"
+     },
+     {
+      "id": "c.big.t1"
+     },
+     {
+      "id": "c.big.t2"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "source": "c.a.src",
+      "target": "c.a.v1"
+     },
+     {
+      "id": "e2",
+      "source": "c.a.v1",
+      "target": "c.b.out"
+     },
+     {
+      "id": "e3",
+      "source": "c.big.t0",
+      "target": "c.big.t1"
+     }
+    ]
+   }
+  },
+  {
+   "name": "meaning, rejected and superseded edges are not drawn; a group of mixed objects says objects",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.big.t0",
+      "kind": "view"
+     },
+     {
+      "id": "c.big.t1",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t2",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t3",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t4",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t5",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t6",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t7",
+      "kind": "table"
+     },
+     {
+      "id": "c.big.t8",
+      "kind": "table"
+     },
+     {
+      "id": "c.small.x",
+      "kind": "table"
+     },
+     {
+      "id": "c.small.y",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "sketch",
+      "source": "c.big.t0",
+      "target": "c.small.x",
+      "status": "derived"
+     },
+     {
+      "id": "e2",
+      "kind": "fk",
+      "source": "c.big.t1",
+      "target": "c.small.x",
+      "status": "rejected"
+     },
+     {
+      "id": "e3",
+      "kind": "lineage",
+      "source": "c.big.t2",
+      "target": "c.small.y",
+      "status": "superseded"
+     },
+     {
+      "id": "e4",
+      "kind": "lineage",
+      "source": "c.big.t3",
+      "target": "c.small.y",
+      "status": "derived"
+     }
+    ],
+    "grouping": {}
+   },
+   "expected": {
+    "nodes": [
+     {
+      "id": "c.big.t3"
+     },
+     {
+      "id": "c.big.t4"
+     },
+     {
+      "id": "c.big.t5"
+     },
+     {
+      "id": "c.big.t6"
+     },
+     {
+      "id": "c.big.t7"
+     },
+     {
+      "id": "c.big.t8"
+     },
+     {
+      "id": "c.small.y"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e4",
+      "source": "c.big.t3",
+      "target": "c.small.y"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a focus or pinned table stays when its edges are hidden, and a table nothing touches stays",
+   "input": {
+    "nodes": [
+     {
+      "id": "c.a.f",
+      "kind": "table",
+      "focus": true
+     },
+     {
+      "id": "c.a.p",
+      "kind": "table",
+      "pinned": true
+     },
+     {
+      "id": "c.a.h",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.alone",
+      "kind": "table"
+     },
+     {
+      "id": "c.a.z",
+      "kind": "table"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "kind": "sketch",
+      "source": "c.a.f",
+      "target": "c.a.z",
+      "status": "derived"
+     },
+     {
+      "id": "e2",
+      "kind": "sketch",
+      "source": "c.a.p",
+      "target": "c.a.z",
+      "status": "derived"
+     },
+     {
+      "id": "e3",
+      "kind": "sketch",
+      "source": "c.a.h",
+      "target": "c.a.z",
+      "status": "derived"
+     }
+    ],
+    "grouping": {}
+   },
+   "expected": {
+    "nodes": [
+     {
+      "id": "c.a.alone"
+     },
+     {
+      "id": "c.a.f"
+     },
+     {
+      "id": "c.a.p"
+     }
+    ],
+    "edges": []
+   }
+  }
+ ]
+}

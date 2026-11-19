@@ -2,6 +2,7 @@
 import { create } from 'zustand'
 import type { TraceRequest } from '../api/columnTrace'
 import type { ColumnInfo } from './columns'
+import type { Lens } from './lens'
 
 export interface TraceState {
   request: TraceRequest | null
@@ -9,9 +10,11 @@ export interface TraceState {
   added: string[]
   /** Where each table that was on the graph stood when the trace began, so clearing it puts them back. */
   positions: Record<string, { x: number; y: number }>
+  /** The lens the graph was in when the trace began: the positions above are that lens's. */
+  lens: Lens | null
   /** Columns of the tables on the path, for the ones whose node had not loaded them. Drawn, never put on the node. */
   columns: Record<string, ColumnInfo[]>
-  begin: (request: TraceRequest, positions: TraceState['positions']) => void
+  begin: (request: TraceRequest, positions: TraceState['positions'], lens?: Lens) => void
   setAdded: (ids: string[]) => void
   setColumns: (columns: TraceState['columns']) => void
   reset: () => void
@@ -21,9 +24,10 @@ export const useTraceStore = create<TraceState>()((set) => ({
   request: null,
   added: [],
   positions: {},
+  lens: null,
   columns: {},
-  begin: (request, positions) => set({ request, positions, added: [], columns: {} }),
+  begin: (request, positions, lens) => set({ request, positions, lens: lens ?? null, added: [], columns: {} }),
   setAdded: (added) => set({ added }),
   setColumns: (columns) => set({ columns }),
-  reset: () => set({ request: null, added: [], positions: {}, columns: {} }),
+  reset: () => set({ request: null, added: [], positions: {}, lens: null, columns: {} }),
 }))

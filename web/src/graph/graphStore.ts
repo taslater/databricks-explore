@@ -160,6 +160,16 @@ const RELAYOUT = { layoutPending: true, layoutFresh: true, layoutScope: null } a
 /** The nodes an earlier layout (or a saved diagram) positioned: the next layout keeps their order. */
 const placedIds = new Set<string>()
 let layoutRunning = false
+/** Bumped when the graph changes under a layout that is running (lens switch, diagram loaded or cleared, trace cleared): that layout's result is dropped. */
+let layoutEpoch = 0
+const soonTimers = new Set<ReturnType<typeof setTimeout>>()
+
+/** Drops the layout that is running and the ones waiting on a timer, for a change that puts the nodes where they should stand. */
+export function cancelLayouts(): void {
+  layoutEpoch++
+  for (const t of soonTimers) clearTimeout(t)
+  soonTimers.clear()
+}
 
 export const useGraphStore = create<GraphState>()((set, get) => ({
   nodes: [],
@@ -192,6 +202,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   setLens: (lens) => {
     const s = get()
     if (lens === s.lens) return
+    layoutEpoch++ // a layout in flight was for the other lens
     // The positions of the lens that was showing wait; the new lens takes back its own, for the tables that have one.
     const waiting: LensPositions = { ...s.lensPositions, [s.lens]: Object.fromEntries(s.nodes.map((n) => [n.id, { ...n.position }])) }
     const saved = waiting[lens] ?? {}
@@ -365,6 +376,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
 
   clear: () => {
     placedIds.clear()
+    cancelLayouts()
     set({
       nodes: [],
       edges: [],
@@ -399,7 +411,13 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
             layoutScope: scope && (!s.layoutPending || s.layoutScope) ? [...(s.layoutScope ?? []), ...scope] : null,
           },
     ),
-  requestLayoutSoon: (scope) => void setTimeout(() => useGraphStore.getState().requestLayout(scope), 250),
+  requestLayoutSoon: (scope) => {
+    const timer = setTimeout(() => {
+      soonTimers.delete(timer)
+      useGraphStore.getState().requestLayout(scope)
+    }, 250)
+    soonTimers.add(timer)
+  },
 
   runLayout: async () => {
     // One layout at a time: a call made while one runs is dropped, and the request it carried stays pending.
@@ -407,6 +425,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
     layoutRunning = true
     try {
       const s = get()
+      const epoch = layoutEpoch
       const fresh = s.layoutFresh
       const { nodes: laid, links } = layoutInput(s, fresh ? new Set() : placedIds)
       const stamp = (g: typeof s) => g.nodes.map((n) => n.id).join('|') + '#' + groupingSignature(g.grouping) + g.grouping.shownChains.join()
@@ -418,6 +437,12 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       const layLinks = model ? links.filter((l) => !l.hidden && familyOf(l.kind as GraphEdgeKind) === 'reference') : links
       const scoped = scope ? await computeScopedLayout(layNodes, layLinks, scope, model) : null
       const positions = scoped ?? (await computeLayout(layNodes, layLinks, model))
+      if (epoch !== layoutEpoch) {
+        // The graph changed under this layout (see cancelLayouts): its positions are for something else. A request made since stays pending,
+        // and the new node array wakes the page's effect that runs it.
+        if (get().layoutPending) set((now) => ({ nodes: [...now.nodes] }))
+        return
+      }
       for (const id of positions.keys()) placedIds.add(id)
       set((now) => {
         // Nodes added or a new scope requested while this ran: the positions still apply, and another layout follows.
@@ -443,6 +468,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
 
   loadDiagram: (payload) => {
     placedIds.clear()
+    cancelLayouts()
     for (const n of payload.nodes) placedIds.add(n.id)
     // A graph saved in a lens opens in it: the lens's filters, and its column level once the lens switch has set it. Positions kept from before stay.
     const lens = payload.lens ?? DEFAULT_LENS

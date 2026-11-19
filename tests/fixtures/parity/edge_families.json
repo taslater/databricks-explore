@@ -1,0 +1,30 @@
+{
+ "note": "Python: edge_families.family_of. TypeScript: familyOf in web/src/graph/edgeStyles.ts.",
+ "cases": [
+  {
+   "name": "every kind the Graph draws",
+   "input": {
+    "kinds": [
+     "lineage",
+     "view_dep",
+     "fk",
+     "join_mined",
+     "manual",
+     "sketch",
+     "concept_link",
+     "ontology"
+    ]
+   },
+   "expected": {
+    "lineage": "flow",
+    "view_dep": "flow",
+    "fk": "reference",
+    "join_mined": "reference",
+    "manual": "reference",
+    "sketch": "meaning",
+    "concept_link": "meaning",
+    "ontology": "meaning"
+   }
+  }
+ ]
+}

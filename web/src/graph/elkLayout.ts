@@ -1,5 +1,7 @@
 // The Graph's flow layout on ELK (elkjs): the layered algorithm, direction RIGHT, with a port for each column row a flow edge
-// ends at and a box around each group. In a browser it runs in a web worker; elkjs is loaded the first time it is needed.
+// ends at and a box around each group. In a browser it runs in a web worker; elkjs is loaded the first time it is needed. The page ships
+// the worker only: without one (it cannot start) the layout falls back to dagre, so the second 1.4 MB copy of elkjs is not shipped. The
+// tests have no browser, so they load the bundled build, which a production build leaves out.
 import type { ElkExtendedEdge, ElkNode, ElkPort } from 'elkjs/lib/elk-api'
 import type { GraphLayout, LayoutEdge, LayoutNode, Point } from './layout'
 
@@ -38,19 +40,16 @@ interface Elk {
 
 let loaded: Promise<Elk> | null = null
 
-/** One ELK for the page. A browser gets a worker, so the layout never blocks the Graph; anywhere else it runs in place. */
+/** One ELK for the page, in a web worker so the layout never blocks the Graph. Rejects when there is no worker: the caller lays out with dagre. */
 function loadElk(): Promise<Elk> {
   loaded ??= (async () => {
-    if (typeof Worker !== 'undefined') {
-      try {
-        const { default: ELK } = await import('elkjs/lib/elk-api')
-        return new ELK({ workerFactory: () => new Worker(new URL('elkjs/lib/elk-worker.min.js', import.meta.url)) })
-      } catch (e) {
-        console.warn('ELK worker did not start, laying out on the page', e)
-      }
+    if (import.meta.env.MODE === 'test') {
+      const { default: ELK } = await import('elkjs/lib/elk.bundled.js')
+      return new ELK()
     }
-    const { default: ELK } = await import('elkjs/lib/elk.bundled.js')
-    return new ELK()
+    if (typeof Worker === 'undefined') throw new Error('this browser has no web workers')
+    const { default: ELK } = await import('elkjs/lib/elk-api')
+    return new ELK({ workerFactory: () => new Worker(new URL('elkjs/lib/elk-worker.min.js', import.meta.url)) })
   })()
   return loaded
 }

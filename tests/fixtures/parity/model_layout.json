@@ -1,0 +1,196 @@
+{
+ "note": "Python: graph_lens.model_layout. TypeScript: layoutGraph(..., {lens: 'model'}) in web/src/graph/layout.ts (modelPart). Positions are top-left, moved so the least x and y are 0.",
+ "cases": [
+  {
+   "name": "a star: facts in the middle row, dimensions above and below",
+   "input": {
+    "sizes": {
+     "c.s.orders": [
+      100,
+      40
+     ],
+     "c.s.cust": [
+      80,
+      40
+     ],
+     "c.s.prod": [
+      90,
+      40
+     ],
+     "c.s.date": [
+      70,
+      40
+     ]
+    },
+    "edges": [
+     {
+      "source": "c.s.orders",
+      "target": "c.s.cust",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.orders",
+      "target": "c.s.prod",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.orders",
+      "target": "c.s.date",
+      "kind": "fk"
+     }
+    ]
+   },
+   "expected": {
+    "c.s.orders": [
+     47.5,
+     130.0
+    ],
+    "c.s.cust": [
+     0.0,
+     0.0
+    ],
+    "c.s.prod": [
+     52.5,
+     260.0
+    ],
+    "c.s.date": [
+     120.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "two facts share a dimension, and a dimension has one of its own",
+   "input": {
+    "sizes": {
+     "c.s.f1": [
+      100,
+      40
+     ],
+     "c.s.f2": [
+      120,
+      40
+     ],
+     "c.s.shared": [
+      90,
+      40
+     ],
+     "c.s.own": [
+      60,
+      30
+     ],
+     "c.s.deep": [
+      50,
+      30
+     ]
+    },
+    "edges": [
+     {
+      "source": "c.s.f1",
+      "target": "c.s.shared",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.f2",
+      "target": "c.s.shared",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.f2",
+      "target": "c.s.own",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.own",
+      "target": "c.s.deep",
+      "kind": "fk"
+     }
+    ]
+   },
+   "expected": {
+    "c.s.f1": [
+     0.0,
+     130.0
+    ],
+    "c.s.f2": [
+     160.0,
+     130.0
+    ],
+    "c.s.shared": [
+     90.0,
+     0.0
+    ],
+    "c.s.own": [
+     190.0,
+     260.0
+    ],
+    "c.s.deep": [
+     195.0,
+     380.0
+    ]
+   }
+  },
+  {
+   "name": "parts with no reference between them are stacked",
+   "input": {
+    "sizes": {
+     "c.s.a": [
+      100,
+      40
+     ],
+     "c.s.b": [
+      80,
+      40
+     ],
+     "c.s.c": [
+      100,
+      40
+     ],
+     "c.s.d": [
+      80,
+      40
+     ],
+     "c.s.alone": [
+      70,
+      30
+     ]
+    },
+    "edges": [
+     {
+      "source": "c.s.a",
+      "target": "c.s.b",
+      "kind": "fk"
+     },
+     {
+      "source": "c.s.c",
+      "target": "c.s.d",
+      "kind": "join_mined",
+      "status": "accepted"
+     }
+    ]
+   },
+   "expected": {
+    "c.s.a": [
+     0.0,
+     130.0
+    ],
+    "c.s.b": [
+     10.0,
+     0.0
+    ],
+    "c.s.c": [
+     0.0,
+     360.0
+    ],
+    "c.s.d": [
+     10.0,
+     230.0
+    ],
+    "c.s.alone": [
+     0.0,
+     460.0
+    ]
+   }
+  }
+ ]
+}

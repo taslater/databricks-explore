@@ -45,6 +45,13 @@ def short_names(ids: Iterable[str]) -> dict[str, str]:
     return names if ids else {}
 
 
+def node_names(nodes: list[dict]) -> dict[str, str]:
+    """{id: name} for the nodes of a picture or diagram: a node's own `label` (a collapsed group says `bronze (12 tables)`), else the table's short name."""
+    labels = {n["id"]: n["label"].strip() for n in nodes if isinstance(n.get("label"), str) and n["label"].strip()}
+    names = short_names(i for i in {n["id"] for n in nodes} if i not in labels)
+    return {**names, **labels}
+
+
 def table_keys(info: Optional[dict]) -> list[dict]:
     """[{name, type, pk, fk}] for the primary and foreign key columns of a tables.get payload, in column order."""
     pk, fk = set(), set()
@@ -74,7 +81,7 @@ def facts_read(edges: list[dict], stats_times: Iterable[Optional[str]] = ()) -> 
 
 
 def legend(lens: str, edges: list[dict], cards: dict, keys: dict) -> list[str]:
-    """What the picture's legend lists, and only what is drawn: the edge families, dashed, the crow's-foot ends and the key markers."""
+    """Twin of pictureLegend in web/src/graph/exportPicture.ts (tests/test_parity.py). What the picture's legend lists, and only what is drawn: the edge families, dashed, the crow's-foot ends and the key markers."""
     drawn = _drawn(lens, edges)
     families = {family_of(e.get("kind")) for e in drawn}
     out = []
@@ -106,14 +113,15 @@ def flowchart(nodes: list[dict], edges: list[dict], glyphs: Optional[dict] = Non
     Flow edges are arrows, labelled with the transform glyphs when glyphs ({edge id: [names]}) has them. Reference edges
     are plain lines labelled with the join columns. An inferred edge is dashed."""
     ids = sorted({n["id"] for n in nodes})
-    name = short_names(ids)
+    name = node_names(nodes)
     tag = {t: f"n{i}" for i, t in enumerate(ids, 1)}
     kinds = {n["id"]: n.get("kind") for n in nodes}
     lines = ["flowchart LR"]
     for t in ids:
         label = _q(name[t])
         k = kinds[t] or "table"
-        lines.append(f'  {tag[t]}(["{label}"])' if k in ("view", "metric_view") else f'  {tag[t]}[["{label}"]]' if k in ("materialized_view", "streaming_table") else f'  {tag[t]}["{label}"]')
+        lines.append(f'  {tag[t]}(["{label}"])' if k in ("view", "metric_view") else f'  {tag[t]}[["{label}"]]' if k in ("materialized_view", "streaming_table")
+                     else f'  {tag[t]}[("{label}")]' if k == "group" else f'  {tag[t]}["{label}"]')
     for e in _sorted([e for e in _drawn("flow", edges) if e["source"] in tag and e["target"] in tag]):
         flow, dashed = family_of(e.get("kind")) == "flow", is_inferred(e)
         if flow:
@@ -140,7 +148,7 @@ def er_diagram(nodes: list[dict], edges: list[dict], keys: dict, cards: dict) ->
 
     The referenced table is written first. An end that is not known is drawn as zero or more, which claims nothing, and a comment says so."""
     ids = sorted({n["id"] for n in nodes})
-    name = short_names(ids)
+    name = node_names(nodes)
     ent = {t: _entity(name[t]) for t in ids}
     lines = ["erDiagram"]
     for t in ids:
@@ -179,7 +187,7 @@ def mermaid(lens: str, nodes: list[dict], edges: list[dict], keys: Optional[dict
 # ---------------------------------------------------------------- PNG
 
 _INK, _FLOW, _REF, _MUTED = "#1f2328", "#2d3748", "#2c7a7b", "#6b7280"
-_FILL = {"view": "#e6f0fa", "materialized_view": "#e9f5ea", "streaming_table": "#e9f5ea", "metric_view": "#f6ecf7"}
+_FILL = {"group": "#eef0f3", "view": "#e6f0fa", "materialized_view": "#e9f5ea", "streaming_table": "#e9f5ea", "metric_view": "#f6ecf7"}
 
 
 def _legend_rows(items: list[str]) -> list[list[str]]:
@@ -247,7 +255,7 @@ def render_png(lens: str, nodes: list[dict], edges: list[dict], keys: dict, card
 
     width = int(min(max(width, 400), 4000))
     ids = {n["id"] for n in nodes}
-    name = short_names(ids)
+    name = node_names(nodes)
     drawn = [e for e in _drawn(lens, edges) if e["source"] in ids and e["target"] in ids]
     fonts: dict = {}
 

@@ -1,4 +1,4 @@
-"""The three edge families: what a relationship means (web/src/graph/edgeStyles.ts keeps the same map).
+"""The three edge families: what a relationship means (web/src/graph/edgeStyles.ts FAMILY_OF is the twin; tests/test_parity.py checks both).
 
 flow: data moves from source to target. reference: a key in one table identifies a row in another. meaning: concept,
 ontology and sketch links. Only flow edges set the Graph's left-to-right order."""
