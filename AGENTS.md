@@ -31,12 +31,27 @@ Tests write to a temporary data folder (`tests/conftest.py`), never to the user'
 
 ## Worktrees
 An agent worktree should symlink the main checkout's `web/node_modules` rather than run `npm ci`,
-unless `package.json` changed. It saves about 160 MB per worktree.
+unless `package.json` changed. It saves about 160 MB per worktree. Start a branch from the remote, not from
+whatever the worktree was created on: `git fetch origin && git checkout -B <branch> origin/main`.
 
 ## Keeping it current
 After you add, remove, rename, or change the signature of anything, run `python map_project.py` again
 so your own copy stays accurate. Never commit `PROJECT_MAP.md`; it is git-ignored so branches cannot
 conflict over it.
+
+## Working in parallel
+- Most Graph changes touch the same few files: `web/src/graph/derive.ts`, `TableNode.tsx`, the ELK layout
+  (async), `GraphToolbar.tsx` and `GraphDetails.tsx`. Put an addition in its own component or section and
+  insert it with a line or two, so parallel branches merge cleanly.
+- Some logic exists in both TypeScript (the page) and Python (agent tools): edge derivation and families, table
+  roles, the Model and flow layouts, size estimates, collapse, the export scene and legend. `tests/test_parity.py`
+  and `web/src/parity.test.ts` run both sides on shared fixtures. Change both copies together.
+- A new field in a saved graph must round-trip through save, MCP `get_graph`/`create_graph`/`update_graph`,
+  rename and the trash copy, and graphs saved by older versions must still load.
+- Demo mode answers with invented shapes. Check a new Databricks read (SQL, REST, system tables) against a real
+  workspace before a release.
+- macOS file names are case-insensitive: never add two files whose names differ only by case
+  (`nodeFacts.ts` and `NodeFacts.tsx` collide).
 
 ## Conventions
 - Put a one-line docstring at the top of each module and public function. The map uses that line as the summary.
