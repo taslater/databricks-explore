@@ -124,39 +124,42 @@ describe('deriveFlow', () => {
   const B = flowNode(`${S}.report`)
   const C = flowNode('main.other.x')
 
-  it('marks lineage older than staleDays as stale, hides it when showStale is off', () => {
+  it('hides a superseded edge by default and draws it dotted grey when "superseded edges" is on', () => {
     const edge = flowEdge({
       id: `lineage:${S}.orders<->${S}.raw`,
       source: `${S}.orders`,
       target: `${S}.raw`,
       kind: 'lineage',
-      last_seen: '2026-10-01 00:00:00.0',
+      status: 'superseded',
+      last_seen: '2026-11-10 00:00:00.0',
     })
-    const base = { nodes: [F, A], edges: [edge], focusSchema: S, staleDays: 7, hoverId: null, now: NOW }
+    const base = { nodes: [F, A], edges: [edge], focusSchema: S, hoverId: null }
 
-    const shown = deriveFlow({ ...base, filters: ALL_ON })
-    expect(shown.edges[0].type).toBe('stale')
-    expect(shown.edges[0].data!.stale).toBe(true)
+    const shown = deriveFlow({ ...base, filters: { ...ALL_ON, showSuperseded: true } })
+    expect(shown.edges[0].type).toBe('superseded')
+    expect(shown.edges[0].data!.superseded).toBe(true)
     expect(shown.edges[0].hidden).toBe(false)
 
-    const hidden = deriveFlow({ ...base, filters: { ...ALL_ON, showStale: false } })
+    const hidden = deriveFlow({ ...base, filters: { ...ALL_ON, showSuperseded: false } })
     expect(hidden.edges[0].hidden).toBe(true)
     // A has only hidden edges and is not the focus, so A hides too. F stays.
     expect(hidden.nodes.find((n) => n.id === A.id)!.hidden).toBe(true)
     expect(hidden.nodes.find((n) => n.id === F.id)!.hidden).toBe(false)
   })
 
-  it('keeps fresh lineage as lineage', () => {
+  it('never dims an edge for its age', () => {
     const edge = flowEdge({
       id: `lineage:${S}.orders<->${S}.raw`,
       source: `${S}.orders`,
       target: `${S}.raw`,
       kind: 'lineage',
-      last_seen: '2026-11-10 00:00:00.0',
+      status: 'derived',
+      last_seen: '2020-01-01 00:00:00.0',
     })
-    const out = deriveFlow({ nodes: [F, A], edges: [edge], focusSchema: S, filters: ALL_ON, staleDays: 7, hoverId: null, now: NOW })
+    const out = deriveFlow({ nodes: [F, A], edges: [edge], focusSchema: S, filters: ALL_ON, hoverId: null })
     expect(out.edges[0].type).toBe('lineage')
-    expect(out.edges[0].data!.stale).toBe(false)
+    expect(out.edges[0].hidden).toBe(false)
+    expect(out.edges[0].data!.superseded).toBe(false)
   })
 
   it('hides FK-only neighbors when the fk filter is off, but never hides the focus', () => {
@@ -167,10 +170,7 @@ describe('deriveFlow', () => {
       edges: [fk],
       focusSchema: S,
       filters: { ...ALL_ON, fk: false },
-      staleDays: 7,
-      hoverId: null,
-      now: NOW,
-    })
+      hoverId: null })
     expect(out.edges[0].hidden).toBe(true)
     expect(out.nodes.find((n) => n.id === cust.id)!.hidden).toBe(true)
     expect(out.nodes.find((n) => n.id === F.id)!.hidden).toBe(false)
@@ -184,10 +184,7 @@ describe('deriveFlow', () => {
       edges: [fk],
       focusSchema: S,
       filters: { ...ALL_ON, fk: false },
-      staleDays: 7,
-      hoverId: null,
-      now: NOW,
-    })
+      hoverId: null })
     expect(out.edges[0].hidden).toBe(true)
     expect(out.nodes.find((n) => n.id === cust.id)!.hidden).toBe(false)
   })
@@ -196,7 +193,7 @@ describe('deriveFlow', () => {
     const fk = flowEdge({ id: `fk:${S}.orders->${S}.customers`, source: `${S}.orders`, target: `${S}.customers`, kind: 'fk', child_columns: ['cust_id', 'region'] })
     const cust = flowNode(`${S}.customers`)
     const other = flowNode('main.other.x')
-    const out = deriveFlow({ nodes: [F, cust, other], edges: [fk], focusSchema: S, filters: ALL_ON, staleDays: 7, hoverId: null, now: NOW })
+    const out = deriveFlow({ nodes: [F, cust, other], edges: [fk], focusSchema: S, filters: ALL_ON, hoverId: null })
     const byId = (id: string) => out.nodes.find((n) => n.id === id)!
     expect(byId(cust.id).data.via).toBe('cust_id, region')
     expect(byId(F.id).data.via).toBeUndefined()
@@ -208,7 +205,7 @@ describe('deriveFlow', () => {
   it('fades non-neighbors and edges that do not touch the hovered node', () => {
     const e1 = flowEdge({ id: 'l1', source: F.id, target: A.id, kind: 'lineage', last_seen: '2026-11-10 00:00:00.0' })
     const e2 = flowEdge({ id: 'l2', source: A.id, target: B.id, kind: 'lineage', last_seen: '2026-11-10 00:00:00.0' })
-    const out = deriveFlow({ nodes: [F, A, B, C], edges: [e1, e2], focusSchema: S, filters: ALL_ON, staleDays: 7, hoverId: F.id, now: NOW })
+    const out = deriveFlow({ nodes: [F, A, B, C], edges: [e1, e2], focusSchema: S, filters: ALL_ON, hoverId: F.id })
     const node = (id: string) => out.nodes.find((n) => n.id === id)!
     expect(node(F.id).data.faded).toBe(false)
     expect(node(A.id).data.faded).toBe(false)
@@ -220,7 +217,7 @@ describe('deriveFlow', () => {
 
   it('adds a start marker for bidirectional lineage', () => {
     const e = flowEdge({ id: 'l1', source: F.id, target: A.id, kind: 'lineage', bidir: true, last_seen: '2026-11-10 00:00:00.0' })
-    const out = deriveFlow({ nodes: [F, A], edges: [e], focusSchema: S, filters: ALL_ON, staleDays: 7, hoverId: null, now: NOW })
+    const out = deriveFlow({ nodes: [F, A], edges: [e], focusSchema: S, filters: ALL_ON, hoverId: null })
     expect(out.edges[0].markerStart).toBeDefined()
     expect(out.edges[0].markerEnd).toBeDefined()
   })
@@ -380,5 +377,40 @@ describe('graph store merge (legacy addGraph)', () => {
     expect(s.nodes.find((n) => n.id === `${S}.src`)!.data.pinned).toBeUndefined()
     expect(s.edges.map((e) => e.id)).toEqual(['l1'])
     store.clear()
+  })
+})
+
+describe('graph store: kinds and missing objects', () => {
+  const N = (id: string, kind: string, extra = {}) => ({ id, label: id.split('.').pop()!, kind, ...extra })
+  const V = 'main.sales.v'
+  const T = 'main.sales.t'
+
+  it('takes a node kind from its own focus response over the guess it arrived with', () => {
+    const s = useGraphStore.getState()
+    s.clear()
+    s.mergeRelations({ nodes: [N(T, 'table', { focus: true }), N(V, 'table')], edges: [], errors: [] })
+    expect(useGraphStore.getState().nodes.find((n) => n.id === V)!.data.kind).toBe('table')
+    // expanding the view: its own tables.get says what it is
+    s.mergeRelations({ nodes: [N(V, 'materialized_view', { focus: true })], edges: [], errors: [] })
+    expect(useGraphStore.getState().nodes.find((n) => n.id === V)!.data.kind).toBe('materialized_view')
+    // a later neighbor guess never overrides it
+    s.mergeRelations({ nodes: [N(T, 'managed', { focus: true }), N(V, 'table')], edges: [], errors: [] })
+    const kinds = Object.fromEntries(useGraphStore.getState().nodes.map((n) => [n.id, n.data.kind]))
+    expect(kinds).toEqual({ [T]: 'managed', [V]: 'materialized_view' })
+    s.clear()
+  })
+
+  it('carries missing, why and the likely new name onto the node, new or already on screen', () => {
+    const s = useGraphStore.getState()
+    s.clear()
+    const gone = N('old.shop.orders', 'table', { missing: true, missing_reason: 'catalog `old` does not exist', renamed_to: 'new.shop.orders' })
+    s.mergeRelations({ nodes: [N(V, 'view', { focus: true }), gone], edges: [], errors: [] })
+    const node = useGraphStore.getState().nodes.find((n) => n.id === 'old.shop.orders')!
+    expect(node.data).toMatchObject({ missing: true, missingReason: 'catalog `old` does not exist', renamedTo: 'new.shop.orders' })
+    expect(useGraphStore.getState().nodes.find((n) => n.id === V)!.data.missing).toBeUndefined()
+    // an object that exists is never marked
+    s.mergeRelations({ nodes: [N(T, 'table')], edges: [], errors: [] })
+    expect(useGraphStore.getState().nodes.find((n) => n.id === T)!.data.missing).toBeUndefined()
+    s.clear()
   })
 })

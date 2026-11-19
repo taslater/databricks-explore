@@ -53,7 +53,11 @@ def test_primary_keys(client):
 
 def test_relations_include_fk_and_lineage(client):
     rel = client.get("/api/relations?name=demo.sales.orders").json
-    assert sorted(e["kind"] for e in rel["edges"]) == ["fk", "lineage"]
+    # the view's lineage and its dependency are one edge, the dependency
+    assert sorted(e["kind"] for e in rel["edges"]) == ["fk", "view_dep"]
+    view = next(e for e in rel["edges"] if e["kind"] == "view_dep")
+    assert view["last_read"] == "2026-11-10T08:00:00.000Z" and not view.get("superseded")
+    assert {n["id"]: n["kind"] for n in rel["nodes"]}["demo.sales.v_daily_revenue"] == "view"
     assert rel["errors"] == []
 
 

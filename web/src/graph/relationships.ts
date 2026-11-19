@@ -64,6 +64,8 @@ export function toGraphEdges(rels: Relationship[]): GraphEdge[] {
     merged.last_seen_by_dir = { ...merged.last_seen_by_dir, [direction]: info.last_seen ?? '' }
     merged.last_seen = laterOf(merged.last_seen, info.last_seen)
     merged.patch_ids = [...(merged.patch_ids ?? []), ...(info.patch_ids ?? [])]
+    // Superseded only when every direction is.
+    if (info.status !== 'superseded' && merged.status === 'superseded') merged.status = info.status
     merged.note = merged.note || info.note
   }
   return out
