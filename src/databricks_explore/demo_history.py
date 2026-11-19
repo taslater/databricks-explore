@@ -13,6 +13,8 @@ import random
 import re
 from datetime import datetime, timedelta, timezone
 
+from . import demo_lake
+
 USERS = ["ana.k@example.invalid", "ben.o@example.invalid", "chloe.m@example.invalid", "dev.p@example.invalid",
          "elif.s@example.invalid", "farid.n@example.invalid"]
 REDACTED = "<REDACTED>"
@@ -29,7 +31,7 @@ COLUMN_LINEAGE = [
     (T, "trip_id", "demo.metrics.wide_metrics", "id"), (T, "pickup_ts", "demo.metrics.wide_metrics", "event_ts"),
     (T, "distance_mi", "demo.metrics.wide_metrics", "metric_01_throughput_per_sec"),
     (T, "fare", "demo.metrics.wide_metrics", "metric_02_error_rate"),
-]
+] + demo_lake.COLUMN_LINEAGE
 
 # (count, user indexes, statement type, status, lineage tables or None for no lineage row, SQL with {date}/{email})
 _SPECS = [
@@ -139,6 +141,55 @@ def _selected(low, params, cap):
     return rows[:cap]
 
 
+LAKE_LINEAGE_COLUMNS = ("statement_id", "source_type", "source_table_full_name", "source_path", "target_table_full_name",
+                        "target_type", "entity_type", "entity_id", "created_by", "event_time", "executed_by",
+                        "statement_type", "statement_text")
+
+
+def _lake_lineage(low, params, cap):
+    """system.access.table_lineage rows of the invented lakehouse, with the statement's text and runner joined on.
+
+    Answered when the SQL names target_table_full_name (mining's query does not, so it is unchanged). Each
+    `target_table_full_name = X` or `source_table_full_name = X` (a literal or a :parameter) keeps the edges whose that end is X;
+    the same X compared with both ends (an OR) keeps the edges touching it. No comparison, every edge. The columns are always
+    these, whatever the SELECT lists: a superset, in the table's own names."""
+    ends = {}  # table name -> the ends (target, source) the SQL compares it with
+    for end, ref in re.findall(r"(target|source)_table_full_name\s*=\s*(:\w+|'[^']*')", low):
+        value = str((params or {}).get(ref[1:], "")) if ref.startswith(":") else ref.strip("'")
+        ends.setdefault(value.lower(), set()).add(end)
+    rows = []
+    for r in demo_lake.lineage_rows():
+        if any(not any(r[f"{end}_table_full_name"] == name for end in sides) for name, sides in ends.items()):
+            continue
+        row = {**r, "event_time": _fmt(r["event_time"])}
+        if redacted_mode() and row["statement_text"]:
+            row["statement_text"] = REDACTED
+        rows.append(row)
+    cols = [{"name": n, "type": "STRING"} for n in LAKE_LINEAGE_COLUMNS]
+    return cols, [[None if r[n] is None else str(r[n]) for n in LAKE_LINEAGE_COLUMNS] for r in rows[-cap:]]
+
+
+def _asked_ids(low, params):
+    """Statement ids the SQL asks for by name: quoted in the text, or in a parameter (a comma-separated string or a list)."""
+    found = set(re.findall(r"'(demo-(?:lake|hist)-\d+)'", low))
+    for v in (params or {}).values():
+        for part in (v if isinstance(v, (list, tuple)) else re.split(r"[\s,]+", str(v))):
+            if re.fullmatch(r"demo-(?:lake|hist)-\d+", str(part).lower()):
+                found.add(str(part).lower())
+    return found
+
+
+def _by_id(ids):
+    """system.query.history rows for the named statement ids (the lake's writes and the older history alike)."""
+    rows = [x for x in [*demo_lake.statements(), *history()] if x["statement_id"] in ids]
+    redact_all = redacted_mode()
+    names = ("statement_id", "executed_by", "start_time", "statement_text", "statement_type", "execution_status")
+    return ([{"name": n, "type": "STRING"} for n in names],
+            [[x["statement_id"], x["executed_by"], _fmt(x["start_time"]),
+              REDACTED if redact_all or x.get("redacted") else x["statement_text"], x["statement_type"],
+              x["execution_status"]] for x in rows])
+
+
 def system_query(low, params, cap):
     """(columns, rows) for a statement on system.query.history, system.access.table_lineage or column_lineage."""
     strs = lambda *names: [{"name": n, "type": "STRING"} for n in names]  # noqa: E731
@@ -147,6 +198,11 @@ def system_query(low, params, cap):
         hits = [c for c in COLUMN_LINEAGE if t in (c[0], c[2])]
         return (strs("source_table_full_name", "source_column_name", "target_table_full_name", "target_column_name",
                      "last_seen"), [[a, b, c, d, LINEAGE_SEEN] for a, b, c, d in hits])
+    if "table_lineage" in low and "target_table_full_name" in low:
+        return _lake_lineage(low, params, cap)
+    ids = _asked_ids(low, params)
+    if ids:
+        return _by_id(ids)
     rows = _selected(low, params, cap)
     if "table_lineage" in low:
         return (strs("statement_id", "source_table_full_name"),
