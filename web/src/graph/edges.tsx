@@ -2,6 +2,9 @@ import { BaseEdge, getBezierPath, type EdgeProps } from '@xyflow/react'
 import { edgeStyle, FAMILY_STYLE, isInferred, type EdgeFamily } from './edgeStyles'
 import { EdgeEnd } from './EdgeEnds'
 import { EdgeGrainGlyph } from './NodeFacts'
+import { OrphanTick } from './OrphanTick'
+import { hasOrphans } from './relProfile'
+import { EdgeTransformGlyphs } from './EdgeTransforms'
 import type { FlowEdge } from './types'
 
 /** Width in pixels of the invisible path that takes clicks and hovers, so a thin line is easy to hit. React Flow's default is 20. */
@@ -48,7 +51,11 @@ function makeEdge(family: EdgeFamily, superseded = false) {
             {data.cardinality.target && <EdgeEnd x={targetX} y={targetY} side={targetPosition} end={data.cardinality.target.end} {...endLook(data.faded, rejected)} />}
           </>
         )}
-        <EdgeGrainGlyph id={id} change={data?.grainChange} x={labelX} y={labelY} faded={data?.faded} />
+        {family === 'reference' && hasOrphans(data?.cardinality) && (
+          <OrphanTick x={targetX} y={targetY} side={targetPosition} profile={data!.cardinality!.profile!} faded={data?.faded} />
+        )}
+        <EdgeGrainGlyph id={id} change={data?.transform?.glyphs.includes('aggregate') ? undefined : data?.grainChange} x={labelX} y={labelY} faded={data?.faded} />
+        <EdgeTransformGlyphs id={id} transform={data?.transform} x={targetX} y={targetY} side={targetPosition} faded={data?.faded} />
       </>
     )
   }

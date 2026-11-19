@@ -24,12 +24,15 @@ import { EDGE_TYPES } from './edges'
 import { useNodeColors } from './ColorByControl'
 import { withFills } from './colorBy'
 import { useCardinality, withCardinality } from './EdgeEnds'
+import { useEdgeTransforms } from './EdgeTransforms'
+import { withTransforms } from './transformText'
 import { EDGE_COLORS } from './format'
 import { useGraphStore } from './graphStore'
 import { GraphToolbar } from './GraphToolbar'
 import { MineDialog } from './MineDialog'
 import { MiningPanel } from './MiningPanel'
 import { withGrainChanges, withNodeFacts } from './cardFacts'
+import { EdgeMenuHost, ProfileDialog, useEdgeContextMenu } from './ProfileDialog'
 import { useNeighborScan, withNeighborCounts } from './neighborScan'
 import { TableStatsDialog } from './TableStatsDialog'
 import { TableNode } from './TableNode'
@@ -82,6 +85,8 @@ export function GraphView() {
       {drawer && <MiningPanel drawer={drawer} />}
       {mineDialog && <MineDialog />}
       <TableStatsDialog />
+      <ProfileDialog />
+      <EdgeMenuHost />
     </div>
   )
 }
@@ -135,9 +140,10 @@ function GraphCanvas() {
     [flow.nodes, overlay.nodes, certification.data, nodeFacts.data, neighbors, filters, fills],
   )
   const ends = useCardinality()
+  const transforms = useEdgeTransforms()
   const drawnEdges = useMemo(
-    () => [...withCardinality(withGrainChanges(flow.edges, nodeFacts.data), ends.data), ...overlay.edges],
-    [flow.edges, overlay.edges, nodeFacts.data, ends.data],
+    () => [...withTransforms(withCardinality(withGrainChanges(flow.edges, nodeFacts.data), ends.data), transforms.data), ...overlay.edges],
+    [flow.edges, overlay.edges, nodeFacts.data, ends.data, transforms.data],
   )
 
   // Layout and fit need real node sizes, so they wait until every visible node has been measured.
@@ -176,6 +182,7 @@ function GraphCanvas() {
   const onEdgeClick: EdgeMouseHandler<FlowEdge> = (_, edge) => {
     if (!isConceptEdge(edge.id)) useGraphStore.getState().setSelection({ kind: 'edge', id: edge.id })
   }
+  const onEdgeContextMenu = useEdgeContextMenu()
   const onNodeDoubleClick: NodeMouseHandler<FlowNode | ConceptFlowNode> = (_, node) => {
     if (node.type !== 'concept') void actions.expand(node.id)
   }
@@ -201,6 +208,7 @@ function GraphCanvas() {
       onEdgesChange={onEdgesChange}
       onNodeClick={onNodeClick}
       onEdgeClick={onEdgeClick}
+      onEdgeContextMenu={onEdgeContextMenu}
       onNodeDoubleClick={onNodeDoubleClick}
       onNodeMouseEnter={onNodeMouseEnter}
       onNodeMouseLeave={onNodeMouseLeave}

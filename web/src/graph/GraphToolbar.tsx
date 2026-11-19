@@ -8,6 +8,7 @@ import { messageOf } from './actions'
 import { toDiagramBody, fromDiagram } from './diagram'
 import { ColorByControl } from './ColorByControl'
 import { useMiningWatcher } from './MiningPanel'
+import { ProfileButton } from './ProfileDialog'
 import { TableStatsButton } from './TableStatsDialog'
 import { useSuggestions } from '../api/hooks'
 import { useGraphActions } from './actions'
@@ -229,6 +230,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
         Concepts
       </button>
       <TableStatsButton />
+      <ProfileButton />
       <CertificationControl />
       <ColorByControl />
       <span className="spacer" />

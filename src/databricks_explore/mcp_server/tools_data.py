@@ -9,6 +9,7 @@ from .. import lineage as lineage_walk
 from .. import mining
 from .. import ontology
 from .. import relationships
+from .. import transforms
 from ..edge_families import family_of
 from ..relationships import RelationshipInvalid
 
@@ -257,7 +258,7 @@ DIRECTION = {"type": "string", "enum": ["downstream", "upstream", "both"],
 DEPTH = integer(1, lineage_walk.MAX_DEPTH, f"hops to follow, default 3, at most {lineage_walk.MAX_DEPTH}")
 
 
-@tool("lineage", "Walk table lineage and view dependencies from one table, several hops at once (get_relationships is one hop). One line per edge with its hop, kind and family (always flow here), then the tables reached, marked [certified] or [deprecated] when the certification cache is loaded. Uses the cache; a table never expanded is read from Databricks (tables.get and table lineage, one call each), at most 60 tables per walk. Foreign keys, mined and manual joins are not followed (see get_relationships).",
+@tool("lineage", "Walk table lineage and view dependencies from one table, several hops at once (get_relationships is one hop). One line per edge with its hop, kind and family (always flow here) and, when the SQL behind it is known (a view's definition, or a table's writing statement read in the Graph), its transform (aggregate, join, union, dedupe, filter), then the tables reached, marked [certified] or [deprecated] when the certification cache is loaded. Uses the cache; a table never expanded is read from Databricks (tables.get and table lineage, one call each), at most 60 tables per walk. Foreign keys, mined and manual joins are not followed (see get_relationships).",
       obj({"table": TABLE, "direction": DIRECTION, "depth": DEPTH, "format": FORMAT}, ("table",)))
 def lineage(ctx, args):
     e = ctx.need_explorer()
@@ -271,13 +272,17 @@ def lineage(ctx, args):
         for n in out["nodes"]:
             if n["table"] in cert["tables"]:
                 n["certification"] = cert["tables"][n["table"]]
+    how = transforms.for_pairs(e, out["edges"])  # from the cache: the SQL of a view, or of a table whose statement was read in the Graph
     for x in out["edges"]:
         x["family"] = family_of(x["kind"])
+        if (x["source"], x["target"]) in how:
+            x["transform"] = how[(x["source"], x["target"])]
     if _wants_json(args):
         return _json({k: out[k] for k in ("nodes", "edges", "truncated", "errors")})
     n_tables = len(out["nodes"]) - 1
     lines = [f"lineage of {table}, {out['direction']}, depth {out['depth']}: {n_tables} other table(s), {len(out['edges'])} edge(s)"]
-    lines += [f"hop {x['hop']} {x['kind']} ({x['family']}) {x['source']} -> {x['target']}" for x in out["edges"]]
+    lines += [f"hop {x['hop']} {x['kind']} ({x['family']}) {x['source']} -> {x['target']}"
+              + (f" [{transforms.summary(x['transform']) or 'pass-through'}]" if x.get("transform") else "") for x in out["edges"]]
     if not out["edges"]:
         lines.append("no lineage or view dependencies found (lineage only shows queries run since lineage was enabled; try get_relationships)")
     lines.append("tables reached:")

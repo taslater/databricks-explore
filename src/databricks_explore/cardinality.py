@@ -86,14 +86,15 @@ def sentence(source: str, target: str, src: Optional[dict], tgt: Optional[dict])
     return " ".join(parts)
 
 
-def for_edges(edges: list[dict], object_of, joins_of) -> dict[str, Optional[dict]]:
+def for_edges(edges: list[dict], object_of, joins_of, profile_of=None) -> dict[str, Optional[dict]]:
     """{edge id: cardinality or None} for graph edges ({id, kind, source, target}); other kinds are left out.
 
     An edge between two columns (source_column and target_column too) reads only the key sets that hold that pair, so each
     pair of a composite key shows the ends of its key and a mined pair is not blurred by other mined keys.
 
     `object_of(table)` is the table's `tables.get` data or None; `joins_of(table)` is `relationships.join_keys` for it
-    (or None)."""
+    (or None). `profile_of(kind, source, target)` is a kept measurement (relprofile) or None: it replaces the ends read from metadata."""
+    from . import relprofile  # relprofile imports this module
     infos: dict[str, Optional[dict]] = {}
     joins: dict[str, Optional[dict]] = {}
 
@@ -110,6 +111,10 @@ def for_edges(edges: list[dict], object_of, joins_of) -> dict[str, Optional[dict
     for e in edges:
         kind, s, t = e.get("kind"), e.get("source"), e.get("target")
         if kind not in REFERENCE_KINDS or not isinstance(s, str) or not isinstance(t, str):
+            continue
+        measured = profile_of(kind, s, t) if profile_of else None
+        if measured:
+            out[e["id"]] = relprofile.as_cardinality(measured)
             continue
         found = next((j for j in (join(s) or {}).get("joins") or [] if j["table"].lower() == t.lower()), None)
         keys = [k for k in (found or {}).get("keys") or [] if k["source"] == _KEY_SOURCE[kind] and k["status"] != "rejected" and k["pairs"]]

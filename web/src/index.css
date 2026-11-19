@@ -1891,6 +1891,10 @@ button.link {
   width: 5em;
 }
 
+.orphan-note {
+  color: #d1242f;
+}
+
 .mine-sql {
   white-space: pre-wrap;
   font-size: 11px;
@@ -3356,6 +3360,33 @@ button.app-dialog-danger {
   font-size: 11px;
   line-height: 14px;
   cursor: pointer;
+}
+
+.edge-glyph.transform {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 10px;
+}
+
+.how-filters {
+  margin: 4px 0;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.how-sql {
+  max-height: 160px;
+  overflow: auto;
+  margin: 4px 0;
+  padding: 6px;
+  background: #f6f6f8;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: pre-wrap;
 }
 
 .late-text {
