@@ -208,6 +208,41 @@ button:disabled {
   max-width: 260px;
 }
 
+/* The lens switch: three buttons that read as one control. */
+.lens-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+
+.lens-switch button[aria-pressed] {
+  border-radius: 0;
+  margin-left: -1px;
+}
+
+.lens-switch button[aria-pressed]:first-child {
+  border-radius: 4px 0 0 4px;
+  margin-left: 0;
+}
+
+.lens-switch button[aria-pressed]:last-of-type {
+  border-radius: 0 4px 4px 0;
+}
+
+.lens-switch button[aria-pressed='true'] {
+  background: #ddf4ff;
+  border-color: var(--accent);
+  position: relative;
+}
+
+.lens-switch .hint {
+  margin: 0 4px 0 8px;
+}
+
+.node-role {
+  margin: 4px 0;
+}
+
 .graph-status {
   color: var(--muted);
   white-space: nowrap;

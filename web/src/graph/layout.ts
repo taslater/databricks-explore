@@ -3,6 +3,7 @@ import dagre from '@dagrejs/dagre'
 import type { GraphEdgeKind } from '../api/types'
 import { familyOf } from './edgeStyles'
 import { elkLayout, type ElkGroupBox } from './elkLayout'
+import { modelPart } from './modelLayout'
 
 export interface LayoutNode {
   id: string
@@ -21,6 +22,8 @@ export interface LayoutNode {
   placed?: boolean
   /** The box (a schema, say) the node is laid out inside, with the others that name it. Only nodes in the flow take part. */
   group?: string
+  /** The filters leave the node out of the picture (no edge of an edge family that shows, not pinned). The Model lens does not lay it out. */
+  hidden?: boolean
 }
 
 export interface LayoutEdge {
@@ -30,6 +33,8 @@ export interface LayoutEdge {
   /** A column edge: the rows it joins. The table edge of the same pair then gives way to it. */
   sourceColumn?: string
   targetColumn?: string
+  /** The filters leave the edge out. The Model lens counts only the edges that show. */
+  hidden?: boolean
 }
 
 export interface Point {
@@ -53,6 +58,8 @@ export type LayoutEngine = 'elk' | 'dagre'
 export interface LayoutOptions {
   /** ELK unless a test wants the old layout to compare against. ELK that cannot load falls back to dagre. */
   engine?: LayoutEngine
+  /** The Model lens: facts in a middle row and what they reference above and below (graph/modelLayout.ts). Give it only the nodes and reference edges that show. */
+  lens?: 'model'
 }
 
 /** A group's box, from the nodes laid out inside it. */
@@ -190,6 +197,7 @@ function components(nodes: LayoutNode[], edges: LayoutEdge[]): LayoutNode[][] {
 
 /** The rules for one connected part. Every node in the result has a position. */
 async function layoutPart(nodes: LayoutNode[], liveEdges: LayoutEdge[], opts: LayoutOptions): Promise<GraphLayout> {
+  if (opts.lens === 'model') return { positions: modelPart(nodes, liveEdges), groups: new Map() }
   const byId = new Map(nodes.map((n) => [n.id, n]))
 
   const kindsByNode = new Map<string, string[]>()

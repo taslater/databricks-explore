@@ -7,6 +7,7 @@ import { groupingBody, parseGrouping, type Grouping } from './collapse'
 import { nameOf, schemaOf } from './format'
 import { estimateSize } from './layout'
 import { nodeCenter, nodeSize, viaMap } from './derive'
+import { DEFAULT_LENS, parseLens, parseLensPositions, type Lens, type LensPositions } from './lens'
 import type { FlowEdge, FlowNode } from './types'
 
 export interface SavedNodeData {
@@ -36,12 +37,18 @@ export interface DiagramPayload {
   colorBy?: ColorBy
   /** How the nodes are grouped and which groups are collapsed; the default is not written. */
   grouping?: Grouping
+  /** The lens the graph is in; the default (all) is not written. */
+  lens?: Lens
+  /** Where the tables are in the lenses that are not showing, top-left as in the store; written as centers. */
+  lensPositions?: LensPositions
 }
 
 export function toDiagramBody(name: string, payload: DiagramPayload): DiagramBody {
   const via = viaMap(payload.edges)
+  const sizes = new Map<string, { width: number; height: number }>()
   const nodes: SavedNode[] = payload.nodes.map((n) => {
     const size = nodeSize(n, payload.focusSchema, via.get(n.id))
+    sizes.set(n.id, size)
     const c = nodeCenter(n, size)
     const data: SavedNodeData = {
       id: n.id,
@@ -61,7 +68,25 @@ export function toDiagramBody(name: string, payload: DiagramPayload): DiagramBod
   })
   const edges = payload.edges.map((e) => ({ data: e.data!.info }))
   const grouping = payload.grouping && groupingBody(payload.grouping)
-  return { name, focus_schema: payload.focusSchema, nodes, edges, ...(payload.colorBy && payload.colorBy !== 'type' ? { color_by: payload.colorBy } : {}), ...(grouping ? { grouping } : {}) }
+  const others: Record<string, Record<string, { x: number; y: number }>> = {}
+  for (const [lens, positions] of Object.entries(payload.lensPositions ?? {})) {
+    if (lens === payload.lens) continue
+    const centers = Object.entries(positions ?? {}).flatMap(([id, p]) => {
+      const size = sizes.get(id)
+      return size ? [[id, { x: p.x + size.width / 2, y: p.y + size.height / 2 }] as const] : []
+    })
+    if (centers.length > 0) others[lens] = Object.fromEntries(centers)
+  }
+  return {
+    name,
+    focus_schema: payload.focusSchema,
+    nodes,
+    edges,
+    ...(payload.colorBy && payload.colorBy !== 'type' ? { color_by: payload.colorBy } : {}),
+    ...(grouping ? { grouping } : {}),
+    ...(payload.lens && payload.lens !== DEFAULT_LENS ? { lens: payload.lens } : {}),
+    ...(Object.keys(others).length > 0 ? { lens_positions: others } : {}),
+  }
 }
 
 /** Reads a saved diagram (either UI's format). Malformed entries are skipped, not thrown. */
@@ -107,5 +132,17 @@ export function fromDiagram(d: DiagramFile): DiagramPayload {
     edges.push({ id: info.id, source: info.source, target: info.target, data: { info } })
   }
 
-  return { nodes, edges, focusSchema, colorBy: parseColorBy(d.color_by), grouping: parseGrouping(d.grouping) }
+  // Positions another lens left behind are centers too: top-left again, with the size the page estimates for a node it has not measured.
+  const lensPositions: LensPositions = {}
+  for (const [lens, positions] of Object.entries(parseLensPositions(d.lens_positions))) {
+    lensPositions[lens as Lens] = Object.fromEntries(
+      Object.entries(positions).flatMap(([id, p]) => {
+        const node = nodes.find((n) => n.id === id)
+        if (!node) return []
+        const size = estimateSize([node.data.name, node.data.schema])
+        return [[id, { x: p.x - size.width / 2, y: p.y - size.height / 2 }] as const]
+      }),
+    )
+  }
+  return { nodes, edges, focusSchema, colorBy: parseColorBy(d.color_by), grouping: parseGrouping(d.grouping), lens: parseLens(d.lens), lensPositions }
 }

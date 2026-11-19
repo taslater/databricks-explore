@@ -13,6 +13,7 @@ from typing import Optional
 from . import dbx
 from .edge_families import FLOW_KINDS
 from .graph_collapse import check_grouping
+from . import graph_lens
 
 LOCK = threading.RLock()  # one writer at a time, so an agent's read-modify-write cannot interleave with a save
 NAME_MAX = 120
@@ -133,7 +134,7 @@ def check_color_by(value) -> str:
 
 
 def check_body(data) -> str:
-    """Validate a diagram body: an object with a name, lists for nodes and edges, and a color_by and a grouping when present. Returns the stored name."""
+    """Validate a diagram body: an object with a name, lists for nodes and edges, and a color_by, a grouping, a lens and lens_positions when present. Returns the stored name."""
     if not isinstance(data, dict):
         raise GraphInvalid("(root): a diagram must be an object")
     for key in ("nodes", "edges"):
@@ -146,6 +147,12 @@ def check_body(data) -> str:
             check_grouping(data["grouping"])
         except ValueError as e:
             raise GraphInvalid(str(e)) from e
+    for key, check in (("lens", graph_lens.check_lens), ("lens_positions", graph_lens.check_lens_positions)):
+        if key in data:
+            try:
+                check(data[key])
+            except ValueError as e:
+                raise GraphInvalid(str(e)) from e
     return stem_of(data.get("name"))
 
 
@@ -373,13 +380,37 @@ def _clear_of(box, others) -> Optional[tuple]:
     return None
 
 
+def _saved_positions(data: Optional[dict]) -> dict[str, tuple[float, float]]:
+    """{table: (x, y)} node centers a diagram file holds."""
+    out = {}
+    for n in (data or {}).get("nodes") or []:
+        d, p = (n or {}).get("data") or {}, (n or {}).get("position") or {}
+        if d.get("id") and isinstance(p.get("x"), (int, float)) and isinstance(p.get("y"), (int, float)):
+            out[d["id"]] = (p["x"], p["y"])
+    return out
+
+
 def build_body(name: str, nodes: list[dict], edges: list[dict], previous: Optional[dict] = None, relayout: bool = False,
-               color_by: Optional[str] = None) -> dict:
+               color_by: Optional[str] = None, lens: Optional[str] = None) -> dict:
     """A diagram body from `nodes` ({id, kind, focus?, self_ref?, self_ref_last_seen?, self_ref_fks?, files?}, in the order to lay out) and graph `edges`.
 
     Every node is pinned (added on purpose, so the Graph's edge filters never hide it). The focus schema is the focus
     node's, else the most common schema. With `previous` (a stored diagram), nodes already in it keep their positions
-    unless `relayout`; new nodes take the layout's positions, moved clear of the others. `color_by` is saved unless it is the default (type)."""
+    unless `relayout`; new nodes take the layout's positions, moved clear of the others. `color_by` is saved unless it is the default (type).
+
+    `lens` (all, flow or model; the previous one when not given) sets how new nodes are laid out: model puts facts in a middle row and the
+    tables they reference above and below. Each lens keeps its own positions: a change of lens puts the old lens's positions in
+    `lens_positions` and takes back the new lens's, when it has any."""
+    try:
+        lens = graph_lens.check_lens(lens or graph_lens.lens_of(previous))
+    except ValueError as e:
+        raise GraphInvalid(str(e)) from e
+    prev_lens = graph_lens.lens_of(previous)
+    stash = {k: {i: (p["x"], p["y"]) for i, p in v.items()} for k, v in ((previous or {}).get("lens_positions") or {}).items() if isinstance(v, dict)}
+    prior = _saved_positions(previous)
+    if previous and lens != prev_lens:
+        stash[prev_lens] = prior
+        prior = stash.pop(lens, {})
     focus = next((n for n in nodes if n.get("focus")), None)
     schemas = Counter(n["id"].rsplit(".", 1)[0] for n in nodes)
     focus_schema = (focus["id"].rsplit(".", 1)[0] if focus else max(schemas, key=lambda s: (schemas[s], -list(schemas).index(s)))) if nodes else None
@@ -389,14 +420,13 @@ def build_body(name: str, nodes: list[dict], edges: list[dict], previous: Option
     sizes = {n["id"]: estimate_size([label[n["id"]], *([n["id"].rsplit(".", 1)[0]] if external[n["id"]] else []),
                                      *([f"via {via[n['id']]}"] if via.get(n["id"]) else [])]) for n in nodes}
     load = {i: estimate_size([label[i], i.rsplit(".", 1)[0]]) for i in label}  # the size the page assumes when it reads the file
-    fresh = layout_positions(sizes, [(e["source"], e["target"], e["kind"]) for e in edges])
+    fresh = graph_lens.model_layout(sizes, edges) if lens == "model" else layout_positions(sizes, [(e["source"], e["target"], e["kind"]) for e in edges])
     kept = {}
     if previous and not relayout:
-        for n in previous.get("nodes") or []:
-            d, p = (n or {}).get("data") or {}, (n or {}).get("position") or {}
-            if d.get("id") in sizes and isinstance(p.get("x"), (int, float)) and isinstance(p.get("y"), (int, float)):
-                w, h = load[d["id"]]
-                kept[d["id"]] = (p["x"] - w / 2, p["y"] - h / 2)
+        for i, (x, y) in prior.items():
+            if i in sizes:
+                w, h = load[i]
+                kept[i] = (x - w / 2, y - h / 2)
     top_left = dict(fresh)
     if kept:
         dx = sum(kept[i][0] - fresh[i][0] for i in kept) / len(kept)
@@ -434,4 +464,10 @@ def build_body(name: str, nodes: list[dict], edges: list[dict], previous: Option
         body["color_by"] = color_by
     if previous and previous.get("grouping"):  # how the graph is grouped is the person's, and stays when its tables change
         body["grouping"] = previous["grouping"]
+    if lens != graph_lens.DEFAULT_LENS:
+        body["lens"] = lens
+    others = {k: {i: {"x": x, "y": y} for i, (x, y) in v.items() if i in sizes} for k, v in stash.items() if k != lens}
+    others = {k: v for k, v in others.items() if v}
+    if others:  # the positions the other lenses left behind, for the tables still on the graph
+        body["lens_positions"] = others
     return body

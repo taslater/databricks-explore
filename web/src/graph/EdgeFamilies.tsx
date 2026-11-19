@@ -17,6 +17,7 @@ import {
   type KindStyle,
 } from './edgeStyles'
 import { hasEnds, useCardinality } from './EdgeEnds'
+import { isModified, LENS_LABEL, type Lens } from './lens'
 import { anyOrphans } from './relProfile'
 import { useGraphStore } from './graphStore'
 import type { GraphEdge } from '../api/types'
@@ -38,10 +39,15 @@ function Swatch({ style }: { style: KindStyle }) {
   )
 }
 
-/** One checkbox per family, and the per-kind ones under More. */
+/** The families the panel lists up front for each lens; the rest are under More. */
+export const PANEL_FAMILIES: Record<Lens, readonly EdgeFamily[]> = { all: FAMILIES, flow: ['flow'], model: ['reference'] }
+
+/** One checkbox per family the lens is about, and the other families and the per-kind ones under More. */
 export function EdgeFilterBoxes() {
   const filters = useGraphStore((s) => s.filters)
   const setFilter = useGraphStore((s) => s.setFilter)
+  const lens = useGraphStore((s) => s.lens)
+  const up = PANEL_FAMILIES[lens]
   const box = (key: EdgeFamily | GraphEdgeKind, label: string, style: KindStyle, title?: string) => (
     <label key={key} className="check kind-filter" title={title}>
       <input type="checkbox" checked={filters[key]} onChange={(e) => setFilter(key, e.target.checked)} />
@@ -51,10 +57,13 @@ export function EdgeFilterBoxes() {
   )
   return (
     <>
-      <div className="legend-group">Show</div>
-      {FAMILIES.map((f) => box(f, FAMILY_LABEL[f], edgeStyle(f, false), FAMILY_HINT[f]))}
+      <div className="legend-group">
+        Show{lens === 'all' ? '' : ` · ${LENS_LABEL[lens]} lens${isModified(filters, lens) ? ' (modified)' : ''}`}
+      </div>
+      {up.map((f) => box(f, FAMILY_LABEL[f], edgeStyle(f, false), FAMILY_HINT[f]))}
       <details className="edge-kinds">
         <summary>More</summary>
+        {FAMILIES.filter((f) => !up.includes(f)).map((f) => box(f, FAMILY_LABEL[f], edgeStyle(f, false), FAMILY_HINT[f]))}
         {FAMILIES.map((f) =>
           KINDS_OF[f].map((k) => box(k, KIND_LABEL[k], edgeStyle(f, false))),
         )}
