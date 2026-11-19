@@ -2,14 +2,21 @@ import { useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { useEffect } from 'react'
 import { CertBadge } from '../concepts/CertBadge'
 import { useGraphActions } from './actions'
-import { visibleColumns } from './columns'
+import { columnLevel, rowsOf } from './columns'
+import { ColumnRows } from './ColumnRows'
 import { isPlaceholder, nodeFill } from './format'
-import { useGraphStore } from './graphStore'
 import { FilesMark } from './FilesMark'
 import { GrainLine, LateDot, SizeBadge } from './NodeFacts'
 import { NeighborCounts } from './NeighborCounts'
-import { ColumnHandles, TableHandles } from './TableHandles'
+import { TableHandles } from './TableHandles'
 import type { FlowNode } from './types'
+
+const LEVEL_LABEL = { none: '▸ cols', keys: '▾ keys', all: '▾ all' }
+const LEVEL_TITLE = {
+  none: 'Show the key columns and the columns with an edge (click again for all columns)',
+  keys: 'Show all columns (click again to hide them)',
+  all: 'Hide columns',
+}
 
 /** Table, view, or streaming node. Same look as the legacy Cytoscape style. It can list its columns, each with its own handles. */
 export function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
@@ -27,9 +34,8 @@ export function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
     .filter(Boolean)
     .join(' ')
 
-  const rows = data.showColumns && data.columns ? visibleColumns(data.columns, data.involved ?? [], !!data.allColumns) : []
-  const hiddenCount = data.showColumns && data.columns ? data.columns.length - rows.length : 0
-  const shown = rows.map((c) => c.name).join('\u0000')
+  const level = columnLevel(data)
+  const shown = rowsOf(data).map((c) => c.name).join('|')
 
   // The sides that carry edges both ways anchor them at different points (graph/anchors.ts), so the handles move.
   const split = new Set(data.anchorSplit)
@@ -60,41 +66,18 @@ export function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
       {!isPlaceholder(id) && !data.missing && (
         <button
           className="tbl-cols-btn nodrag"
-          title={data.showColumns ? 'Hide columns' : 'Show columns, with column lineage and mined joins'}
-          aria-pressed={!!data.showColumns}
+          title={LEVEL_TITLE[level]}
+          aria-pressed={level !== 'none'}
           onClick={(e) => {
             e.stopPropagation()
-            actions.toggleColumns(id)
+            actions.cycleColumns(id)
           }}
           onDoubleClick={(e) => e.stopPropagation()}
         >
-          {data.showColumns ? '▾ cols' : '▸ cols'}
+          {LEVEL_LABEL[level]}
         </button>
       )}
-      {rows.length > 0 && (
-        <div className="tbl-cols">
-          {rows.map((c) => (
-            <div className="tbl-col" key={c.name} title={`${c.name} ${c.type}`}>
-              <ColumnHandles column={c.name} split={split} />
-              <span className="tbl-col-name">{c.name}</span>
-              <span className="tbl-col-type">{c.type}</span>
-            </div>
-          ))}
-          {(hiddenCount > 0 || data.allColumns) && (
-            <button
-              className="tbl-more nodrag"
-              onClick={(e) => {
-                e.stopPropagation()
-                useGraphStore.getState().setAllColumns(id, !data.allColumns)
-                setTimeout(() => useGraphStore.getState().requestLayout(), 250)
-              }}
-              onDoubleClick={(e) => e.stopPropagation()}
-            >
-              {data.allColumns ? 'show fewer' : `+${hiddenCount} more`}
-            </button>
-          )}
-        </div>
-      )}
+      <ColumnRows id={id} data={data} split={split} />
     </div>
   )
 }

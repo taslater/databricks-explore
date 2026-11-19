@@ -4,7 +4,7 @@ import { create } from 'zustand'
 import type { GraphEdge, GraphNode, RelationsResponse } from '../api/types'
 import type { ColumnInfo } from './columns'
 import { nameOf, schemaOf } from './format'
-import { computeLayout } from './layout'
+import { computeLayout, computeScopedLayout } from './layout'
 import { nodeSize, viaMap } from './derive'
 import type { NeighborSet } from './neighbors'
 import type { DiagramPayload } from './diagram'
@@ -56,6 +56,8 @@ interface GraphState {
   status: { text: string; error: boolean }
   /** Run dagre on the next render where every visible node has been measured. */
   layoutPending: boolean
+  /** When set, the next layout only redoes the parts of the graph holding these nodes (a node's column level changed). */
+  layoutScope: string[] | null
   /** Fit the view on the next render where every visible node has been measured. */
   fitPending: boolean
   /** Flow neighbors read for each table (neighbors.ts), for the counts at a node's sides. Never saved. */
@@ -105,7 +107,9 @@ interface GraphState {
   /** Adds the nodes and edges of one relationships response. Existing nodes and edges stay in place, but an edge already on screen takes the fresh info (status, note, evidence). */
   mergeRelations: (resp: RelationsResponse) => void
   clear: () => void
-  requestLayout: () => void
+  requestLayout: (scope?: string[]) => void
+  /** requestLayout after React Flow has measured the nodes whose size just changed. */
+  requestLayoutSoon: (scope?: string[]) => void
   runLayout: () => void
   finishFit: () => void
   loadDiagram: (payload: DiagramPayload) => void
@@ -125,6 +129,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   filters: DEFAULT_FILTERS,
   status: { text: '', error: false },
   layoutPending: false,
+  layoutScope: null,
   fitPending: false,
   viewport: null,
   neighbors: {},
@@ -259,7 +264,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
         edges.push({ id: e.id, source: e.source, target: e.target, data: { info: e } })
         edgeIds.add(e.id)
       }
-      return { nodes, edges, layoutPending: true }
+      return { nodes, edges, layoutPending: true, layoutScope: null }
     }),
 
   clear: () =>
@@ -278,32 +283,36 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       diagramChanged: null,
     }),
 
-  requestLayout: () => set({ layoutPending: true }),
+  requestLayout: (scope) =>
+    set((s) => ({ layoutPending: true, layoutScope: scope && (!s.layoutPending || s.layoutScope) ? [...(s.layoutScope ?? []), ...scope] : null })),
+  requestLayoutSoon: (scope) => void setTimeout(() => useGraphStore.getState().requestLayout(scope), 250),
 
   runLayout: () =>
     set((s) => {
       const via = viaMap(s.edges)
-      const positions = computeLayout(
-        s.nodes.map((n) => {
-          const size = nodeSize(n, s.focusSchema, via.get(n.id))
-          return {
-            id: n.id,
-            width: size.width,
-            height: size.height,
-            focus: n.data.focus || !!n.data.pinned,
-            x: n.position.x,
-            y: n.position.y,
-          }
-        }),
-        s.edges.map((e) => ({ source: e.source, target: e.target, kind: e.data!.info.kind })),
-      )
+      const laid = s.nodes.map((n) => {
+        const size = nodeSize(n, s.focusSchema, via.get(n.id))
+        return {
+          id: n.id,
+          width: size.width,
+          height: size.height,
+          focus: n.data.focus || !!n.data.pinned,
+          x: n.position.x,
+          y: n.position.y,
+        }
+      })
+      const links = s.edges.map((e) => ({ source: e.source, target: e.target, kind: e.data!.info.kind }))
+      // A level change only moves the parts of the graph it touches, and leaves the view where it is, unless they would then overlap.
+      const scoped = s.layoutScope ? computeScopedLayout(laid, links, s.layoutScope) : null
+      const positions = scoped ?? computeLayout(laid, links)
       return {
+        layoutScope: null,
+        fitPending: !scoped,
         nodes: s.nodes.map((n) => {
           const p = positions.get(n.id)
           return p ? { ...n, position: p } : n
         }),
         layoutPending: false,
-        fitPending: true,
       }
     }),
 

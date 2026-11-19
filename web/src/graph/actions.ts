@@ -8,7 +8,7 @@ import { useUiStore } from '../store/uiStore'
 import type { CanvasConnector, CanvasWindow, GraphEdge } from '../api/types'
 import { schemaOf } from './format'
 import { useGraphStore } from './graphStore'
-import { columnsOf } from './columns'
+import { columnLevel, columnsOf } from './columns'
 import { isPlaceholder } from './format'
 import { openSqlInCanvas } from '../ask/canvasAction'
 import { JOIN_KEYS_STALE_MS } from '../api/hooks'
@@ -159,9 +159,9 @@ export function useGraphActions() {
       }
     }
 
-    /** Waits for React Flow to measure the nodes whose size just changed, then lays the graph out again. */
-    function relayoutSoon() {
-      setTimeout(() => useGraphStore.getState().requestLayout(), 250)
+    /** Waits for React Flow to measure the nodes whose size just changed, then lays out again the parts of the graph they are in (all of it with no ids). */
+    function relayoutSoon(ids?: string[]) {
+      useGraphStore.getState().requestLayoutSoon(ids)
     }
 
     /**
@@ -199,18 +199,30 @@ export function useGraphActions() {
       } catch (e) {
         useGraphStore.getState().setStatus(messageOf(e), true)
       }
-      relayoutSoon()
+      relayoutSoon([id])
     }
 
     function hideColumns(id: string) {
       useGraphStore.getState().setShowColumns(id, false)
-      relayoutSoon()
+      relayoutSoon([id])
     }
 
-    function toggleColumns(id: string) {
-      const node = useGraphStore.getState().nodes.find((n) => n.id === id)
-      if (node?.data.showColumns) hideColumns(id)
-      else void showColumns(id)
+    /** A node's column level one step on: none, keys, all, none. The level shows on the node's button. */
+    function cycleColumns(id: string) {
+      const g = useGraphStore.getState()
+      const node = g.nodes.find((n) => n.id === id)
+      if (!node) return
+      const level = columnLevel(node.data)
+      if (level === 'none') {
+        g.setAllColumns(id, false)
+        void showColumns(id)
+      } else if (level === 'keys') {
+        g.setAllColumns(id, true)
+        relayoutSoon([id])
+      } else {
+        g.setAllColumns(id, false)
+        hideColumns(id)
+      }
     }
 
     /** Columns on several nodes, one after another: each can mean a warehouse query. */
@@ -218,11 +230,12 @@ export function useGraphActions() {
       for (const id of ids) await showColumns(id)
     }
 
-    /** Columns on every table node, or off for all. The choice stays on for nodes added later. */
+    /** The keys level on every table node, or columns off for all. The choice stays on for nodes added later. */
     async function setAllColumns(show: boolean) {
       useGraphStore.getState().setColumnsOn(show)
       const ids = useGraphStore.getState().nodes.filter((n) => !isPlaceholder(n.id)).map((n) => n.id)
       for (const id of ids) {
+        useGraphStore.getState().setAllColumns(id, false)
         if (show) await showColumns(id)
         else useGraphStore.getState().setShowColumns(id, false)
       }
@@ -359,7 +372,7 @@ export function useGraphActions() {
       connect,
       showColumns,
       hideColumns,
-      toggleColumns,
+      cycleColumns,
       setAllColumns,
       refreshGraph,
       showColumnEdge,
