@@ -273,6 +273,48 @@ button:disabled {
   color: #444;
 }
 
+/* Counts of neighbors not on the graph, outside the node's top corners, clear of where edges attach (neighbors.ts). */
+.tbl-more-count {
+  position: absolute;
+  top: 2px;
+  min-width: 14px;
+  padding: 0 3px;
+  border: 1px solid #b6c0ca;
+  border-radius: 8px;
+  background: #fff;
+  color: #667;
+  font-size: 9px;
+  line-height: 13px;
+  cursor: pointer;
+}
+
+.tbl-more-count.is-up {
+  right: 100%;
+  margin-right: 3px;
+}
+
+.tbl-more-count.is-down {
+  left: 100%;
+  margin-left: 3px;
+}
+
+.tbl-more-count:hover {
+  border-color: #dd6b20;
+  color: #222;
+}
+
+/* Small muted marks beside a node's name (nodeMarks.ts). */
+.tbl-mark {
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid #8a9aa9;
+  border-radius: 8px;
+  color: #556;
+  font-size: 9px;
+  font-weight: 400;
+  vertical-align: 1px;
+}
+
 /* Handles exist so edges have anchor points. They are not drawn. */
 .tbl-handle {
   opacity: 0;
@@ -2086,6 +2128,17 @@ textarea.sk-editor {
   border: 2px solid #fff;
   opacity: 0;
   transition: opacity 0.1s;
+}
+
+/* The in and out anchors of a side (sketch/anchors.ts): where edges attach, never drawn or grabbed. */
+.sk-anchor.react-flow__handle {
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .react-flow__node:hover .sk-handle,

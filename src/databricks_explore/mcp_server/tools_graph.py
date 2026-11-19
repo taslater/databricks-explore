@@ -201,7 +201,8 @@ def derive(ctx, tables: list[str]) -> tuple[list[dict], dict[str, dict], list[st
     facts = {}
     for t in tables:
         node = next((n for n in relations_of(t).get("nodes", []) if n["id"] == t), {})
-        facts[t] = {"id": t, "kind": node.get("kind", "table"), "self_ref": node.get("self_ref"), "self_ref_last_seen": node.get("self_ref_last_seen")}
+        facts[t] = {"id": t, "kind": node.get("kind", "table"), "self_ref": node.get("self_ref"), "self_ref_last_seen": node.get("self_ref_last_seen"),
+                     "self_ref_fks": node.get("self_ref_fks"), "files": node.get("files")}
     edges = graphs.graph_edges(rels)
     ends = _cardinalities(ctx, edges, fetch=True)  # both ends were just read, so this costs no new call
     return [{**e, "cardinality": ends[e["id"]]} if e["id"] in ends else e for e in edges], facts, notes

@@ -4,7 +4,9 @@ import { MarkerType } from '@xyflow/react'
 import type { GraphEdge } from '../api/types'
 import { columnHandles, findColumn, visibleColumns } from './columns'
 import { EDGE_COLORS } from './format'
+import { graphSplits } from './anchors'
 import { estimateSize } from './layout'
+import { nameLine } from './nodeMarks'
 import { familyOf } from './edgeStyles'
 import type { EdgeFilters, FlowEdge, FlowNode } from './types'
 
@@ -28,7 +30,7 @@ export function viaMap(edges: FlowEdge[]): Map<string, string> {
 }
 
 function nodeLines(n: FlowNode, showSchema: boolean, via: string | undefined): string[] {
-  const lines = [`${n.data.selfRef ? '↻ ' : ''}${n.data.name}`]
+  const lines = [nameLine(n.data)]
   if (showSchema) lines.push(n.data.schema)
   if (via) lines.push(`via ${via}`)
   if (n.data.showColumns && n.data.columns) {
@@ -219,5 +221,8 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
     }
   })
 
-  return { nodes, edges: [...edges, ...columnEdges] }
+  // A side with edges both in and out anchors them apart. Hidden edges do not count.
+  const all = [...edges, ...columnEdges]
+  const splits = graphSplits(all)
+  return { nodes: nodes.map((n) => (splits.has(n.id) ? { ...n, data: { ...n.data, anchorSplit: splits.get(n.id) } } : n)), edges: all }
 }

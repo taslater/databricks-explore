@@ -9,6 +9,8 @@ import { KIND_LABEL } from './edgeStyles'
 import { EdgeCardinality } from './EdgeEnds'
 import { EdgeFilterBoxes, EdgeFrom, EdgeLegend } from './EdgeFamilies'
 import { fmtAge, fmtTime, lastPart } from './format'
+import { NeighborDetails } from './NeighborDetails'
+import { NodeMarkDetails } from './NodeMarkDetails'
 import { useGraphStore } from './graphStore'
 import { canReview, patchIds } from './relationships'
 import { EdgeGrainDetails, NodeFactsDetails } from './NodeFacts'
@@ -178,7 +180,8 @@ function NodeDetails({ id, node }: { id: string; node: FlowNode }) {
         {str(t.table_type)} · {str(t.data_source_format)} · owner {str(t.owner) || '?'}
       </div>
       <div className="hint">cached {payload.fetched_at}</div>
-      {node.data.selfRef && <p>↻ Reads its own data (e.g. MERGE). Last seen {fmtAge(node.data.selfRefLastSeen)}</p>}
+      <NodeMarkDetails data={node.data} />
+      <NeighborDetails id={id} />
       <p>{str(t.comment)}</p>
       <NodeFactsDetails id={id} />
       {constraints.length > 0 && (

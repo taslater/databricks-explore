@@ -358,7 +358,7 @@ def _clear_of(box, others) -> Optional[tuple]:
 
 
 def build_body(name: str, nodes: list[dict], edges: list[dict], previous: Optional[dict] = None, relayout: bool = False) -> dict:
-    """A diagram body from `nodes` ({id, kind, focus?, self_ref?, self_ref_last_seen?}, in the order to lay out) and graph `edges`.
+    """A diagram body from `nodes` ({id, kind, focus?, self_ref?, self_ref_last_seen?, self_ref_fks?, files?}, in the order to lay out) and graph `edges`.
 
     Every node is pinned (added on purpose, so the Graph's edge filters never hide it). The focus schema is the focus
     node's, else the most common schema. With `previous` (a stored diagram), nodes already in it keep their positions
@@ -405,6 +405,9 @@ def build_body(name: str, nodes: list[dict], edges: list[dict], previous: Option
             data["self_ref"] = True
             if n.get("self_ref_last_seen"):
                 data["self_ref_last_seen"] = n["self_ref_last_seen"]
+        for key in ("self_ref_fks", "files"):  # facts about the node itself, shown as markers
+            if n.get(key):
+                data[key] = n[key]
         if via.get(i):
             data["via"] = via[i]
         w, h = load[i]
