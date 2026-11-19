@@ -204,6 +204,23 @@ def rel_store():
     return relationships.open_store(ex().profile)
 
 
+VIEW_KINDS = ("view", "materialized_view")  # node kinds whose definition is read for the joins it defines
+MAX_VIEW_READS = 20  # views read (from the local cache, or one tables.get each) per request
+
+
+def learn_view_joins(e, store, table, rel):
+    """Record the joins defined by the table (if it is a view) and by the views built from it that `rel` shows.
+
+    `rel` is an Explorer.relations() response. A view that cannot be read is skipped: this never fails a request."""
+    views = [n["id"] for n in (rel or {}).get("nodes", []) if n.get("kind") in VIEW_KINDS and not n["id"].startswith("ph:")]
+    for view in sorted(views, key=lambda v: v != table)[:MAX_VIEW_READS]:  # the table itself first
+        try:
+            info = e.object(view)["data"]  # cached: the caller has just read the table itself
+            store.replace_view_joins(view, relationships.view_join_groups(view, info))
+        except Exception:
+            continue
+
+
 @app.get("/api/relationships")
 def relationships_for_table():
     table = relationships.check_table(request.args.get("table", ""))
@@ -218,21 +235,29 @@ def relationships_for_table():
             except Exception as err:
                 notes.append(f"column_lineage: {dbx.clean_error(err)}")
     with rel_store() as store:
+        learn_view_joins(e, store, table, rel)
         out = relationships.unified(store, table, rel, times, level, columns)
-    return jsonify({**out, "errors": [*out["errors"], *notes]})
+    extra = {"column_lineage_source": columns["source"]} if columns and columns.get("source") else {}
+    return jsonify({**out, **extra, "errors": [*out["errors"], *notes]})
 
 
 @app.get("/api/relationships/joins")
 def relationship_joins():
     """How one table is known to join to others: declared foreign keys, mined joins and manual edges, with columns."""
     table = relationships.check_table(request.args.get("table", ""))
-    info, errors = None, []
+    info, rel, errors = None, None, []
     if not table.startswith("ph:"):  # a placeholder has no catalog metadata
         try:
             info = ex().object(table, refresh())["data"]
         except Exception as err:  # stored edges still answer
             errors.append(f"tables.get: {dbx.clean_error(err)}")
+        try:
+            rel = ex().relations(table)  # cached once the Graph has read it; names the views built from this table
+        except Exception:
+            pass
     with rel_store() as store:
+        if rel:
+            learn_view_joins(ex(), store, table, rel)
         out = relationships.join_keys(store, table, info)
     return jsonify({**out, "errors": errors})
 
@@ -243,7 +268,9 @@ def relationship_suggestions():
     with rel_store() as store:
         edges = store.suggestions(relationships.check_statuses(statuses), table=request.args.get("table") or None)
         counts = store.status_counts()
-    return jsonify({"edges": [x.model_dump(mode="json") for x in edges], "counts": counts})
+        in_views = store.views_by_pair()
+    views = {x.id: v for x in edges if (v := in_views.get(relationships.pair_key(x)))}
+    return jsonify({"edges": [x.model_dump(mode="json") for x in edges], "counts": counts, "views": views})
 
 
 @app.post("/api/relationships/bulk")

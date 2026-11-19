@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Relationship } from '../api/types'
 import { pairLabel } from './mining'
 import { shortestNames } from './names'
-import { groupSuggestions } from './suggestionGroups'
+import { groupSuggestions, viewsOfRow } from './suggestionGroups'
 
 describe('shortestNames', () => {
   it('uses the table name when it is unique in the list', () => {
@@ -155,6 +155,17 @@ describe('groupSuggestions', () => {
     const e = edge('n', [A, 'x'], [B, 'x'], 1)
     e.evidence = null
     expect(groupSuggestions([e]).map((r) => r.composite)).toEqual([false])
+  })
+})
+
+describe('viewsOfRow', () => {
+  it('lists the views that join on every pair of the row', () => {
+    const together = [{ columns: [['x', 'x'], ['y', 'y']] as [string, string][], runs: 5 }]
+    const row = groupSuggestions([edge('a', [A, 'x'], [B, 'x'], 5, together), edge('b', [A, 'y'], [B, 'y'], 5, together)])[0]
+    expect(row.composite).toBe(true)
+    expect(viewsOfRow(row, { a: ['v1', 'v2'], b: ['v2'] })).toEqual(['v2'])
+    expect(viewsOfRow(row, { a: ['v1'] })).toEqual([])
+    expect(viewsOfRow(row, undefined)).toEqual([])
   })
 })
 

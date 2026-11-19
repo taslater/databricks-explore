@@ -10,6 +10,7 @@ from typing import Iterable, NamedTuple
 
 import sqlglot
 from sqlglot import exp
+from sqlglot import lineage as sqlglot_lineage
 from sqlglot.optimizer.scope import ScopeType, build_scope, traverse_scope
 from sqlglot.tokens import TokenType
 
@@ -33,6 +34,7 @@ def wrap_limit(sql: str, max_rows: int) -> tuple[str, bool]:
 
 
 _DIALECT = "databricks"
+VIEW_TYPES = ("VIEW", "MATERIALIZED_VIEW")  # table types whose view_definition is a SELECT (a metric view's is YAML)
 
 
 def _tokenize(sql: str) -> list:
@@ -539,3 +541,34 @@ def _composites(conditions) -> list[tuple[tuple, ...]]:
                 by_tables.setdefault((p.left_table, p.right_table), set()).add(tuple(p[:4]))
         out.update(tuple(sorted(keys)) for keys in by_tables.values() if len(keys) >= 2)
     return sorted(out)
+
+
+# ---------- column lineage from a view's SQL ----------
+
+def view_column_lineage(sql: str, columns: Iterable[str], default_catalog: str | None = None,
+                        default_schema: str | None = None, known: Iterable[str] | None = None) -> list[tuple[str, str, str]]:
+    """Where each output column of a view's SELECT comes from: [(source table, source column, view column)].
+
+    Traces through aliases, CTEs, subqueries, expressions and aggregates to base tables, with no catalog calls.
+    Table and source column names come back lowercase and qualified like `join_analysis`; the view column as given. A column sqlglot cannot trace (a `SELECT *`, a
+    literal, SQL that does not parse) is left out, never guessed. Never raises.
+    """
+    names = _Names(default_catalog, default_schema, known)
+    out: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for column in columns:
+        try:
+            tree = sqlglot_lineage.lineage(column, sql, schema=None, dialect=_DIALECT)
+            leaves = [n for n in tree.walk() if not n.downstream]
+        except Exception:  # sqlglot raises several kinds of error for SQL it cannot trace
+            continue
+        for leaf in leaves:
+            table = leaf.expression if isinstance(leaf.expression, exp.Table) else None
+            source = names.qualify(table) if table is not None else None
+            if source is None or source.count(".") != 2:
+                continue
+            row = (source, leaf.name.rsplit(".", 1)[-1].lower(), str(column))
+            if row not in seen:
+                seen.add(row)
+                out.append(row)
+    return out

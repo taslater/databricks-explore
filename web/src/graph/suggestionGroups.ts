@@ -89,3 +89,9 @@ export function groupSuggestions(edges: readonly Relationship[]): SuggestionRow[
 
   return [...found, ...composites.values()].sort((a, b) => b.row.runs - a.row.runs || a.at - b.at).map((x) => x.row)
 }
+
+/** The views that join on every column pair of a row (a composite key's pairs must all be joined by the same view). */
+export function viewsOfRow(row: SuggestionRow, views: Record<string, string[]> | undefined): string[] {
+  const each = row.edges.map((e) => views?.[e.id] ?? [])
+  return each.length === 0 ? [] : each[0].filter((v) => each.every((list) => list.includes(v)))
+}
