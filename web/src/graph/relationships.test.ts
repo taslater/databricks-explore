@@ -12,7 +12,6 @@ const A = 'main.sales.orders'
 const B = 'main.sales.customers'
 const C = 'main.sales.raw'
 const PH = 'ph:7f0c2d3e-1111-4222-8333-444455556666'
-const NOW = Date.parse('2026-11-11T00:00:00Z')
 
 function rel(extra: Partial<Relationship> & Pick<Relationship, 'id' | 'kind'>, source = A, target = B): Relationship {
   return {
@@ -36,6 +35,29 @@ const node = (id: string, focus = false): FlowNode => ({
   data: { name: nameOf(id), schema: schemaOf(id), kind: 'table', focus, selfRef: false },
 })
 const flowEdge = (info: GraphEdge): FlowEdge => ({ id: info.id, source: info.source, target: info.target, data: { info } })
+
+describe('superseded and last read', () => {
+  it('keeps the superseded status, and a pair is superseded only when both of its directions are', () => {
+    const both = toGraphEdges([
+      rel({ id: `lineage:${A}->${C}`, kind: 'lineage', status: 'superseded' }, A, C),
+      rel({ id: `lineage:${C}->${A}`, kind: 'lineage', status: 'superseded' }, C, A),
+    ])
+    expect(both).toHaveLength(1)
+    expect(both[0]).toMatchObject({ bidir: true, status: 'superseded' })
+    const one = toGraphEdges([
+      rel({ id: `lineage:${A}->${C}`, kind: 'lineage', status: 'superseded' }, A, C),
+      rel({ id: `lineage:${C}->${A}`, kind: 'lineage' }, C, A),
+    ])
+    expect(one[0].status).toBe('derived')
+  })
+
+  it("shows a view dependency's lineage time as when it was last read", () => {
+    const [e] = toGraphEdges([
+      rel({ id: `view_dep:${C}->${A}`, kind: 'view_dep', evidence: { last_seen: '2026-11-15 10:42:00.0', sample_refs: [] } }, C, A),
+    ])
+    expect(e).toMatchObject({ kind: 'view_dep', last_seen: '2026-11-15 10:42:00.0' })
+  })
+})
 
 describe('toGraphEdges', () => {
   it('fills the legacy FK fields from the rolled column pairs and the provenance', () => {
@@ -129,7 +151,7 @@ describe('patchIds for edges from an older saved diagram', () => {
 
 describe('kinds in deriveFlow', () => {
   const nodes = [node(A, true), node(B), node(PH)]
-  const base = { nodes, focusSchema: 'main.sales', staleDays: 7, hoverId: null, now: NOW }
+  const base = { nodes, focusSchema: 'main.sales', hoverId: null }
   const manual = (status: GraphEdge['status'], extra: Partial<GraphEdge> = {}): FlowEdge =>
     flowEdge({ id: 'e_1', source: A, target: B, kind: 'manual', directed: true, status, ...extra })
 
@@ -211,9 +233,10 @@ describe('graph store with relationships', () => {
     store.clear()
   })
 
-  it('has every kind on and rejected off by default', () => {
+  it('has every kind on, and rejected and superseded edges off, by default', () => {
     expect(DEFAULT_FILTERS.showRejected).toBe(false)
-    expect(Object.entries(DEFAULT_FILTERS).filter(([k]) => k !== 'showRejected').every(([, v]) => v)).toBe(true)
+    expect(DEFAULT_FILTERS.showSuperseded).toBe(false)
+    expect(Object.entries(DEFAULT_FILTERS).filter(([k]) => !k.startsWith('show')).every(([, v]) => v)).toBe(true)
   })
 })
 

@@ -6,8 +6,8 @@ import { keyDetail, rankKeys } from '../canvas/linking/joinKeys'
 import type { EdgeFlow, GraphEdge, JoinKey, Producer, RelationshipStatus } from '../api/types'
 import { fetchCurrentEdge, messageOf, useGraphActions } from './actions'
 import { DERIVED_KINDS, KIND_LABEL, KIND_STYLE, STORED_KINDS } from './edgeStyles'
-import { ageDays, fmtAge, fmtTime, lastPart } from './format'
-import { DEFAULT_STALE_DAYS, useGraphStore } from './graphStore'
+import { fmtAge, fmtTime, lastPart } from './format'
+import { useGraphStore } from './graphStore'
 import { canReview, patchIds } from './relationships'
 import type { FlowEdge, FlowNode } from './types'
 
@@ -15,8 +15,6 @@ import type { FlowEdge, FlowNode } from './types'
 export function GraphDetails() {
   const filters = useGraphStore((s) => s.filters)
   const setFilter = useGraphStore((s) => s.setFilter)
-  const staleDays = useGraphStore((s) => s.staleDays)
-  const setStaleDays = useGraphStore((s) => s.setStaleDays)
   const hasNodes = useGraphStore((s) => s.nodes.length > 0)
   const selectedNode = useGraphStore((s) =>
     s.selection?.kind === 'node' ? s.nodes.find((n) => n.id === s.selection?.id) : undefined,
@@ -36,9 +34,6 @@ export function GraphDetails() {
   const several = pickedTables.length > 1
   // With one table picked, its details; with several, the list (the last-clicked node alone would mislead).
   const detailNode = several ? undefined : (allNodes.find((n) => n.id === pickedTables[0]) ?? selectedNode)
-
-  // Keep the field's own text so the user can clear it and type a new number. The store gets the parsed value.
-  const [daysText, setDaysText] = useState(String(staleDays))
 
   return (
     <div className="details">
@@ -62,28 +57,16 @@ export function GraphDetails() {
         <label className="check">
           <input
             type="checkbox"
-            checked={filters.showStale}
-            onChange={(e) => setFilter('showStale', e.target.checked)}
+            checked={filters.showSuperseded}
+            onChange={(e) => setFilter('showSuperseded', e.target.checked)}
           />
-          stale lineage (not seen in
-          <input
-            type="number"
-            className="days-input"
-            min={1}
-            value={daysText}
-            onChange={(e) => {
-              setDaysText(e.target.value)
-              setStaleDays(Number(e.target.value) || DEFAULT_STALE_DAYS)
-            }}
-            aria-label="Stale after days"
-          />
-          days)
+          superseded edges (no longer hold)
         </label>
         <p className="hint legend-note">Lighter lines are proposed, faint ones rejected. No arrowhead means undirected.</p>
         <div className="legend-kinds">
           <span className="k tbl">table</span> <span className="k view">view / MV</span>{' '}
           <span className="k st">streaming</span> <span className="k ext">other schema</span>{' '}
-          <span className="k">↻ self-ref</span>
+          <span className="k miss">missing</span> <span className="k">↻ self-ref</span>
         </div>
       </section>
 
@@ -137,8 +120,8 @@ export function GraphDetails() {
 
       <div className="details-body">
         {several && <SelectionDetails tables={pickedTables} />}
-        {detailNode && <NodeDetails id={detailNode.id} node={detailNode} />}
-        {selectedEdge && <EdgeDetails edge={selectedEdge} staleDays={staleDays} />}
+        {detailNode && (detailNode.data.missing ? <MissingDetails id={detailNode.id} node={detailNode} /> : <NodeDetails id={detailNode.id} node={detailNode} />)}
+        {selectedEdge && <EdgeDetails edge={selectedEdge} />}
       </div>
     </div>
   )
@@ -179,6 +162,30 @@ function SelectionDetails({ tables }: { tables: string[] }) {
         ))}
       </ul>
       <p className="hint">Shift-click a selected table to remove it. Send them to the canvas together, with their connectors.</p>
+    </div>
+  )
+}
+
+/** An object that does not exist: why, and a likely new name. Nothing is read from Databricks. */
+function MissingDetails({ id, node }: { id: string; node: FlowNode }) {
+  const { missingReason, renamedTo } = node.data
+  const actions = useGraphActions()
+  return (
+    <div>
+      <h3>{id}</h3>
+      <p>
+        This object does not exist{missingReason ? `: ${missingReason}` : ''}. A view or key still names it, or lineage saw it
+        under that name.
+      </p>
+      {renamedTo && (
+        <p>
+          Possibly renamed to{' '}
+          <button className="link" onClick={() => void actions.addObject(renamedTo)}>
+            {renamedTo}
+          </button>
+          .
+        </p>
+      )}
     </div>
   )
 }
@@ -232,18 +239,18 @@ function NodeDetails({ id, node }: { id: string; node: FlowNode }) {
   )
 }
 
-function EdgeDetails({ edge, staleDays }: { edge: FlowEdge; staleDays: number }) {
+function EdgeDetails({ edge }: { edge: FlowEdge }) {
   const info = edge.data!.info
   return (
     <div>
-      <EdgeBody info={info} staleDays={staleDays} />
+      <EdgeBody info={info} />
       <EdgeProvenance info={info} />
       <EdgeReview key={edge.id} info={info} />
     </div>
   )
 }
 
-function EdgeBody({ info, staleDays }: { info: GraphEdge; staleDays: number }) {
+function EdgeBody({ info }: { info: GraphEdge }) {
   if (info.source_column && info.target_column) {
     const from = `${info.source}.${info.source_column}`
     const to = `${info.target}.${info.target_column}`
@@ -256,7 +263,7 @@ function EdgeBody({ info, staleDays }: { info: GraphEdge; staleDays: number }) {
           {info.directed === false ? '↔' : '→'} {to}
         </p>
         {info.kind === 'lineage' && (
-          <LineageDetails source={info.source} target={info.target} bidir={false} staleDays={staleDays} />
+          <LineageDetails source={info.source} target={info.target} bidir={false} />
         )}
       </div>
     )
@@ -292,12 +299,23 @@ function EdgeBody({ info, staleDays }: { info: GraphEdge; staleDays: number }) {
         <p>
           {info.source} → {info.target}
         </p>
+        {info.last_seen && <p>Last read {fmtAge(info.last_seen)} (from the lineage API).</p>}
         <p className="hint">Click the view for its definition.</p>
       </div>
     )
   }
   if (info.kind === 'lineage') {
-    return <LineageDetails source={info.source} target={info.target} bidir={!!info.bidir} staleDays={staleDays} />
+    return (
+      <div>
+        {info.status === 'superseded' && (
+          <p className="hint">
+            Superseded: the target's current definition no longer reads this source, or the target was recreated after the last
+            event. Shown because "superseded edges" is on.
+          </p>
+        )}
+        <LineageDetails source={info.source} target={info.target} bidir={!!info.bidir} />
+      </div>
+    )
   }
   return (
     <div>
@@ -393,6 +411,7 @@ function EdgeProvenance({ info }: { info: GraphEdge }) {
 
 const STATUS_TEXT: Record<RelationshipStatus, string> = {
   derived: 'derived from Unity Catalog',
+  superseded: 'superseded (no longer holds)',
   proposed: 'proposed',
   accepted: 'accepted',
   rejected: 'rejected',
@@ -482,17 +501,7 @@ function EdgeReview({ info }: { info: GraphEdge }) {
   )
 }
 
-function LineageDetails({
-  source,
-  target,
-  bidir,
-  staleDays,
-}: {
-  source: string
-  target: string
-  bidir: boolean
-  staleDays: number
-}) {
+function LineageDetails({ source, target, bidir }: { source: string; target: string; bidir: boolean }) {
   const info = useEdge(source, target)
   let body: ReactNode
   if (info.isPending) body = <p className="hint">loading…</p>
@@ -500,9 +509,7 @@ function LineageDetails({
   else if (info.data.flows.length === 0)
     body = <p className="hint">Nothing cached for this pair. Refresh one of the nodes.</p>
   else
-    body = info.data.flows.map((f, i) => (
-      <FlowBlock key={`${f.source}-${f.target}-${i}`} flow={f} staleDays={staleDays} />
-    ))
+    body = info.data.flows.map((f, i) => <FlowBlock key={`${f.source}-${f.target}-${i}`} flow={f} />)
 
   return (
     <div>
@@ -513,14 +520,12 @@ function LineageDetails({
         {bidir ? '↔' : '→'} {target}
       </p>
       {body}
-      <p className="hint">
-        Producers older than {staleDays} days are grey. From the lineage API (Unity Catalog keeps about a year).
-      </p>
+      <p className="hint">From the lineage API (Unity Catalog keeps about a year).</p>
     </div>
   )
 }
 
-function FlowBlock({ flow, staleDays }: { flow: EdgeFlow; staleDays: number }) {
+function FlowBlock({ flow }: { flow: EdgeFlow }) {
   return (
     <div>
       <h4>
@@ -531,7 +536,7 @@ function FlowBlock({ flow, staleDays }: { flow: EdgeFlow; staleDays: number }) {
         <table className="cols">
           <tbody>
             {flow.producers.map((p, i) => (
-              <ProducerRow key={`${p.kind}-${p.id}-${i}`} producer={p} staleDays={staleDays} />
+              <ProducerRow key={`${p.kind}-${p.id}-${i}`} producer={p} />
             ))}
           </tbody>
         </table>
@@ -542,12 +547,10 @@ function FlowBlock({ flow, staleDays }: { flow: EdgeFlow; staleDays: number }) {
   )
 }
 
-function ProducerRow({ producer: p, staleDays }: { producer: Producer; staleDays: number }) {
-  const age = ageDays(p.last_seen)
-  const stale = age !== null && age > staleDays
+function ProducerRow({ producer: p }: { producer: Producer }) {
   const label = `${p.kind} ${p.id}`
   return (
-    <tr className={stale ? 'stale' : undefined}>
+    <tr>
       <td>
         {p.url ? (
           <a href={p.url} target="_blank" rel="noreferrer">
