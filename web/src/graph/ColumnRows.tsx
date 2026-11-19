@@ -1,6 +1,7 @@
 // The column rows of a table node: key markers, the base type, and the `+N more` row. Which rows show is columns.ts's call.
 import { baseType, rowsOf, type ColumnInfo } from './columns'
 import { useGraphStore } from './graphStore'
+import { useColumnTraceMenu } from './ColumnTrace'
 import { ColumnHandles } from './TableHandles'
 import type { TableNodeData } from './types'
 
@@ -28,6 +29,7 @@ export function KeyMarks({ column }: { column: ColumnInfo }) {
 
 /** The rows under a node's name at its column level (keys or all), each with its handles, then a row that changes the level. */
 export function ColumnRows({ id, data, split }: { id: string; data: TableNodeData; split: ReadonlySet<string> }) {
+  const trace = useColumnTraceMenu(id)
   if (!data.showColumns || !data.columns) return null
   const rows = rowsOf(data)
   const hidden = data.columns.length - rows.length
@@ -35,7 +37,7 @@ export function ColumnRows({ id, data, split }: { id: string; data: TableNodeDat
   return (
     <div className="tbl-cols">
       {rows.map((c) => (
-        <div className="tbl-col" key={c.name} title={`${c.name} ${c.type}${c.pk ? ' (primary key)' : ''}${c.fk ? ' (foreign key)' : ''}`}>
+        <div className={`tbl-col${data.traced?.includes(c.name.toLowerCase()) ? (data.traceStart === c.name.toLowerCase() ? ' is-traced is-trace-start' : ' is-traced') : ''}`} key={c.name} {...trace.props(c.name)} title={`${c.name} ${c.type}${c.pk ? ' (primary key)' : ''}${c.fk ? ' (foreign key)' : ''}`}>
           <ColumnHandles column={c.name} split={split} />
           <span className="tbl-col-name">
             <KeyMarks column={c} />
@@ -44,6 +46,7 @@ export function ColumnRows({ id, data, split }: { id: string; data: TableNodeDat
           <span className="tbl-col-type">{baseType(c.type)}</span>
         </div>
       ))}
+      {trace.element}
       {(hidden > 0 || data.allColumns) && (
         <button
           className="tbl-more nodrag"

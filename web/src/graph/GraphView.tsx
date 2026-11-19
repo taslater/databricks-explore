@@ -32,6 +32,8 @@ import { GraphToolbar } from './GraphToolbar'
 import { MineDialog } from './MineDialog'
 import { MiningPanel } from './MiningPanel'
 import { withGrainChanges, withNodeFacts } from './cardFacts'
+import { TraceBar, useActiveTrace } from './ColumnTrace'
+import { traceColumnEdges, traceFade, traceNodes } from './traceDraw'
 import { EdgeMenuHost, ProfileDialog, useEdgeContextMenu } from './ProfileDialog'
 import { useNeighborScan, withNeighborCounts } from './neighborScan'
 import { TableStatsDialog } from './TableStatsDialog'
@@ -81,6 +83,7 @@ export function GraphView() {
         <ReactFlowProvider>
           <GraphCanvas />
         </ReactFlowProvider>
+        <TraceBar />
       </div>
       {drawer && <MiningPanel drawer={drawer} />}
       {mineDialog && <MineDialog />}
@@ -113,9 +116,14 @@ function GraphCanvas() {
   const showConcepts = useGraphStore((s) => s.showConcepts)
   const connected = useUiStore((s) => s.connectedProfile)
 
+  const trace = useActiveTrace()
   const flow = useMemo(
-    () => deriveFlow({ nodes: rawNodes, edges: rawEdges, columnEdges, focusSchema, filters, hoverId }),
-    [rawNodes, rawEdges, columnEdges, focusSchema, filters, hoverId],
+    () =>
+      traceFade(
+        deriveFlow({ nodes: traceNodes(rawNodes, trace), edges: rawEdges, columnEdges: traceColumnEdges(columnEdges, rawNodes, trace), focusSchema, filters, hoverId }),
+        trace,
+      ),
+    [rawNodes, rawEdges, columnEdges, focusSchema, filters, hoverId, trace],
   )
 
   // The Concepts toggle: for the tables on the graph, their linked concepts, drawn above them. Never stored or laid out.
