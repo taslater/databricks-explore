@@ -289,6 +289,10 @@ def result_for(statement, params=None):
         hits = [(f.split(".")[0], f.split(".")[1], f.split(".")[2], "VIEW" if v[0] == "VIEW" else "BASE TABLE")
                 for f, v in sorted(TABLES.items())
                 if all(search_terms.like_matches(p, f.split(".")[{"cat": 0, "sch": 1, "q": 2}[k]]) for k, p in asked.items())]
+        if "information_schema.routines" in low:  # the picker's search asks for functions in the same statement
+            hits += [(f.split(".")[0], f.split(".")[1], f.split(".")[2], "FUNCTION") for f in sorted(FUNCTIONS)
+                     if all(search_terms.like_matches(p, f.split(".")[{"cat": 0, "sch": 1, "q": 2}[k]]) for k, p in asked.items())]
+            hits.sort(key=lambda h: (h[2], h[0], h[1]))
         cols = [{"name": k, "type": "STRING"} for k in ("table_catalog", "table_schema", "table_name", "table_type")]
         return cols, [list(h) for h in hits][: cap or 300]
     if re.match(r"^(create|insert|drop|alter|use|set|optimize|vacuum|grant|merge|update|delete|truncate)\b", low):
@@ -386,6 +390,20 @@ class _Schemas:
         return [uc.SchemaInfo(name=n, catalog_name=catalog_name, comment=f"Invented {n} schema") for n in names]
 
 
+# full name -> comment. User-defined functions, listed beside the tables in the picker.
+FUNCTIONS = {
+    "demo.sales.net_price": "Price after discount",
+    "demo.sales.days_since": "Whole days since a date",
+    "demo.hr.full_name": "First and last name joined",
+}
+
+
+class _Functions:
+    def list(self, catalog_name, schema_name):
+        return [SimpleNamespace(name=f.split(".")[2], full_name=f, comment=c) for f, c in sorted(FUNCTIONS.items())
+                if f.startswith(f"{catalog_name}.{schema_name}.")]
+
+
 class _Tables:
     def list(self, catalog_name, schema_name):
         return [_table_info(f) for f in sorted(TABLES) if f.startswith(f"{catalog_name}.{schema_name}.")]
@@ -430,6 +448,7 @@ class FakeWorkspaceClient:
         self.catalogs = _Catalogs()
         self.schemas = _Schemas()
         self.tables = _Tables()
+        self.functions = _Functions()
         self.api_client = _ApiClient()
         self.statement_execution = _Statements()
 

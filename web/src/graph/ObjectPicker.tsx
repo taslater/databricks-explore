@@ -1,15 +1,19 @@
 // Object picker: Drill-down, Tree, and Search. Port of the three legacy modes in static/app.js.
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type RefObject } from 'react'
 import * as api from '../api/client'
-import { useCatalogs, useObjects, useSchemas, useSearch } from '../api/hooks'
+import { useCatalogs, useFunctions, useObjects, useSchemas, useSearch } from '../api/hooks'
 import type { ObjectSummary } from '../api/types'
+import { openSqlInCanvas } from '../ask/canvasAction'
+import { describeFunctionSql } from '../shared/scriptAs'
 import { useUiStore, type PickMode } from '../store/uiStore'
 import { messageOf, useGraphActions } from './actions'
 import { shortType } from './format'
 import { useGraphStore } from './graphStore'
 import { tableDragProps } from '../shared/tableDrag'
-import { Highlighted, PickerFilter } from './PickerFilter'
+import { countText, isFunction, passesTypes, presentGroups, type TypeGroup } from './objectTypes'
+import { Highlighted, PickerFilter, TypeChips } from './PickerFilter'
+import { focusAtEnd, keepInputFocus } from './pickerFocus'
 import { compileFilter, matchName, rankItems, regexError, type Compiled, type Ranked } from './pickerMatch'
 import { completeLast, pathPrefix, resolvePath, splitPath } from './pickerPath'
 import { ObjectMenuHost, useObjectContextMenu } from './objectMenu'
@@ -26,14 +30,18 @@ type KeyNav = MutableRefObject<((e: KeyboardEvent<HTMLInputElement>) => boolean)
 /** Shift, Cmd or Ctrl on a click adds the object to the graph instead of starting a new one, as on the graph itself. */
 const addsToGraph = (e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => e.shiftKey || e.metaKey || e.ctrlKey
 
-/** Click opens the object as a new graph; with Shift, Cmd or Ctrl it is added to the graph on screen. */
-type OpenHandler = (fullName: string, add: boolean) => void
+/**
+ * Click opens the object as a new graph; with Shift, Cmd or Ctrl it is added to the graph on screen. A function has no
+ * graph node, so a click puts DESCRIBE FUNCTION in a new query window (not run) instead.
+ */
+type OpenHandler = (fullName: string, add: boolean, type?: string | null) => void
 
 function useOpenHandler(): OpenHandler {
   const actions = useGraphActions()
   return useCallback(
-    (fullName: string, add: boolean) => {
-      if (add) void actions.addObject(fullName)
+    (fullName: string, add: boolean, type?: string | null) => {
+      if (isFunction(type)) openSqlInCanvas(describeFunctionSql(fullName))
+      else if (add) void actions.addObject(fullName)
       else actions.openObject(fullName)
     },
     [actions],
@@ -57,6 +65,13 @@ function AddButton({ fullName, onOpen }: { fullName: string; onOpen: OpenHandler
   )
 }
 
+/** The type chips, bound to the remembered selection. */
+function PickerTypes({ present }: { present: ReadonlySet<TypeGroup> | null }) {
+  const selected = useUiStore((s) => s.pickTypes)
+  const setTypes = useUiStore((s) => s.setPickTypes)
+  return <TypeChips selected={selected} present={present} onChange={setTypes} />
+}
+
 const PLACEHOLDERS: Record<PickMode, string> = {
   drill: 'filter — type dev.schema. to drill',
   tree: 'filter — * ? globs, dev.schema.table',
@@ -75,6 +90,7 @@ export function ObjectPicker() {
   // In Drill-down the filter text is the path to where the list is, so it starts as the current position.
   const [filter, setFilter] = useState(() => (mode === 'drill' && !regex ? pathPrefix(drill) : ''))
   const navRef: KeyNav = useRef(null)
+  const inputRef = useRef<HTMLInputElement>(null)
   const [refreshError, setRefreshError] = useState<string | null>(null)
 
   /** Re-reads the list the user is looking at, bypassing the server-side cache (`refresh=1`). */
@@ -136,6 +152,7 @@ export function ObjectPicker() {
         </button>
       </div>
       <PickerFilter
+        inputRef={inputRef}
         value={filter}
         onChange={setFilter}
         onKeyDown={(e) => {
@@ -161,7 +178,7 @@ export function ObjectPicker() {
       {!profile ? (
         <p className="hint">Connect to browse.</p>
       ) : mode === 'drill' ? (
-        <DrillDown filter={filter} setFilter={setFilter} regex={regex} navRef={navRef} />
+        <DrillDown filter={filter} setFilter={setFilter} regex={regex} navRef={navRef} inputRef={inputRef} />
       ) : mode === 'tree' ? (
         <TreeBrowser filter={filter} regex={regex} />
       ) : (
@@ -190,11 +207,13 @@ function DrillDown({
   setFilter,
   regex,
   navRef,
+  inputRef,
 }: {
   filter: string
   setFilter: (text: string) => void
   regex: boolean
   navRef: KeyNav
+  inputRef: RefObject<HTMLInputElement | null>
 }) {
   const drill = useUiStore((s) => s.drill)
   const setDrill = useUiStore((s) => s.setDrill)
@@ -205,6 +224,8 @@ function DrillDown({
   const catalogs = useCatalogs()
   const schemas = useSchemas(drill.catalog)
   const objects = useObjects(drill.catalog, drill.schema)
+  const functions = useFunctions(drill.catalog, drill.schema)
+  const types = useUiStore((s) => s.pickTypes)
   const listRef = useRef<HTMLUListElement>(null)
   /** The highlighted row, and whether the arrow keys have moved it (an untouched top row is not highlighted). */
   const [hi, setHi] = useState(0)
@@ -218,13 +239,16 @@ function DrillDown({
   const items: Item[] = useMemo(() => {
     if (level === 'catalogs') return (catalogs.data?.data ?? []).map((c) => ({ name: c.name, type: c.type, comment: c.comment }))
     if (level === 'schemas') return (schemas.data?.data ?? []).map((s) => ({ name: s.name, type: null, comment: s.comment }))
-    return (objects.data?.data ?? []).map((o: ObjectSummary) => ({
-      name: o.name,
-      type: o.type,
-      comment: o.comment,
-      fullName: o.full_name,
-    }))
-  }, [level, catalogs.data, schemas.data, objects.data])
+    return [...(objects.data?.data ?? []), ...(functions.data?.data ?? [])]
+      .map((o: ObjectSummary) => ({ name: o.name, type: o.type, comment: o.comment, fullName: o.full_name }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [level, catalogs.data, schemas.data, objects.data, functions.data])
+  // The type chips narrow only the objects level. `items` stays whole, for the "12 of 80" count and the greyed chips.
+  const typed = useMemo(
+    () => (level === 'objects' ? items.filter((x) => passesTypes(x.type, types)) : items),
+    [items, level, types],
+  )
+  const present = useMemo(() => (level === 'objects' && items.length ? presentGroups(items.map((x) => x.type)) : null), [items, level])
 
   const catalogNames = catalogs.data ? catalogs.data.data.map((c) => c.name) : null
   const schemaNames = schemas.data ? schemas.data.data.map((s) => s.name) : null
@@ -232,7 +256,7 @@ function DrillDown({
   const levelText = res ? res.filter : filter
 
   const compiled = useMemo(() => compileFilter(levelText, regex), [levelText, regex])
-  const { primary, rest } = useMemo(() => rankItems(items, compiled, (x) => x.name), [items, compiled])
+  const { primary, rest } = useMemo(() => rankItems(typed, compiled, (x) => x.name), [typed, compiled])
   const rows: Ranked<Item>[] = [...primary, ...rest]
   const hot = Math.min(hi, rows.length - 1)
   const showHot = navigated || levelText !== ''
@@ -278,11 +302,18 @@ function DrillDown({
     if (navigated) listRef.current?.querySelector<HTMLElement>(`[data-idx="${hot}"]`)?.scrollIntoView?.({ block: 'nearest' })
   }, [hot, navigated])
 
+  /** After a click moved the path, the box keeps the focus with the caret at the end, so typing goes on to the next level. */
+  function goAndRefocus(next: { catalog: string | null; schema: string | null }) {
+    go(next)
+    setTimeout(() => focusAtEnd(inputRef.current), 0) // after React has written the new path into the box
+  }
+
   function pick(x: Item, add: boolean) {
-    if (level === 'catalogs') go({ catalog: x.name, schema: null })
-    else if (level === 'schemas') go({ catalog: drill.catalog, schema: x.name })
+    if (level === 'catalogs') goAndRefocus({ catalog: x.name, schema: null })
+    else if (level === 'schemas') goAndRefocus({ catalog: drill.catalog, schema: x.name })
     else if (x.fullName) {
-      open(x.fullName, add)
+      open(x.fullName, add, x.type)
+      if (isFunction(x.type)) return // its description is in a query window; the list stays as it was
       // Adding keeps the filter, so several objects can be added from one filtered list.
       if (add) return
       setFilter(regex ? '' : pathPrefix(drill))
@@ -337,30 +368,32 @@ function DrillDown({
         data-idx={idx}
         className={`pick-item${selected ? ' sel' : ''}${showHot && idx === hot ? ' hi' : ''}${dim ? ' dim' : ''}`}
         title={x.fullName ?? (x.comment ? `${x.name}\n${x.comment}` : x.name)}
+        onMouseDown={x.fullName ? undefined : keepInputFocus} // catalogs and schemas: the box keeps focus while the path is typed
         onClick={(e) => pick(x, addsToGraph(e))}
-        {...(x.fullName ? tableDragProps(x.fullName) : {})}
+        {...(x.fullName && !isFunction(x.type) ? tableDragProps(x.fullName) : {})}
         {...(x.fullName ? menu(x.fullName, x.type) : {})}
       >
         <span className="nm">
           <Highlighted name={x.name} ranges={r.match.ranges} />
         </span>
         <span className="tag">{shortType(x.type)}</span>
-        {x.fullName && <AddButton fullName={x.fullName} onOpen={open} />}
+        {x.fullName && !isFunction(x.type) && <AddButton fullName={x.fullName} onOpen={open} />}
       </li>
     )
   }
 
-  const shown = rows.length === items.length ? `${items.length}` : `${rows.length} of ${items.length}`
+  const shown = countText(rows.length, items.length)
+  const functionsNote = level === 'objects' && functions.isError ? ' · functions unavailable' : ''
   return (
     <>
       <div className="crumbs">
-        <button className="crumb" onClick={() => go({ catalog: null, schema: null })}>
+        <button className="crumb" onMouseDown={keepInputFocus} onClick={() => goAndRefocus({ catalog: null, schema: null })}>
           catalogs
         </button>
         {drill.catalog && (
           <>
             {' › '}
-            <button className="crumb" onClick={() => go({ catalog: drill.catalog, schema: null })}>
+            <button className="crumb" onMouseDown={keepInputFocus} onClick={() => goAndRefocus({ catalog: drill.catalog, schema: null })}>
               {drill.catalog}
             </button>
           </>
@@ -375,8 +408,9 @@ function DrillDown({
       <ListStatus
         loading={active.isPending}
         error={active.isError ? messageOf(active.error) : null}
-        text={res?.problem ?? `${shown} ${level} · cached ${active.data?.fetched_at ?? ''}`}
+        text={res?.problem ?? `${shown} ${level} · cached ${active.data?.fetched_at ?? ''}${functionsNote}`}
       />
+      {level === 'objects' && <PickerTypes present={present} />}
       <ul className="pick-list" ref={listRef}>
         {primary.map((r, i) => renderRow(r, i, false))}
         {primary.length > 0 && rest.length > 0 && <li className="pick-divider" role="separator" />}
@@ -426,21 +460,25 @@ interface TreeFilters {
   levels: [Compiled, Compiled, Compiled]
   active: boolean
   dotted: boolean
+  /** The object type groups to show; empty shows all. It narrows objects only, never catalogs or schemas. */
+  types: readonly TypeGroup[]
 }
 
-function treeFilters(text: string, regex: boolean): TreeFilters {
+function treeFilters(text: string, regex: boolean, types: readonly TypeGroup[]): TreeFilters {
   const segs = regex ? [text] : [...splitPath(text).done, splitPath(text).last]
   const dotted = segs.length > 1
   const levels = (dotted ? [0, 1, 2].map((i) => compileFilter(segs[i] ?? '', false)) : Array(3).fill(compileFilter(text, regex))) as TreeFilters['levels']
-  return { levels, dotted, active: levels.some((l) => l.kind !== 'none' && l.kind !== 'invalid') }
+  return { levels, dotted, types, active: types.length > 0 || levels.some((l) => l.kind !== 'none' && l.kind !== 'invalid') }
 }
 
 function TreeBrowser({ filter, regex }: { filter: string; regex: boolean }) {
-  const filters = useMemo(() => treeFilters(filter, regex), [filter, regex])
+  const types = useUiStore((s) => s.pickTypes)
+  const filters = useMemo(() => treeFilters(filter, regex, types), [filter, regex, types])
   const catalogs = useCatalogs()
   const open = useOpenHandler()
   return (
     <>
+      <PickerTypes present={null} />
       <ListStatus
         loading={catalogs.isPending}
         error={catalogs.isError ? messageOf(catalogs.error) : null}
@@ -514,6 +552,7 @@ function SchemaBranch({
 }) {
   const [open, setOpen] = useState(false)
   const objects = useObjects(open ? catalog : null, open ? name : null)
+  const functions = useFunctions(open ? catalog : null, open ? name : null)
   const match = matchName(filters.levels[1], name)
   const { visible, reportKid } = useBranchVisibility(name, match !== null, filters, onVisible)
   return (
@@ -528,7 +567,7 @@ function SchemaBranch({
         <ul>
           {objects.isPending && <li className="hint">loading…</li>}
           {objects.isError && <li className="error">{messageOf(objects.error)}</li>}
-          {(objects.data?.data ?? []).map((o) => (
+          {[...(objects.data?.data ?? []), ...(functions.data?.data ?? [])].map((o) => (
             <ObjectLeaf key={o.full_name} item={o} filters={filters} onVisible={reportKid} onOpen={onOpen} />
           ))}
         </ul>
@@ -550,14 +589,15 @@ function ObjectLeaf({
 }) {
   const menu = useObjectContextMenu()
   const match = matchName(filters.levels[2], item.name)
-  const { visible } = useBranchVisibility(item.name, match !== null, filters, onVisible)
+  const { visible } = useBranchVisibility(item.name, match !== null && passesTypes(item.type, filters.types), filters, onVisible)
+  const fn = isFunction(item.type)
   return (
     <li className={visible ? undefined : 'hidden'}>
       <div
         className="tree-row"
         title={item.full_name}
-        onClick={(e) => onOpen(item.full_name, addsToGraph(e))}
-        {...tableDragProps(item.full_name)}
+        onClick={(e) => onOpen(item.full_name, addsToGraph(e), item.type)}
+        {...(fn ? {} : tableDragProps(item.full_name))}
         {...menu(item.full_name, item.type)}
       >
         <span className="tw" />
@@ -565,7 +605,7 @@ function ObjectLeaf({
           <Highlighted name={item.name} ranges={match?.ranges ?? []} />
         </span>
         <span className="tag">{shortType(item.type)}</span>
-        <AddButton fullName={item.full_name} onOpen={onOpen} />
+        {!fn && <AddButton fullName={item.full_name} onOpen={onOpen} />}
       </div>
     </li>
   )
@@ -591,32 +631,35 @@ function SearchBrowser({ filter }: { filter: string }) {
   const debounced = useDebounced(trimmed, 300)
   const term = enough && debounced.length >= 3 ? debounced : ''
   const search = useSearch(term)
+  const types = useUiStore((s) => s.pickTypes)
 
   let status = 'type at least 3 characters'
   let error: string | null = null
   if (enough) {
     if (search.isError) error = messageOf(search.error)
     else if (!term || search.isPending) status = 'searching…'
-    else status = `${search.data.data.length} hits · ${search.data.source}`
   }
-  const rows = enough && term && search.data ? search.data.data : []
+  const hits = enough && term && search.data ? search.data.data : []
+  const rows = hits.filter((o) => passesTypes(o.type, types))
+  if (enough && !error && term && search.data) status = `${countText(rows.length, hits.length)} hits · ${search.data.source}`
 
   return (
     <>
       <div className={`pick-status${error ? ' error' : ''}`}>{error ?? status}</div>
+      <PickerTypes present={hits.length ? presentGroups(hits.map((o) => o.type)) : null} />
       <ul className="pick-list">
         {rows.map((o) => (
           <li
             key={o.full_name}
             className="pick-item"
             title={o.full_name}
-            onClick={(e) => open(o.full_name, addsToGraph(e))}
-            {...tableDragProps(o.full_name)}
+            onClick={(e) => open(o.full_name, addsToGraph(e), o.type)}
+            {...(isFunction(o.type) ? {} : tableDragProps(o.full_name))}
             {...menu(o.full_name, o.type)}
           >
             <span className="nm">{o.full_name}</span>
             <span className="tag">{shortType(o.type)}</span>
-            <AddButton fullName={o.full_name} onOpen={open} />
+            {!isFunction(o.type) && <AddButton fullName={o.full_name} onOpen={open} />}
           </li>
         ))}
       </ul>
