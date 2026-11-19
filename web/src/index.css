@@ -273,6 +273,36 @@ button:disabled {
   color: #444;
 }
 
+/* Counts of neighbors not on the graph, outside the node's top corners, clear of where edges attach (neighbors.ts). */
+.tbl-more-count {
+  position: absolute;
+  top: 2px;
+  min-width: 14px;
+  padding: 0 3px;
+  border: 1px solid #b6c0ca;
+  border-radius: 8px;
+  background: #fff;
+  color: #667;
+  font-size: 9px;
+  line-height: 13px;
+  cursor: pointer;
+}
+
+.tbl-more-count.is-up {
+  right: 100%;
+  margin-right: 3px;
+}
+
+.tbl-more-count.is-down {
+  left: 100%;
+  margin-left: 3px;
+}
+
+.tbl-more-count:hover {
+  border-color: #dd6b20;
+  color: #222;
+}
+
 /* Small muted marks beside a node's name (nodeMarks.ts). */
 .tbl-mark {
   margin-left: 4px;

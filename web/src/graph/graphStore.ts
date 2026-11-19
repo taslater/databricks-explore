@@ -1,11 +1,12 @@
 // Client state for the relationship graph. Server data is in TanStack Query. This store holds only what the user has built on screen.
 import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange } from '@xyflow/react'
 import { create } from 'zustand'
-import type { GraphEdge, RelationsResponse } from '../api/types'
+import type { GraphEdge, GraphNode, RelationsResponse } from '../api/types'
 import type { ColumnInfo } from './columns'
 import { nameOf, schemaOf } from './format'
 import { computeLayout } from './layout'
 import { nodeSize, viaMap } from './derive'
+import type { NeighborSet } from './neighbors'
 import type { DiagramPayload } from './diagram'
 import type { DiagramRevision } from '../api/diagrams'
 import type { EdgeFilters, FlowEdge, FlowNode, Selection } from './types'
@@ -54,6 +55,16 @@ interface GraphState {
   layoutPending: boolean
   /** Fit the view on the next render where every visible node has been measured. */
   fitPending: boolean
+  /** Flow neighbors read for each table (neighbors.ts), for the counts at a node's sides. Never saved. */
+  neighbors: Record<string, NeighborSet>
+  /** The tables each expansion added, by `<table>|<up or down>`, so it can be collapsed. Never saved. */
+  expansions: Record<string, string[]>
+  setNeighbors: (id: string, set: NeighborSet) => void
+  recordExpansion: (key: string, ids: string[]) => void
+  /** A table's own facts from its relationships response (kind, self-reference, files), for a node that was added as a neighbor. No layout. */
+  applyNodeFacts: (node: GraphNode) => void
+  /** Takes tables off the graph, with the edges that touch them. */
+  removeNodes: (ids: string[]) => void
   /** The saved graph on screen, for live sync with agents. Null for a graph built here and never saved or loaded. */
   openDiagram: OpenDiagram | null
   /** Someone else saved the open graph while the page held unsaved changes: the page asks (Reload or Keep mine). */
@@ -113,6 +124,38 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   layoutPending: false,
   fitPending: false,
   viewport: null,
+  neighbors: {},
+  expansions: {},
+  setNeighbors: (id, found) => set({ neighbors: { ...get().neighbors, [id]: found } }),
+  recordExpansion: (key, ids) => set({ expansions: { ...get().expansions, [key]: [...new Set([...(get().expansions[key] ?? []), ...ids])] } }),
+  applyNodeFacts: (fact) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) =>
+        n.id !== fact.id
+          ? n
+          : {
+              ...n,
+              data: {
+                ...n.data,
+                kind: fact.kind,
+                ...(fact.self_ref ? { selfRef: true, selfRefLastSeen: fact.self_ref_last_seen, selfRefFks: fact.self_ref_fks } : {}),
+                ...(fact.files ? { files: fact.files } : {}),
+              },
+            },
+      ),
+    })),
+  removeNodes: (ids) =>
+    set((s) => {
+      const gone = new Set(ids)
+      const touches = (e: FlowEdge) => gone.has(e.source) || gone.has(e.target)
+      return {
+        nodes: s.nodes.filter((n) => !gone.has(n.id)),
+        edges: s.edges.filter((e) => !touches(e)),
+        columnEdges: s.columnEdges.filter((e) => !touches(e)),
+        selection: s.selection?.kind === 'node' && gone.has(s.selection.id) ? null : s.selection,
+        layoutPending: true,
+      }
+    }),
   setViewport: (viewport) => set({ viewport }),
   openDiagram: null,
   diagramChanged: null,
@@ -226,6 +269,8 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       layoutPending: false,
       fitPending: false,
       viewport: null,
+      neighbors: {},
+      expansions: {},
       openDiagram: null,
       diagramChanged: null,
     }),
@@ -266,6 +311,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       nodes: payload.nodes,
       edges: payload.edges,
       columnEdges: [],
+      expansions: {},
       focusSchema: payload.focusSchema,
       selection: null,
       hoverId: null,

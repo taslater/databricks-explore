@@ -16,6 +16,8 @@ import { joinSql, planJoins } from './joinQuery'
 import { newTableIds } from './columns'
 import { patchIds, toColumnEdges, toRelations } from './relationships'
 import { edgeShown } from './derive'
+import { makeExpansion } from './expansion'
+import { neighborSet } from './neighbors'
 import { lineagePath, pathConnectors, planSend, sendSummary, type PathDirection } from './sendSelection'
 
 export function messageOf(e: unknown): string {
@@ -61,6 +63,7 @@ export function useGraphActions() {
   const qc = useQueryClient()
 
   return useMemo(() => {
+    const expansion = makeExpansion(qc, columnsForArrivals)
     /**
      * Loads /api/relationships for one object (derived edges plus stored ones) and merges it into the graph.
      * `refresh` forces a Databricks re-read of the derived part.
@@ -86,6 +89,7 @@ export function useGraphActions() {
         )
         const before = useGraphStore.getState().nodes.map((n) => n.id)
         useGraphStore.getState().mergeRelations(resp)
+        useGraphStore.getState().setNeighbors(name, neighborSet(resp, name))
         // Errors stay visible. The legacy UI overwrote them with "loaded".
         if (resp.errors.length) useGraphStore.getState().setStatus(resp.errors.join(' | '), true)
         else useGraphStore.getState().setStatus(`loaded ${name}`)
@@ -95,6 +99,12 @@ export function useGraphActions() {
       } catch (e) {
         useGraphStore.getState().setStatus(messageOf(e), true)
       }
+    }
+
+    /** Columns for the tables that arrived since `before`, when Show columns is on. */
+    function columnsForArrivals(before: string[]) {
+      const arrived = newTableIds(useGraphStore.getState().columnsOn, before, useGraphStore.getState().nodes)
+      if (arrived.length > 0) void showColumnsOf(arrived)
     }
 
     /** Starts a new graph centered on one object. */
@@ -338,6 +348,7 @@ export function useGraphActions() {
     }
 
     return {
+      ...expansion,
       sendTables,
       sendPath,
       queryTables,

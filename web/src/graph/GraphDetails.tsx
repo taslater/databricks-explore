@@ -7,6 +7,7 @@ import type { EdgeFlow, GraphEdge, JoinKey, Producer, RelationshipStatus } from 
 import { fetchCurrentEdge, messageOf, useGraphActions } from './actions'
 import { DERIVED_KINDS, KIND_LABEL, KIND_STYLE, STORED_KINDS } from './edgeStyles'
 import { fmtAge, fmtTime, lastPart } from './format'
+import { NeighborDetails } from './NeighborDetails'
 import { NodeMarkDetails } from './NodeMarkDetails'
 import { useGraphStore } from './graphStore'
 import { canReview, patchIds } from './relationships'
@@ -209,6 +210,7 @@ function NodeDetails({ id, node }: { id: string; node: FlowNode }) {
       </div>
       <div className="hint">cached {payload.fetched_at}</div>
       <NodeMarkDetails data={node.data} />
+      <NeighborDetails id={id} />
       <p>{str(t.comment)}</p>
       <NodeFactsDetails id={id} />
       {constraints.length > 0 && (

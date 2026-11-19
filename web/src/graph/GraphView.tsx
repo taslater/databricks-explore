@@ -27,6 +27,7 @@ import { GraphToolbar } from './GraphToolbar'
 import { MineDialog } from './MineDialog'
 import { MiningPanel } from './MiningPanel'
 import { withGrainChanges, withNodeFacts } from './cardFacts'
+import { useNeighborScan, withNeighborCounts } from './neighborScan'
 import { TableStatsDialog } from './TableStatsDialog'
 import { TableNode } from './TableNode'
 import type { ConceptFlowNode, FlowEdge, FlowNode } from './types'
@@ -121,9 +122,12 @@ function GraphCanvas() {
   // The grain line, size badge and late dot, and the Σ on edges that change grain: read from the server's cache, drawn, never saved.
   const readable = useMemo(() => rawNodes.filter((n) => !n.data.missing).map((n) => n.id).filter((id) => !id.startsWith('ph:')), [rawNodes])
   const nodeFacts = useNodeFacts(readable)
+  // The counts at a node's sides: flow neighbors that are not on the graph. Read table by table, drawn, never saved.
+  const neighbors = useGraphStore((s) => s.neighbors)
+  useNeighborScan(rawNodes)
   const drawnNodes = useMemo<Array<FlowNode | ConceptFlowNode>>(
-    () => [...withNodeFacts(withCertification(flow.nodes, certification.data), nodeFacts.data), ...overlay.nodes],
-    [flow.nodes, overlay.nodes, certification.data, nodeFacts.data],
+    () => [...withNeighborCounts(withNodeFacts(withCertification(flow.nodes, certification.data), nodeFacts.data), neighbors, filters), ...overlay.nodes],
+    [flow.nodes, overlay.nodes, certification.data, nodeFacts.data, neighbors, filters],
   )
   const drawnEdges = useMemo(() => [...withGrainChanges(flow.edges, nodeFacts.data), ...overlay.edges], [flow.edges, overlay.edges, nodeFacts.data])
 

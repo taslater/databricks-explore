@@ -34,6 +34,8 @@ export type TableNodeData = {
   showSchema?: boolean
   external?: boolean
   via?: string
+  /** Neighbors not on the graph, upstream and downstream (set by withNeighborCounts, never saved). */
+  more?: { up: number; down: number }
   /** Side keys (`r`, or `r:column` on a row) that carry edges in and out, so they anchor apart (graph/anchors.ts). */
   anchorSplit?: string[]
   faded?: boolean

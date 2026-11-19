@@ -7,6 +7,7 @@ import { isPlaceholder, nodeFill } from './format'
 import { useGraphStore } from './graphStore'
 import { FilesMark } from './FilesMark'
 import { GrainLine, LateDot, SizeBadge } from './NodeFacts'
+import { NeighborCounts } from './NeighborCounts'
 import { ColumnHandles, TableHandles } from './TableHandles'
 import type { FlowNode } from './types'
 
@@ -52,6 +53,7 @@ export function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
         <FilesMark data={data} />
         <SizeBadge facts={data.facts} />
       </div>
+      <NeighborCounts id={id} more={data.more} />
       <GrainLine facts={data.facts} />
       {data.showSchema && <div className="tbl-sub">{data.schema}</div>}
       {data.via && <div className="tbl-sub">via {data.via}</div>}
