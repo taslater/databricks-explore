@@ -363,6 +363,10 @@ class Explorer:
         """The cached table_stats payload, or None when it was never read. Never queries."""
         return self._peek(f"{self._dir(full_name)}/stats/{safe(full_name)}.json")
 
+    def cached_tags(self, full_name):
+        """The cached tags payload ({"fetched_at", "data"}), or None when they were never read. Never queries."""
+        return self._peek(f"{self._dir(full_name)}/tags/{safe(full_name)}.json")
+
     def _peek(self, rel):
         try:
             return json.loads((self.root / rel).read_text(encoding="utf-8"))

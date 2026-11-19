@@ -7,6 +7,7 @@ import type { EdgeFlow, GraphEdge, JoinKey, Producer, RelationshipStatus } from 
 import { fetchCurrentEdge, messageOf, useGraphActions } from './actions'
 import { KIND_LABEL } from './edgeStyles'
 import { EdgeCardinality } from './EdgeEnds'
+import { ColorLegend } from './ColorByControl'
 import { EdgeFilterBoxes, EdgeFrom, EdgeLegend } from './EdgeFamilies'
 import { fmtAge, fmtTime, lastPart } from './format'
 import { NeighborDetails } from './NeighborDetails'
@@ -61,11 +62,7 @@ export function GraphDetails() {
           superseded edges (no longer hold)
         </label>
         <EdgeLegend />
-        <div className="legend-kinds">
-          <span className="k tbl">table</span> <span className="k view">view / MV</span>{' '}
-          <span className="k st">streaming</span> <span className="k ext">other schema</span>{' '}
-          <span className="k miss">missing</span> <span className="k">↻ self-ref</span>
-        </div>
+        <ColorLegend />
       </section>
 
       <p className="hint">Click a node or edge for details. Shift-click to select several. Double-click a node to expand it. Drag to arrange.</p>

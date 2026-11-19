@@ -44,6 +44,8 @@ export type TableNodeData = {
   certification?: 'certified' | 'deprecated'
   /** The grain and the size and freshness last read, added at draw time (graph/nodeFacts.ts) and never saved. */
   facts?: NodeFacts
+  /** The fill chosen by "Color by", added at draw time (graph/colorBy.ts) and never saved. Absent in type mode. */
+  fill?: string
 }
 
 export type FlowNode = Node<TableNodeData, 'table'>

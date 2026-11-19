@@ -8,6 +8,7 @@ import { useGraphStore } from './graphStore'
 import { FilesMark } from './FilesMark'
 import { GrainLine, LateDot, SizeBadge } from './NodeFacts'
 import { NeighborCounts } from './NeighborCounts'
+import { TypeIcon } from './TypeIcon'
 import { ColumnHandles, TableHandles } from './TableHandles'
 import type { FlowNode } from './types'
 
@@ -42,11 +43,12 @@ export function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
 
   // Four handles per side. The edge picks the pair that matches its direction (see handlesFor in derive.ts).
   return (
-    <div className={classes} style={{ background: data.missing ? 'transparent' : nodeFill(data.kind) }}
+    <div className={classes} style={{ background: data.missing ? 'transparent' : (data.fill ?? nodeFill(data.kind)) }}
       title={data.missing ? `Does not exist${data.missingReason ? `: ${data.missingReason}` : ''}` : undefined}>
       <TableHandles split={split} />
       <div className="tbl-name">
         <LateDot facts={data.facts} />
+        <TypeIcon kind={data.kind} />
         {data.selfRef && '↻ '}
         {data.name}
         {data.certification && <CertBadge status={data.certification} />}

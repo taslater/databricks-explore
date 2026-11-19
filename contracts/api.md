@@ -173,7 +173,7 @@ Response:
 
 ### Diagrams
 
-A saved graph is `data/diagrams/<stem>.json`: `{"name", "saved_at", "focus_schema", "nodes": [{"data", "position"}], "edges": [{"data"}]}` (positions are node centers; see `web/src/graph/diagram.ts`). The stem is the name with anything but letters, digits, `_`, `.` and `-` turned into `_`. Everywhere a route or MCP tool takes a name, the name as typed (`Returns graph`) or as stored (`Returns_graph`) works. No connection needed. Agents read and change saved graphs over MCP (`contracts/mcp.md`, "Tools: saved graphs").
+A saved graph is `data/diagrams/<stem>.json`: `{"name", "saved_at", "focus_schema", "color_by"?, "nodes": [{"data", "position"}], "edges": [{"data"}]}` (positions are node centers; see `web/src/graph/diagram.ts`). `color_by` is what a node's fill means (see "Color by" below) and is left out for the default, `type`. The stem is the name with anything but letters, digits, `_`, `.` and `-` turned into `_`. Everywhere a route or MCP tool takes a name, the name as typed (`Returns graph`) or as stored (`Returns_graph`) works. No connection needed. Agents read and change saved graphs over MCP (`contracts/mcp.md`, "Tools: saved graphs").
 
 Every saved graph has a **revision**: a counter that every write bumps, by the page or by an agent. It lives beside the file in `data/diagram_history/<stem>/meta.json`, never inside the diagram, and outlives a delete. A graph saved before revisions existed is at revision 0.
 
@@ -187,7 +187,7 @@ Returns the saved diagram file as stored: `{"name": str, "saved_at": str, ...}` 
 
 ### `POST /api/diagrams`
 
-Body: the diagram object. `name` is required, `nodes` and `edges` must be lists when given (**400** otherwise). The server writes `data/diagrams/<stem>.json` with `{...body, "name", "saved_at": <now>}`: the server's time always wins. A name that differs from an existing graph's only by case is a **400**.
+Body: the diagram object. `name` is required, `nodes` and `edges` must be lists when given and `color_by` must be one of the values below (**400** otherwise). The server writes `data/diagrams/<stem>.json` with `{...body, "name", "saved_at": <now>}`: the server's time always wins. A name that differs from an existing graph's only by case is a **400**.
 
 Optional request header `X-Base-Revision: <n>`, the revision the sender started from. When the graph exists and is no longer at that revision, nothing is written and the answer is **409** `{"error": "graph g was saved by agent since revision 4 (now revision 6)", "name": "g", "revision": 6, "by": "agent"}`. A bad header value is 400. With no header the save is unchecked.
 
@@ -690,6 +690,18 @@ What the Graph shows on a card besides its name. Body for all three: `{"tables":
 `POST /api/table-stats/plan` answers `{"statements": [{"table", "name": "detail"|"history", "sql"}], "skipped": [{"table", "reason"}], "warehouse_id"}`: the statements a read would run (`DESCRIBE DETAIL <t>` and `DESCRIBE HISTORY <t> LIMIT 50`), and the tables it would not (views, metric views, non-Delta tables, tables that cannot be read).
 
 `POST /api/table-stats/read` runs those statements on the selected warehouse (this can start a stopped warehouse), four tables at a time, replaces each table's cached answer (`stats/<table>.json` in the profile's cache folder, `{"fetched_at", "data"}`) and answers `{"facts": {...as node-facts, for the tables read}, "skipped": [...], "errors": {"<table>": "<message>"}}`. A table whose statements fail is listed in `errors` and its cache is left as it was; when only DESCRIBE HISTORY fails the size is kept and `history_error` says why. With no warehouse selected it answers **400** and runs nothing.
+
+### Color by: `POST /api/node-meta`, `POST /api/node-tags/plan`, `POST /api/node-tags/read`
+
+What a node's fill means. A saved graph's `color_by` is `type` (the default: each kind has its fill), `schema`, `catalog`, `owner`, `certification`, `freshness` or `tag:<key>` (nodes take the color of their value for that tag). The page works the values out from what it already has (names, the certification cache, the size and history read before) plus the two routes below; the object type is always an icon before the name. Body for all three: `{"tables": [...]}` as in "Card facts".
+
+`POST /api/node-meta` answers `{"meta": {"<table>": {"owner", "tags", "tags_fetched_at"}}}`. `owner` comes from the cached `tables.get` data (fetched when missing, a REST call). `tags` is the table's own `{tag: value}` as last read (`{}` when it has none), or `null` when its tags were never read. It **never runs a query**. A table that cannot be read and has no cached tags is left out.
+
+`POST /api/node-tags/plan` answers `{"statements": [{"table", "sql"}], "warehouse_id"}`: for each table, the one statement a read would run (its table tags and column tags from `<catalog>.information_schema`, the same as `describe_table`).
+
+`POST /api/node-tags/read` runs those statements on the selected warehouse (this can start a stopped warehouse), four tables at a time, replaces each table's cached tags (`tags/<table>.json`, shared with `describe_table`) and answers `{"meta": {...as node-meta, for the tables read}, "errors": {"<table>": "<message>"}}`. With no warehouse selected it answers **400** and runs nothing.
+
+Fills come from a palette of eight light colors. A value takes the slot its text hashes to and, when that is taken, the next free one, going through the values in sorted order; with more than eight values the eight on most nodes get a slot and the rest are "other" (grey). A node with no value stays white. Certification (certified green, deprecated red) and freshness (late amber, on time green) use fixed colors; a table is "on time" only when it has a write cadence.
 
 ## 6. Concepts
 

@@ -21,6 +21,8 @@ import { ConceptNode } from './ConceptNode'
 import { useGraphActions } from './actions'
 import { deriveFlow } from './derive'
 import { EDGE_TYPES } from './edges'
+import { useNodeColors } from './ColorByControl'
+import { withFills } from './colorBy'
 import { useCardinality, withCardinality } from './EdgeEnds'
 import { EDGE_COLORS } from './format'
 import { useGraphStore } from './graphStore'
@@ -126,9 +128,11 @@ function GraphCanvas() {
   // The counts at a node's sides: flow neighbors that are not on the graph. Read table by table, drawn, never saved.
   const neighbors = useGraphStore((s) => s.neighbors)
   useNeighborScan(rawNodes)
+  // The fill chosen by Color by (none in type mode, where each node keeps its type color).
+  const fills = useNodeColors().colors?.fills ?? null
   const drawnNodes = useMemo<Array<FlowNode | ConceptFlowNode>>(
-    () => [...withNeighborCounts(withNodeFacts(withCertification(flow.nodes, certification.data), nodeFacts.data), neighbors, filters), ...overlay.nodes],
-    [flow.nodes, overlay.nodes, certification.data, nodeFacts.data, neighbors, filters],
+    () => [...withFills(withNeighborCounts(withNodeFacts(withCertification(flow.nodes, certification.data), nodeFacts.data), neighbors, filters), fills), ...overlay.nodes],
+    [flow.nodes, overlay.nodes, certification.data, nodeFacts.data, neighbors, filters, fills],
   )
   const ends = useCardinality()
   const drawnEdges = useMemo(
