@@ -663,3 +663,292 @@ def view_grain(sql: str) -> Grain | None:
     if tree.args.get("distinct"):
         return Grain("distinct", [])
     return None
+
+
+# ---------- transforms: what a statement does with each of its sources ----------
+
+_FILTER_CHARS = 160  # a predicate longer than this is cut, with an ellipsis, in the facts
+
+
+def _short_sql(node: exp.Expression) -> str:
+    text = " ".join(node.sql(dialect=_DIALECT).split())
+    return text if len(text) <= _FILTER_CHARS else text[:_FILTER_CHARS - 1] + "…"
+
+
+def _blank_facts() -> dict:
+    return {"driving": False, "joined": None, "union": None, "filters": [], "aggregate": None, "dedupe": None,
+            "distinct": False, "window": False, "pivot": False, "merge": None}
+
+
+def _fold(into: dict, other: dict) -> None:
+    """Add what another appearance of the same table says (a second alias, a second union branch, an inner query)."""
+    into["driving"] = into["driving"] or other["driving"]
+    for key in ("joined", "union", "aggregate", "dedupe", "merge"):
+        into[key] = into[key] or other[key]
+    for key in ("distinct", "window", "pivot"):
+        into[key] = into[key] or other[key]
+    into["filters"] += [f for f in other["filters"] if f not in into["filters"]]
+
+
+def _fold_all(into: dict[str, dict], more: dict[str, dict]) -> None:
+    for table, facts in more.items():
+        _fold(into.setdefault(table, _blank_facts()), facts)
+
+
+def _own(node: exp.Expression, *kinds, stop: tuple = (exp.Subquery, exp.Select, exp.Window)):
+    """The nodes of these kinds under node that belong to its own query: not inside a subquery, and not inside a window."""
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        if isinstance(n, stop):
+            continue
+        if isinstance(n, kinds):
+            yield n
+        stack += list(n.iter_expressions())
+
+
+def _and_parts(cond: exp.Expression):
+    if isinstance(cond, exp.Paren):
+        yield from _and_parts(cond.this)
+    elif isinstance(cond, exp.And):
+        yield from _and_parts(cond.left)
+        yield from _and_parts(cond.right)
+    else:
+        yield cond
+
+
+def _union_size(expr: exp.Expression) -> int:
+    """How many queries a chain of UNIONs joins."""
+    return sum(_union_size(side) for side in (expr.left, expr.right)) if isinstance(expr, exp.Union) else 1
+
+
+def _branches(scope) -> list:
+    return list(getattr(scope, "set_operation_scopes", None) or getattr(scope, "union_scopes", None) or [])
+
+
+def _aggregate_of(select: exp.Select) -> dict | None:
+    """GROUP BY keys, the aggregate functions and HAVING of one SELECT, or None when it aggregates nothing."""
+    funcs = []
+    for item in select.expressions:
+        for f in _own(item, exp.AggFunc):
+            name = f.sql_name().upper()
+            if name not in funcs:
+                funcs.append(name)
+    group = select.args.get("group")
+    if group is None and not funcs:
+        return None
+    keys: list[str] = []
+    if group is not None:
+        if group.args.get("all"):
+            keys = [_item_name(i) for i in select.expressions if not (i.this if isinstance(i, exp.Alias) else i).find(exp.AggFunc)]
+        else:
+            keys = [_key_name(k, select) for k in group.expressions]
+    having = select.args.get("having")
+    return {"keys": keys, "functions": funcs, "having": _short_sql(having.this) if having is not None else None}
+
+
+def _in_where(scope, where: exp.Where):
+    """The subquery scopes of a SELECT that sit in its WHERE, with whether each one is negated (NOT EXISTS, NOT IN)."""
+    for sub in getattr(scope, "subquery_scopes", []) or []:
+        expr = sub.expression
+        if expr.find_ancestor(exp.Where) is where:
+            node, negated = expr, False
+            while node is not None and node is not where:
+                negated = negated or isinstance(node, exp.Not)
+                node = node.parent
+            yield sub, negated
+
+
+def _select_facts(scope, names: _Names, depth: int) -> dict[str, dict]:
+    select = scope.expression
+    sources = _sources_of(scope)
+    below: dict[str, dict[str, dict]] = {}
+    for alias, src in sources.items():
+        if isinstance(src, exp.Table):
+            full = names.qualify(src)
+            below[alias] = {full: _blank_facts()} if full else {}
+        elif hasattr(src, "expression"):
+            below[alias] = _scope_facts(src, names, depth + 1)
+    from_ = select.args.get("from_") or select.args.get("from")
+    order = ([from_.this.alias_or_name.lower()] if from_ is not None else []) + [j.alias_or_name.lower() for j in select.args.get("joins") or []]
+    pairs = list(_select_pairs(scope, names))
+    seen_tables: set[str] = set()
+    for k, alias in enumerate(order):
+        bases = below.get(alias, {})
+        join = (select.args.get("joins") or [None])[k - 1] if k else None
+        if join is None:
+            for facts in bases.values():
+                facts["driving"] = True
+        else:
+            kind = _join_type(join)
+            for table, facts in bases.items():
+                keys = []
+                for p in pairs:
+                    for here, there, hc, tc in ((p.left_table, p.right_table, p.left_column, p.right_column),
+                                                (p.right_table, p.left_table, p.right_column, p.left_column)):
+                        if here == table and there in seen_tables and there != table and {"column": hc, "other": f"{there}.{tc}"} not in keys:
+                            keys.append({"column": hc, "other": f"{there}.{tc}"})
+                if not keys and join.args.get("using"):  # USING after several tables: the columns, without the table they meet
+                    keys = [{"column": i.name.lower(), "other": None} for i in join.args["using"]]
+                if kind in ("semi", "anti"):
+                    facts["filters"].append({"kind": kind, "sql": _short_sql(join)})
+                else:
+                    plain = join.args.get("on") is None and not join.args.get("using") and not keys
+                    facts["joined"] = {"type": "cross" if plain else kind, "keys": keys}
+        seen_tables |= set(bases)
+    where = select.args.get("where")
+    extra: dict[str, dict] = {}  # tables that only filter: the subqueries of the WHERE
+    if where is not None:
+        for sub, negated in _in_where(scope, where):
+            more = _scope_facts(sub, names, depth + 1)
+            for facts in more.values():
+                facts["driving"] = False  # it only filters the rows of the query around it
+                facts["filters"].append({"kind": "anti" if negated else "semi", "sql": _short_sql(sub.expression.parent or sub.expression)})
+            _fold_all(extra, more)
+        dedupe_by_where = select.args.get("qualify") is None and _dedupe_keys(select) is not None
+        for cond in _and_parts(where.this):
+            if any(isinstance(n, (exp.Subquery, exp.Exists)) for n in cond.walk()):
+                continue
+            if dedupe_by_where and _is_row_number_one(cond) is not None:
+                continue
+            aliases = set()
+            for col in _own(cond, exp.Column):
+                if col.table:
+                    aliases.add(col.table.lower())
+                elif len(sources) == 1:
+                    aliases.add(next(iter(sources)))
+            if not aliases <= set(below):
+                continue  # names a table of the query around it: a correlation, not a filter on this source
+            if len(aliases) >= 2 and isinstance(cond, (exp.EQ, exp.NullSafeEQ)):
+                continue  # an equality between two sources is how they are joined
+            for alias in aliases:
+                for facts in below[alias].values():
+                    facts["filters"].append({"kind": "where", "sql": _short_sql(cond)})
+    out: dict[str, dict] = {}
+    for bases in below.values():
+        _fold_all(out, bases)
+    qualify = select.args.get("qualify")
+    dedupe = _dedupe_keys(select) if isinstance(select, exp.Select) else None
+    dedupe = {"keys": [_key_name(k, select) for k in dedupe]} if dedupe else None
+    aggregate = _aggregate_of(select)
+    window = any(True for item in select.expressions for _ in _own(item, exp.Window, stop=(exp.Subquery, exp.Select)))
+    pivot = any(isinstance(s, exp.Table) and s.args.get("pivots") for s in sources.values())
+    for facts in out.values():
+        if qualify is not None and dedupe is None:
+            facts["filters"].append({"kind": "qualify", "sql": _short_sql(qualify.this)})
+        facts["aggregate"] = aggregate or facts["aggregate"]
+        facts["dedupe"] = dedupe or facts["dedupe"]
+        facts["distinct"] = facts["distinct"] or bool(select.args.get("distinct"))
+        facts["window"] = facts["window"] or (window and dedupe is None)
+        facts["pivot"] = facts["pivot"] or bool(pivot)
+    for table, facts in extra.items():
+        _fold(out.setdefault(table, _blank_facts()), facts)
+    return out
+
+
+def _scope_facts(scope, names: _Names, depth: int = 0) -> dict[str, dict]:
+    """{base table: facts} for the tables a query reads, through CTEs, subqueries and set operations."""
+    if depth > _MAX_DEPTH or scope is None:
+        return {}
+    expr = scope.expression
+    if isinstance(expr, exp.SetOperation):
+        out: dict[str, dict] = {}
+        branches = _branches(scope)
+        for i, branch in enumerate(branches):
+            more = _scope_facts(branch, names, depth + 1)
+            for facts in more.values():
+                if isinstance(expr, exp.Union):
+                    facts["union"] = {"branches": _union_size(expr)}
+                elif i > 0:
+                    facts["filters"].append({"kind": "anti" if isinstance(expr, exp.Except) else "semi",
+                                             "sql": "EXCEPT" if isinstance(expr, exp.Except) else "INTERSECT"})
+            _fold_all(out, more)
+        return out
+    return _select_facts(scope, names, depth) if isinstance(expr, exp.Select) else {}
+
+
+def _merge_facts(merge: exp.Merge, names: _Names, depth: int = 0) -> tuple[str | None, dict[str, dict]]:
+    """(target table, facts of the tables a MERGE reads): each carries the target's key columns and the actions."""
+    target = merge.this if isinstance(merge.this, exp.Table) else None
+    full = names.qualify(target) if target is not None else None
+    using = merge.args.get("using")
+    if isinstance(using, exp.Table):
+        base = names.qualify(using)
+        facts = {base: _blank_facts()} if base else {}
+        for f in facts.values():
+            f["driving"] = True
+    elif isinstance(using, exp.Subquery):
+        facts = _scope_facts(build_scope(using.this), names, depth + 1)
+    else:
+        facts = {}
+    alias = target.alias_or_name.lower() if target is not None else ""
+    keys: list[str] = []
+    on = merge.args.get("on")
+    for eq in _conjuncts(on) if on is not None else ():
+        for side in (_strip(eq.left), _strip(eq.right)):
+            if _is_column(side) and side.table.lower() == alias and side.name.lower() not in keys:
+                keys.append(side.name.lower())
+    whens = merge.args.get("whens")
+    actions = []
+    for when in (whens.expressions if whens is not None else []):
+        then = when.args.get("then")
+        action = "delete" if isinstance(then, exp.Var) and then.name.upper() == "DELETE" else \
+            "update" if isinstance(then, exp.Update) else "insert" if isinstance(then, exp.Insert) else None
+        if action and action not in actions:
+            actions.append(action)
+    for f in facts.values():
+        f["merge"] = {"keys": keys, "actions": actions}
+    return full, facts
+
+
+def transform_analysis(sql: str, default_catalog: str | None = None, default_schema: str | None = None,
+                       known: Iterable[str] | None = None) -> dict:
+    """What a statement does with each table it reads: {"statement", "target", "sources": {table: facts}}.
+
+    The statement is a SELECT (a view's definition), CREATE ... AS SELECT, INSERT ... SELECT or MERGE; the first one
+    that reads a table is used. facts says whether the table is the driving FROM or joined in (type and keys), one
+    of several union branches, which WHERE, QUALIFY and semi or anti conditions apply to it, and whether the query
+    aggregates (GROUP BY keys and functions), dedupes (row_number() = 1 keys, DISTINCT), uses a window or a pivot, or
+    merges. Names are lowercase, qualified like join_analysis. A statement that reads no table (COPY INTO, VALUES)
+    gives no sources. Raises ValueError when the SQL does not parse."""
+    names = _Names(default_catalog, default_schema, known)
+    try:
+        trees = sqlglot.parse(sql, read=_DIALECT)
+        for tree in trees:
+            if tree is None:
+                continue
+            if isinstance(tree, exp.Merge):
+                target, sources = _merge_facts(tree, names)
+                kind = "merge"
+            else:
+                target, query, kind = None, tree, "select"
+                if isinstance(tree, (exp.Create, exp.Insert)):
+                    kind = "create" if isinstance(tree, exp.Create) else "insert"
+                    query = tree.expression
+                    dest = tree.this.this if isinstance(tree.this, exp.Schema) else tree.this
+                    target = names.qualify(dest) if isinstance(dest, exp.Table) else None
+                query = _unwrap_query(query)
+                if not isinstance(query, exp.Query):
+                    continue
+                sources = _scope_facts(build_scope(query), names)
+            if sources:
+                return {"statement": kind, "target": target, "sources": sources}
+        return {"statement": "other", "target": None, "sources": {}}
+    except sqlglot.errors.SqlglotError as e:
+        raise ValueError(f"cannot parse SQL: {e}") from e
+    except RecursionError as e:
+        raise ValueError("cannot parse SQL: nested too deeply") from e
+
+
+GLYPH_ORDER = ("aggregate", "join", "union", "dedupe", "filter")  # priority; at most two are drawn
+
+
+def edge_transform(analysis: dict, source: str) -> dict | None:
+    """The facts for one source table of an analysed statement, plus "glyphs" (at most two, by priority) and "statement". None when the statement does not read it."""
+    facts = analysis["sources"].get(source.lower())
+    if facts is None:
+        return None
+    present = {"aggregate": facts["aggregate"], "join": facts["joined"], "union": facts["union"],
+               "dedupe": facts["dedupe"] or facts["distinct"], "filter": facts["filters"]}
+    return {**facts, "window": facts["window"] and not facts["dedupe"], "glyphs": [g for g in GLYPH_ORDER if present[g]][:2],
+            "statement": analysis["statement"]}

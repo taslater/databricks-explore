@@ -1,5 +1,6 @@
 import type { Edge, Node } from '@xyflow/react'
 import type { Cardinality, FileUpstream, GraphEdge, GraphEdgeKind, SelfRefFk } from '../api/types'
+import type { EdgeTransform } from '../api/edgeTransforms'
 import type { NodeFacts } from '../api/nodeFacts'
 import type { ColumnInfo } from './columns'
 import type { EdgeFamily } from './edgeStyles'
@@ -73,6 +74,8 @@ export type EdgeData = {
   grainChange?: string
   /** The crow's-foot ends read from keys and nullability, added at draw time (graph/EdgeEnds.tsx) and never saved. */
   cardinality?: Cardinality
+  /** What the SQL behind a flow edge does with its source (aggregate, join, union, dedupe, filter), added at draw time and never saved. */
+  transform?: EdgeTransform
 }
 
 export type FlowEdge = Edge<EdgeData>

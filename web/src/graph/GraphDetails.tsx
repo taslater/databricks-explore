@@ -15,6 +15,7 @@ import { NeighborDetails } from './NeighborDetails'
 import { NodeMarkDetails } from './NodeMarkDetails'
 import { useGraphStore } from './graphStore'
 import { canReview, patchIds } from './relationships'
+import { EdgeHow } from './EdgeTransforms'
 import { EdgeGrainDetails, NodeFactsDetails } from './NodeFacts'
 import type { FlowEdge, FlowNode } from './types'
 
@@ -223,6 +224,7 @@ function EdgeDetails({ edge }: { edge: FlowEdge }) {
       <EdgeCardinality info={info} />
       <ProfileDetails edge={edge} />
       <EdgeGrainDetails edge={edge} />
+      <EdgeHow edge={edge} />
       <EdgeProvenance info={info} />
       <EdgeReview key={edge.id} info={info} />
     </div>

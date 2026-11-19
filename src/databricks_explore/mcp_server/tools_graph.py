@@ -8,6 +8,7 @@ from ..edge_families import family_of
 from .. import nodefacts
 from .. import relationships
 from .. import relprofile
+from .. import transforms
 
 from .tooling import B, ToolError, integer, obj, strings, text, tool
 
@@ -60,6 +61,12 @@ def _facts_text(f: dict) -> str:
         bits += ([f"{s['rows']:,} rows"] if s["rows"] is not None else []) + ([f"{s['bytes']:,} bytes"] if s["bytes"] is not None else [])
         bits += ["late"] if s["late"] else []
     return f" ({', '.join(bits)})" if bits else ""
+
+
+def _transforms(ctx, edges: list[dict]) -> dict[tuple[str, str], dict]:
+    """The transform of each flow edge whose SQL the app has: from the cache, never the workspace; empty when not connected."""
+    ex = ctx.explorer()
+    return transforms.for_pairs(ex, edges) if ex else {}
 
 
 _END_MARK = {"one": "||", "zero_one": "o|", "one_many": "|<", "zero_many": "o<"}
@@ -121,7 +128,7 @@ def list_graphs(ctx, args):
     return text("\n".join(lines))
 
 
-@tool("get_graph", "Read a graph saved from the Graph tab: its tables (kind, focus, and, when known, grain with its basis, rows, bytes, last_write and late from the cached size and history reads) and edges (kind, family: flow, reference or meaning, source, target, status, join columns, and for a reference edge its crow's-foot cardinality: the end at each table that is known, with its basis). The name may be typed (Returns graph) or stored (Returns_graph). json gives every field, with positions.",
+@tool("get_graph", "Read a graph saved from the Graph tab: its tables (kind, focus, and, when known, grain with its basis, rows, bytes, last_write and late from the cached size and history reads) and edges (kind, family: flow, reference or meaning, source, target, status, join columns, and for a reference edge its crow's-foot cardinality: the end at each table that is known, with its basis; for a flow edge its transform when the SQL behind it is known: the aggregate, join, union, dedupe and filters its source goes through). The name may be typed (Returns graph) or stored (Returns_graph). json gives every field, with positions.",
       obj({"name": NAME, "format": {"type": "string", "enum": ["text", "json"], "description": "text (default, compact) or json"}}, ("name",)))
 def get_graph(ctx, args):
     data = _run(graphs.load_graph, args["name"])
@@ -130,6 +137,7 @@ def get_graph(ctx, args):
     pos = {n["data"]["id"]: n.get("position") for n in data.get("nodes") or [] if isinstance(n, dict) and isinstance(n.get("data"), dict)}
     card = _card_facts(ctx, [n["id"] for n in nodes])
     ends = _cardinalities(ctx, edges)
+    how = _transforms(ctx, edges)
     if args.get("format") == "json":
         return text(json.dumps({
             "name": info["name"], "title": data.get("name"), "revision": info["revision"], "by": info["by"], "saved_at": data.get("saved_at"),
@@ -138,7 +146,7 @@ def get_graph(ctx, args):
                        **({"pinned": True} if n.get("pinned") else {}), **_facts_json(card.get(n["id"], {})), "x": (pos.get(n["id"]) or {}).get("x"), "y": (pos.get(n["id"]) or {}).get("y")}
                       for n in nodes],
             "edges": [{k: v for k, v in {"id": e.get("id"), "kind": e.get("kind"), "source": e.get("source"), "target": e.get("target"),
-                                         "family": family_of(e.get("kind")), "cardinality": ends.get(e.get("id")), "status": e.get("status"), "directed": e.get("directed"), "bidir": e.get("bidir") or None,
+                                         "family": family_of(e.get("kind")), "cardinality": ends.get(e.get("id")), "transform": how.get((e.get("source"), e.get("target"))), "status": e.get("status"), "directed": e.get("directed"), "bidir": e.get("bidir") or None,
                                          "columns": e.get("child_columns"), "parent_columns": e.get("parent_columns"),
                                          "note": e.get("note") or None}.items() if v is not None} for e in edges]},
             separators=(",", ":")))
@@ -153,6 +161,7 @@ def get_graph(ctx, args):
         keys = e.get("label") or ""
         lines.append(f"  {e.get('source')} {arrow} {e.get('target')}  {e.get('kind')} ({family_of(e.get('kind')) or '?'}) {e.get('status') or ''}".rstrip() + (f" ({keys})" if keys else "")
                      + (_ends_text(ends[e["id"]], e) if e.get("id") in ends else "")
+                     + (f" [{transforms.summary(how[(e.get('source'), e.get('target'))]) or 'pass-through'}]" if (e.get("source"), e.get("target")) in how else "")
                      + (f" note: {e['note']}" if e.get("note") else ""))
     return text("\n".join(lines))
 
