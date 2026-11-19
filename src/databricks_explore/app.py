@@ -23,6 +23,7 @@ from . import relationships
 from . import sqltools
 from . import starexpand
 from . import tablestats
+from . import transforms
 from .mcp_server import tools_canvas
 from .mcp_server.tooling import Context, ToolError
 
@@ -492,6 +493,62 @@ def table_stats_read():
     with ThreadPoolExecutor(max_workers=4) as pool:
         errors = {t: msg for t, msg in pool.map(one, eligible) if msg}
     return jsonify({"facts": nodefacts.facts(e, eligible), "skipped": skipped, "errors": errors})
+
+
+@app.post("/api/edge-transforms")
+def edge_transforms():
+    """What each flow edge does with its source ({id, source, target} each): the transform from the target's SQL (a view's definition, or the statement last read for a table) and a note when there is none. Never the warehouse."""
+    body = request.get_json(silent=True)
+    edges = body.get("edges") if isinstance(body, dict) else None
+    if not isinstance(edges, list) or not all(isinstance(x, dict) and all(isinstance(x.get(k), str) for k in ("id", "source", "target")) for x in edges):
+        raise relationships.RelationshipInvalid("edges: expected a list of {id, source, target}")
+    if len(edges) > 400:
+        raise relationships.RelationshipInvalid("edges: at most 400 at a time")
+    edges = [x for x in edges if nodefacts.table_name(x["source"]) and nodefacts.table_name(x["target"])]
+    out = transforms.for_edges(ex(), edges)
+    return jsonify({"edges": out["edges"], "origins": {t: {k: v for k, v in o.items() if k != "sql"} | ({"sql": o["sql"]} if o["sql"] else {})
+                                                       for t, o in out["origins"].items()}})
+
+
+def _statement_plan(e, names):
+    """(tables to read, [{"table", "reason"}] for the ones with no statement to read): views and metric views are skipped."""
+    eligible, skipped = [], []
+    for t in names:
+        try:
+            reason = transforms.skip_reason(e.object(t)["data"])
+        except Exception as err:
+            reason = f"cannot read the table: {dbx.clean_error(err)}"
+        (skipped.append({"table": t, "reason": reason}) if reason else eligible.append(t))
+    return eligible, skipped
+
+
+@app.post("/api/edge-transforms/plan")
+def edge_transforms_plan():
+    """The statement `POST /api/edge-transforms/read` would run for each table (the latest write, from system.access.table_lineage and system.query.history), and the tables it would skip."""
+    e = ex()
+    eligible, skipped = _statement_plan(e, _table_names(request.get_json(silent=True)))
+    return jsonify({"statements": [{"table": t, "sql": transforms.statement_plan(t)["sql"]} for t in eligible], "skipped": skipped,
+                    "warehouse_id": e.warehouse_id})
+
+
+@app.post("/api/edge-transforms/read")
+def edge_transforms_read():
+    """Run that statement for the tables and cache the answer (replacing what was cached). Answers {"read": [...], "skipped": [...], "errors": {table: message}}."""
+    e = ex()
+    names = _table_names(request.get_json(silent=True))
+    if not e.warehouse_id:
+        raise ontology.NeedsWarehouse("Pick a SQL warehouse to read the statement that wrote a table.")
+    eligible, skipped = _statement_plan(e, names)
+
+    def one(t):
+        try:
+            e.write_statement(t, True)
+            return t, None
+        except Exception as err:
+            return t, dbx.clean_error(err)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        errors = {t: msg for t, msg in pool.map(one, eligible) if msg}
+    return jsonify({"read": [t for t in eligible if t not in errors], "skipped": skipped, "errors": errors})
 
 
 # ---------- ontology import (ontology.py): read-only, into concepts with origin "ontology" ----------

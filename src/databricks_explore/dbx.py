@@ -9,7 +9,7 @@ from platformdirs import user_data_path
 from databricks.sdk.service.sql import StatementParameterListItem, StatementState
 
 from . import demo
-from . import neighbors, search_terms, sqltools, tablestats
+from . import neighbors, search_terms, sqltools, tablestats, transforms
 
 
 def default_data_dir(demo: bool = False) -> Path:
@@ -362,6 +362,15 @@ class Explorer:
     def cached_table_stats(self, full_name):
         """The cached table_stats payload, or None when it was never read. Never queries."""
         return self._peek(f"{self._dir(full_name)}/stats/{safe(full_name)}.json")
+
+    def write_statement(self, full_name, refresh=False):
+        """The latest write of a table (its SQL statement, or the job or notebook that wrote it), read from the system tables through the warehouse and cached: {"fetched_at", "data"} (see transforms.read_statement)."""
+        return self._cached(f"{self._dir(full_name)}/statement/{safe(full_name)}.json",
+                            lambda: transforms.read_statement(self.sql, full_name), refresh)
+
+    def cached_write_statement(self, full_name):
+        """The cached write_statement payload, or None when it was never read. Never queries."""
+        return self._peek(f"{self._dir(full_name)}/statement/{safe(full_name)}.json")
 
     def _peek(self, rel):
         try:

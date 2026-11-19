@@ -49,7 +49,8 @@ export interface StatsRead {
   errors: Record<string, string>
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+/** POST JSON and read the answer; an error body {error} becomes an ApiError. */
+export async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   const text = await res.text()
   let data: unknown = null

@@ -22,6 +22,8 @@ import { useGraphActions } from './actions'
 import { deriveFlow } from './derive'
 import { EDGE_TYPES } from './edges'
 import { useCardinality, withCardinality } from './EdgeEnds'
+import { useEdgeTransforms } from './EdgeTransforms'
+import { withTransforms } from './transformText'
 import { EDGE_COLORS } from './format'
 import { useGraphStore } from './graphStore'
 import { GraphToolbar } from './GraphToolbar'
@@ -127,9 +129,10 @@ function GraphCanvas() {
     [flow.nodes, overlay.nodes, certification.data, nodeFacts.data],
   )
   const ends = useCardinality()
+  const transforms = useEdgeTransforms()
   const drawnEdges = useMemo(
-    () => [...withCardinality(withGrainChanges(flow.edges, nodeFacts.data), ends.data), ...overlay.edges],
-    [flow.edges, overlay.edges, nodeFacts.data, ends.data],
+    () => [...withTransforms(withCardinality(withGrainChanges(flow.edges, nodeFacts.data), ends.data), transforms.data), ...overlay.edges],
+    [flow.edges, overlay.edges, nodeFacts.data, ends.data, transforms.data],
   )
 
   // Layout and fit need real node sizes, so they wait until every visible node has been measured.

@@ -11,6 +11,7 @@ import { EdgeFilterBoxes, EdgeFrom, EdgeLegend } from './EdgeFamilies'
 import { fmtAge, fmtTime, lastPart } from './format'
 import { useGraphStore } from './graphStore'
 import { canReview, patchIds } from './relationships'
+import { EdgeHow } from './EdgeTransforms'
 import { EdgeGrainDetails, NodeFactsDetails } from './NodeFacts'
 import type { FlowEdge, FlowNode } from './types'
 
@@ -221,6 +222,7 @@ function EdgeDetails({ edge }: { edge: FlowEdge }) {
       <EdgeFrom info={info} />
       <EdgeCardinality info={info} />
       <EdgeGrainDetails edge={edge} />
+      <EdgeHow edge={edge} />
       <EdgeProvenance info={info} />
       <EdgeReview key={edge.id} info={info} />
     </div>
