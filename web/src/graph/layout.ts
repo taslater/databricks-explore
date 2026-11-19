@@ -1,4 +1,5 @@
 // Layout of the Graph: ELK's layered algorithm (column rows as ports, schemas as boxes), dagre as the fallback. Pure: no React Flow, no DOM.
+import dagre from '@dagrejs/dagre'
 import type { GraphEdgeKind } from '../api/types'
 import { familyOf } from './edgeStyles'
 import { elkLayout, type ElkGroupBox } from './elkLayout'
@@ -258,7 +259,6 @@ async function layoutMain(main: LayoutNode[], flowEdges: LayoutEdge[], opts: Lay
 
 /** The old layout: dagre knows nodes and flow edges, not where on a node an edge attaches. */
 async function dagreLayout(main: LayoutNode[], flowEdges: LayoutEdge[]): Promise<Map<string, Point>> {
-  const { default: dagre } = await import('@dagrejs/dagre')
   const g = new dagre.graphlib.Graph()
   g.setGraph({ rankdir: 'LR', nodesep: NODE_SEP, ranksep: RANK_SEP })
   g.setDefaultEdgeLabel(() => ({}))
