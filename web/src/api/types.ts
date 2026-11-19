@@ -115,6 +115,23 @@ export type GraphEdgeKind = RelationshipKind
 /** `derived` and `superseded` (a derived edge that no longer holds) are only ever on edges read from Unity Catalog. */
 export type RelationshipStatus = 'derived' | 'superseded' | 'proposed' | 'accepted' | 'rejected'
 
+/** A crow's-foot end: how many rows of the end's table relate to one row of the other. `one` is ||, `zero_one` o|, `one_many` |< and `zero_many` o<. */
+export type CardinalityEndKind = 'one' | 'zero_one' | 'one_many' | 'zero_many'
+
+export interface CardinalityEnd {
+  end: CardinalityEndKind
+  /** Where the end comes from: a declared `constraint`, a `primary_key`, or a measured `profile`. */
+  basis: 'constraint' | 'primary_key' | 'profile'
+  why: string
+}
+
+/** The known ends of a reference edge (POST /api/relationships/cardinality). An unknown end is null, never "one". */
+export interface Cardinality {
+  source: CardinalityEnd | null
+  target: CardinalityEnd | null
+  sentence: string
+}
+
 /** What the graph draws and saves for one edge. The first group is the legacy shape, the second comes from /api/relationships. */
 export interface GraphEdge {
   id: string
@@ -138,6 +155,8 @@ export interface GraphEdge {
   evidence?: Evidence
   /** Ids to send to PATCH /api/relationships/<id>: the underlying stored edges, or the derived edge ids. */
   patch_ids?: string[]
+  /** A reference edge's crow's-foot ends, when an agent saved the graph with them. The page reads them again from the server when it draws. */
+  cardinality?: Cardinality
   /** Column-level edges only (`level=column`): the columns joined or fed. `source` and `target` stay table names. */
   source_column?: string
   target_column?: string

@@ -1,6 +1,7 @@
 """The graph tools: read, create, change, rename and delete the diagrams saved from the Graph tab. They never touch the workspace."""
 import json
 
+from .. import cardinality
 from .. import dbx
 from .. import graphs
 from ..edge_families import family_of
@@ -59,6 +60,31 @@ def _facts_text(f: dict) -> str:
     return f" ({', '.join(bits)})" if bits else ""
 
 
+_END_MARK = {"one": "||", "zero_one": "o|", "one_many": "|<", "zero_many": "o<"}
+
+
+def _cardinalities(ctx, edges: list[dict], fetch: bool = False) -> dict[str, dict]:
+    """{edge id: cardinality} for the reference edges: what the saved edge carries, else computed from the cached table metadata (never a warehouse)."""
+    have = {e["id"]: e["cardinality"] for e in edges if e.get("cardinality") and e.get("id")}
+    todo = [e for e in edges if e.get("id") and e["id"] not in have and e.get("kind") in cardinality.REFERENCE_KINDS]
+    ex = ctx.explorer() if todo else None
+    if ex:
+        def object_of(t):
+            try:
+                return (ex.object(t) if fetch else ex.cached_object(t) or {}).get("data")
+            except Exception:
+                return None
+        with ctx.store() as store:
+            have.update({k: v for k, v in cardinality.for_edges(todo, object_of, lambda t: relationships.join_keys(store, t, object_of(t))).items() if v})
+    return have
+
+
+def _ends_text(c: dict, e: dict) -> str:
+    """` [orders o<, customers ||]`: the crow's-foot end at each table, for the ends that are known."""
+    bits = [f"{e[side].rsplit('.', 1)[-1]} {_END_MARK[c[side]['end']]}" for side in ("source", "target") if c.get(side)]
+    return f" [{', '.join(bits)}]" if bits else ""
+
+
 def _kinds_line(edges: list[dict]) -> str:
     counts: dict[str, int] = {}
     for e in edges:
@@ -87,7 +113,7 @@ def list_graphs(ctx, args):
     return text("\n".join(lines))
 
 
-@tool("get_graph", "Read a graph saved from the Graph tab: its tables (kind, focus, and, when known, grain with its basis, rows, bytes, last_write and late from the cached size and history reads) and edges (kind, family: flow, reference or meaning, source, target, status, join columns). The name may be typed (Returns graph) or stored (Returns_graph). json gives every field, with positions.",
+@tool("get_graph", "Read a graph saved from the Graph tab: its tables (kind, focus, and, when known, grain with its basis, rows, bytes, last_write and late from the cached size and history reads) and edges (kind, family: flow, reference or meaning, source, target, status, join columns, and for a reference edge its crow's-foot cardinality: the end at each table that is known, with its basis). The name may be typed (Returns graph) or stored (Returns_graph). json gives every field, with positions.",
       obj({"name": NAME, "format": {"type": "string", "enum": ["text", "json"], "description": "text (default, compact) or json"}}, ("name",)))
 def get_graph(ctx, args):
     data = _run(graphs.load_graph, args["name"])
@@ -95,6 +121,7 @@ def get_graph(ctx, args):
     nodes, edges = _nodes_of(data), _edges_of(data)
     pos = {n["data"]["id"]: n.get("position") for n in data.get("nodes") or [] if isinstance(n, dict) and isinstance(n.get("data"), dict)}
     card = _card_facts(ctx, [n["id"] for n in nodes])
+    ends = _cardinalities(ctx, edges)
     if args.get("format") == "json":
         return text(json.dumps({
             "name": info["name"], "title": data.get("name"), "revision": info["revision"], "by": info["by"], "saved_at": data.get("saved_at"),
@@ -103,7 +130,7 @@ def get_graph(ctx, args):
                        **({"pinned": True} if n.get("pinned") else {}), **_facts_json(card.get(n["id"], {})), "x": (pos.get(n["id"]) or {}).get("x"), "y": (pos.get(n["id"]) or {}).get("y")}
                       for n in nodes],
             "edges": [{k: v for k, v in {"id": e.get("id"), "kind": e.get("kind"), "source": e.get("source"), "target": e.get("target"),
-                                         "family": family_of(e.get("kind")), "status": e.get("status"), "directed": e.get("directed"), "bidir": e.get("bidir") or None,
+                                         "family": family_of(e.get("kind")), "cardinality": ends.get(e.get("id")), "status": e.get("status"), "directed": e.get("directed"), "bidir": e.get("bidir") or None,
                                          "columns": e.get("child_columns"), "parent_columns": e.get("parent_columns"),
                                          "note": e.get("note") or None}.items() if v is not None} for e in edges]},
             separators=(",", ":")))
@@ -117,6 +144,7 @@ def get_graph(ctx, args):
         arrow = "<->" if e.get("bidir") else ("->" if e.get("directed", True) else "--")
         keys = e.get("label") or ""
         lines.append(f"  {e.get('source')} {arrow} {e.get('target')}  {e.get('kind')} ({family_of(e.get('kind')) or '?'}) {e.get('status') or ''}".rstrip() + (f" ({keys})" if keys else "")
+                     + (_ends_text(ends[e["id"]], e) if e.get("id") in ends else "")
                      + (f" note: {e['note']}" if e.get("note") else ""))
     return text("\n".join(lines))
 
@@ -174,7 +202,9 @@ def derive(ctx, tables: list[str]) -> tuple[list[dict], dict[str, dict], list[st
     for t in tables:
         node = next((n for n in relations_of(t).get("nodes", []) if n["id"] == t), {})
         facts[t] = {"id": t, "kind": node.get("kind", "table"), "self_ref": node.get("self_ref"), "self_ref_last_seen": node.get("self_ref_last_seen")}
-    return graphs.graph_edges(rels), facts, notes
+    edges = graphs.graph_edges(rels)
+    ends = _cardinalities(ctx, edges, fetch=True)  # both ends were just read, so this costs no new call
+    return [{**e, "cardinality": ends[e["id"]]} if e["id"] in ends else e for e in edges], facts, notes
 
 
 def _lonely(tables: list[str], edges: list[dict]) -> list[str]:

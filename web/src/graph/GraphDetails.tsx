@@ -6,6 +6,7 @@ import { keyDetail, rankKeys } from '../canvas/linking/joinKeys'
 import type { EdgeFlow, GraphEdge, JoinKey, Producer, RelationshipStatus } from '../api/types'
 import { fetchCurrentEdge, messageOf, useGraphActions } from './actions'
 import { KIND_LABEL } from './edgeStyles'
+import { EdgeCardinality } from './EdgeEnds'
 import { EdgeFilterBoxes, EdgeFrom, EdgeLegend } from './EdgeFamilies'
 import { fmtAge, fmtTime, lastPart } from './format'
 import { useGraphStore } from './graphStore'
@@ -218,6 +219,7 @@ function EdgeDetails({ edge }: { edge: FlowEdge }) {
     <div>
       <EdgeBody info={info} />
       <EdgeFrom info={info} />
+      <EdgeCardinality info={info} />
       <EdgeGrainDetails edge={edge} />
       <EdgeProvenance info={info} />
       <EdgeReview key={edge.id} info={info} />

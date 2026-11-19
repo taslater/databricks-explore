@@ -156,3 +156,14 @@ def test_get_graph_has_the_grain_and_the_cached_size_and_freshness_of_each_table
     assert "grain" not in metrics and "rows" not in metrics
     text = agent.ok("get_graph", name="lake")
     assert "per order_id, 12,100,000 rows" in text and "late)" in text
+
+
+def test_get_graph_reports_the_crows_foot_ends_of_reference_edges_and_nothing_for_flow(agent):
+    agent.ok("create_graph", name="Ends", tables=[ITEMS, ORDERS, CUSTOMERS, VIEW])
+    j = graph_json(agent, "Ends")
+    by = {(e["kind"], e["source"], e["target"]): e for e in j["edges"]}
+    fk = by[("fk", ITEMS, ORDERS)]["cardinality"]
+    assert fk["source"]["end"] == "zero_many" and fk["target"]["end"] in ("one", "zero_one") and "sentence" in fk
+    assert "cardinality" not in by[("view_dep", ORDERS, VIEW)]  # only reference edges have ends
+    text = agent.ok("get_graph", name="Ends")
+    assert f"{ITEMS} -> {ORDERS}  fk (reference) derived (order_id) [order_items o<, orders " in text

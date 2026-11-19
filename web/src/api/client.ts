@@ -88,6 +88,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T
 }
 
+/** The crow's-foot ends of reference edges, by edge id (null where no end is known). Reads keys and nullability, never the warehouse. */
+export const getCardinality = (edges: Array<{ id: string; kind: string; source: string; target: string }>) =>
+  request<{ cardinality: Record<string, import('./types').Cardinality | null> }>('POST', '/api/relationships/cardinality', { edges }).then((r) => r.cardinality)
+
 const get = <T>(path: string) => request<T>('GET', path)
 const post = <T>(path: string, body: unknown) => request<T>('POST', path, body)
 const patch = <T>(path: string, body: unknown) => request<T>('PATCH', path, body)

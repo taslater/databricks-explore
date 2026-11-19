@@ -1,5 +1,6 @@
 import { BaseEdge, getBezierPath, type EdgeProps } from '@xyflow/react'
-import { edgeStyle, isInferred, type EdgeFamily } from './edgeStyles'
+import { edgeStyle, FAMILY_STYLE, isInferred, type EdgeFamily } from './edgeStyles'
+import { EdgeEnd } from './EdgeEnds'
 import { EdgeGrainGlyph } from './NodeFacts'
 import type { FlowEdge } from './types'
 
@@ -8,6 +9,9 @@ export const EDGE_INTERACTION_WIDTH = 32
 
 /** Rejected edges are barely there. */
 const REJECTED_OPACITY = 0.3
+
+/** An end is drawn in the reference color and fades with its line. */
+const endLook = (faded?: boolean, rejected?: boolean) => ({ stroke: FAMILY_STYLE.reference.stroke, width: 1.2, opacity: faded ? 0.2 : rejected ? REJECTED_OPACITY : 1 })
 
 function makeEdge(family: EdgeFamily, superseded = false) {
   function Edge({
@@ -38,6 +42,12 @@ function makeEdge(family: EdgeFamily, superseded = false) {
             opacity: data?.faded ? 0.2 : rejected ? REJECTED_OPACITY : 1,
           }}
         />
+        {family === 'reference' && data?.cardinality && (
+          <>
+            {data.cardinality.source && <EdgeEnd x={sourceX} y={sourceY} side={sourcePosition} end={data.cardinality.source.end} {...endLook(data.faded, rejected)} />}
+            {data.cardinality.target && <EdgeEnd x={targetX} y={targetY} side={targetPosition} end={data.cardinality.target.end} {...endLook(data.faded, rejected)} />}
+          </>
+        )}
         <EdgeGrainGlyph id={id} change={data?.grainChange} x={labelX} y={labelY} faded={data?.faded} />
       </>
     )

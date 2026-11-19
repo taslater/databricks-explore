@@ -16,6 +16,7 @@ import {
   type EdgeFamily,
   type KindStyle,
 } from './edgeStyles'
+import { hasEnds, useCardinality } from './EdgeEnds'
 import { useGraphStore } from './graphStore'
 import type { GraphEdge } from '../api/types'
 
@@ -82,6 +83,7 @@ export function EdgeLegend() {
     () => legendOf(edges.map((e) => e.data!.info).filter((info) => edgeShown(info, filters))),
     [edges, filters],
   )
+  const ends = hasEnds(useCardinality().data) && families.includes('reference')
   if (families.length === 0 && !inferred && !superseded) return null
   return (
     <div className="edge-legend" aria-label="Legend">
@@ -95,6 +97,11 @@ export function EdgeLegend() {
         <div className="kind-filter">
           <Swatch style={edgeStyle('reference', true)} />
           dashed: inferred or proposed
+        </div>
+      )}
+      {ends && (
+        <div className="kind-filter" title="Drawn only where keys and nullability say so. Click an edge for the reason.">
+          ends: || exactly one, o| zero or one, o&lt; zero or more
         </div>
       )}
       {superseded && (

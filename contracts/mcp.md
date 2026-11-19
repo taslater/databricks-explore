@@ -68,7 +68,7 @@ All of these read the app's connection. Catalog data comes from the local cache 
 
 ## Tools: relationships and mining
 
-Every edge kind belongs to a **family**: `flow` (`lineage`, `view_dep`: data moves from source to target), `reference` (`fk`, `join_mined`, `manual`: a key identifies a row elsewhere) or `meaning` (`sketch`, `concept_link`, `ontology`). `get_graph` and `lineage` report it next to the kind. Only flow edges set a graph's left-to-right order.
+Every edge kind belongs to a **family**: `flow` (`lineage`, `view_dep`: data moves from source to target), `reference` (`fk`, `join_mined`, `manual`: a key identifies a row elsewhere) or `meaning` (`sketch`, `concept_link`, `ontology`). `get_graph` and `lineage` report it next to the kind. `get_graph` also gives each reference edge's crow's-foot `cardinality` (`contracts/api.md`, `POST /api/relationships/cardinality`): the end at each table that is known, with its basis, and in text `[orders o<, customers ||]`. Only flow edges set a graph's left-to-right order.
 
 | Tool | Input | Output |
 | --- | --- | --- |
@@ -180,7 +180,7 @@ A saved graph is a diagram saved from the Graph tab: `data/diagrams/<name>.json`
 | Tool | Input | Output |
 | --- | --- | --- |
 | `list_graphs` | none | `name: N tables, M edges, revision R (by), saved <time>` per graph, plus `named 'Returns graph'` when the title differs from the stored name |
-| `get_graph` | `*name`, `format` (`text` default, `json`) | Text: the header (counts, revision, who wrote last, saved time), the focus schema, one line per table (`catalog.schema.table [kind] focus pinned`) and one per edge (`source -> target  kind (family) status (join columns)`, the family being `flow`, `reference` or `meaning`; `<->` for lineage both ways). The Graph's filters are not saved with a graph, so there are none to report. `json`: `{name, title, revision, by, saved_at, focus_schema, nodes: [{table, kind, focus?, pinned?, x, y}], edges: [{id, kind, family, source, target, status, directed, bidir?, columns?, parent_columns?, note?}]}`, compact |
+| `get_graph` | `*name`, `format` (`text` default, `json`) | Text: the header (counts, revision, who wrote last, saved time), the focus schema, one line per table (`catalog.schema.table [kind] focus pinned`) and one per edge (`source -> target  kind (family) status (join columns)`, the family being `flow`, `reference` or `meaning`; `<->` for lineage both ways). The Graph's filters are not saved with a graph, so there are none to report. `json`: `{name, title, revision, by, saved_at, focus_schema, nodes: [{table, kind, focus?, pinned?, x, y}], edges: [{id, kind, family, cardinality?, source, target, status, directed, bidir?, columns?, parent_columns?, note?}]}`, compact |
 | `create_graph` | `*name`, `*tables` (1-60), `focus` | Saves a graph with a node for each table and an edge for each relationship the app knows between two of them. An existing name is an error. Needs a connected profile |
 | `update_graph` | `*name`, `add`, `remove`, `relayout` | Adds or removes tables (their edges go with them), derives the edges again for the new set, keeps the positions of tables that stay unless `relayout`, and places added tables clear of them. Removing every table is an error (use `delete_graph`). Needs a connected profile |
 | `rename_graph` | `*name`, `*new_name` | Renames the graph (and the title inside the file). A taken name is an error |

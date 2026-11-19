@@ -21,6 +21,7 @@ import { ConceptNode } from './ConceptNode'
 import { useGraphActions } from './actions'
 import { deriveFlow } from './derive'
 import { EDGE_TYPES } from './edges'
+import { useCardinality, withCardinality } from './EdgeEnds'
 import { EDGE_COLORS } from './format'
 import { useGraphStore } from './graphStore'
 import { GraphToolbar } from './GraphToolbar'
@@ -125,7 +126,11 @@ function GraphCanvas() {
     () => [...withNodeFacts(withCertification(flow.nodes, certification.data), nodeFacts.data), ...overlay.nodes],
     [flow.nodes, overlay.nodes, certification.data, nodeFacts.data],
   )
-  const drawnEdges = useMemo(() => [...withGrainChanges(flow.edges, nodeFacts.data), ...overlay.edges], [flow.edges, overlay.edges, nodeFacts.data])
+  const ends = useCardinality()
+  const drawnEdges = useMemo(
+    () => [...withCardinality(withGrainChanges(flow.edges, nodeFacts.data), ends.data), ...overlay.edges],
+    [flow.edges, overlay.edges, nodeFacts.data, ends.data],
+  )
 
   // Layout and fit need real node sizes, so they wait until every visible node has been measured.
   useEffect(() => {
