@@ -430,6 +430,38 @@ tr.stale td {
   color: var(--accent);
 }
 
+/* Object type chips under the filter box. */
+.pick-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0;
+}
+
+.pick-type {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pick-type:hover {
+  background: #eef6ff;
+}
+
+.pick-type.on {
+  border-color: var(--accent);
+  background: #ddf4ff;
+  color: var(--accent);
+}
+
+.pick-type.absent:not(.on) {
+  opacity: 0.45;
+}
+
 .pick-hit {
   background: #fff1a8;
   color: inherit;

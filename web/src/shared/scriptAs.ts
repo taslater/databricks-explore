@@ -64,6 +64,11 @@ export function describeHistorySql(fullName: string): string {
   return `DESCRIBE HISTORY ${quoteFullName(fullName)}`
 }
 
+/** DESCRIBE FUNCTION EXTENDED: the signature, body and owner of a user-defined function. */
+export function describeFunctionSql(fullName: string): string {
+  return `DESCRIBE FUNCTION EXTENDED ${quoteFullName(fullName)}`
+}
+
 /** SHOW CREATE TABLE; Databricks accepts it for views too. */
 export function showCreateSql(fullName: string): string {
   return `SHOW CREATE TABLE ${quoteFullName(fullName)}`

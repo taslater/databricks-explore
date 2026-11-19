@@ -148,6 +148,11 @@ def objects():
     return jsonify(ex().objects(request.args["catalog"], request.args["schema"], refresh()))
 
 
+@app.get("/api/functions")
+def functions():
+    return jsonify(ex().functions(request.args["catalog"], request.args["schema"], refresh()))
+
+
 @app.get("/api/search")
 def search():
     e = ex()
