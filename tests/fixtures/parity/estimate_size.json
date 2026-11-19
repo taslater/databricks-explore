@@ -1,0 +1,52 @@
+{
+ "note": "Python: graphs.estimate_size. TypeScript: estimateSize in web/src/graph/layout.ts.",
+ "cases": [
+  {
+   "name": "one short line",
+   "input": {
+    "lines": [
+     "a"
+    ]
+   },
+   "expected": [
+    60.0,
+    32.0
+   ]
+  },
+  {
+   "name": "two lines",
+   "input": {
+    "lines": [
+     "orders",
+     "main.sales"
+    ]
+   },
+   "expected": [
+    86.0,
+    48.0
+   ]
+  },
+  {
+   "name": "a long line is capped",
+   "input": {
+    "lines": [
+     "a_very_long_table_name_that_goes_on_and_on_and_on_and_on_and_on"
+    ]
+   },
+   "expected": [
+    240.0,
+    32.0
+   ]
+  },
+  {
+   "name": "no lines",
+   "input": {
+    "lines": []
+   },
+   "expected": [
+    60.0,
+    16.0
+   ]
+  }
+ ]
+}

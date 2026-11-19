@@ -250,7 +250,7 @@ def adapt_edge(r: dict) -> dict:
 
 
 def graph_edges(rels: list[dict]) -> list[dict]:
-    """Relationships as graph edges. Lineage seen in both directions is one `bidir` edge with the id `lineage:<a><-><b>` (names sorted)."""
+    """Relationships as graph edges (web/src/graph/relationships.ts toGraphEdges is the twin; tests/test_parity.py runs both on the same cases). Lineage seen in both directions is one `bidir` edge with the id `lineage:<a><-><b>` (names sorted)."""
     out, lineage = [], {}
     for r in rels:
         info = adapt_edge(r)
@@ -271,6 +271,8 @@ def graph_edges(rels: list[dict]) -> list[dict]:
             merged["bidir"] = True
         merged["last_seen_by_dir"][direction] = info.get("last_seen", "")
         merged["last_seen"] = max(filter(None, [merged.get("last_seen"), info.get("last_seen")]), default=None) or merged.get("last_seen")
+        if info.get("status") != "superseded" and merged.get("status") == "superseded":  # superseded only when every direction is (relationships.ts toGraphEdges)
+            merged["status"] = info["status"]
         merged["patch_ids"] = [*merged["patch_ids"], *info["patch_ids"]]
         merged["note"] = merged.get("note") or info.get("note", "")
     return out
@@ -279,20 +281,23 @@ def graph_edges(rels: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------- layout (the Graph's rules, left to right)
 
 RANK_SEP, NODE_SEP, COMPONENT_GAP, CLEAR = 110, 24, 60, 16
+KID_GAP, KID_ROW_OFFSET, KID_ROW_MIN_GAP = 24, 90, 40  # the row of reference-only tables under the flow (web/src/graph/layout.ts has the same numbers)
 
 
 def estimate_size(lines: list[str]) -> tuple[float, float]:
-    """The size the page estimates for a node before React Flow measures it (web/src/graph/layout.ts estimateSize)."""
+    """The size the page estimates for a node before React Flow measures it (web/src/graph/layout.ts estimateSize keeps the same numbers; tests/test_parity.py checks both)."""
     longest = max([0, *(len(l) for l in lines)])
     return float(min(240, max(60, round(longest * 6.8) + 18))), float(len(lines) * 16 + 16)
 
 
-def layout_positions(sizes: dict[str, tuple[float, float]], edges: list[tuple[str, str, str]]) -> dict[str, tuple[float, float]]:
+def layout_positions(sizes: dict[str, tuple[float, float]], edges: list[tuple[str, str, str]], focus: Optional[str] = None) -> dict[str, tuple[float, float]]:
     """Top-left positions for nodes (id -> (width, height)) and edges (source, target, kind), flowing left to right.
 
-    Lineage and view dependencies set the columns (a source is left of what is built from it). A node with only
-    references (foreign keys, joins) joins the column of the node it refers to or is referred by. Parts of the graph
-    with no edge between them are stacked top to bottom. Deterministic: the order of `sizes` breaks every tie."""
+    The same rules as the page's layout (web/src/graph/layout.ts; tests/test_parity.py checks the rules both keep, not the positions, since the page uses ELK).
+    Lineage and view dependencies set the columns (a source is left of what is built from it). A table with only references
+    (foreign keys, joins, meaning links) hangs in a row under the flow, centered under the table at the other end of its first edge,
+    unless it is the `focus` or the part has no flow at all. Parts of the graph with no edge between them are stacked top to bottom.
+    Deterministic: the order of `sizes` breaks every tie."""
     ids = list(sizes)
     index = {i: n for n, i in enumerate(ids)}
     live = [(s, t, k) for s, t, k in edges if s in index and t in index and s != t]
@@ -312,37 +317,28 @@ def layout_positions(sizes: dict[str, tuple[float, float]], edges: list[tuple[st
     top = 0.0
     for members in parts.values():
         mset = set(members)
-        flow = [(s, t) for s, t, k in live if s in mset and k in LINEAGE_FLOW]
-        refs = [(s, t) for s, t, k in live if s in mset and k not in LINEAGE_FLOW]
-        rank = {i: 0 for i in members}
-        for _ in range(len(members)):  # longest path; a cycle stops growing at the part's size
+        mine = [(s, t, k) for s, t, k in live if s in mset]
+        flowing = {i for s, t, k in mine if k in LINEAGE_FLOW for i in (s, t)}
+        touched = {i for s, t, _ in mine for i in (s, t)}
+        kids = {i for i in touched - flowing if i != focus}  # tables with only references
+        if len(kids) == len(members):  # a part with no flow and no focus has nothing for its row to hang under
+            kids = set()
+        main = [i for i in members if i not in kids]
+        flow = [(s, t) for s, t, k in mine if k in LINEAGE_FLOW and s not in kids and t not in kids]
+        rank = {i: 0 for i in main}
+        for _ in range(len(main)):  # longest path; a cycle stops growing at the part's size
             moved = False
             for s, t in flow:
-                if rank[s] + 1 > rank[t] and rank[s] + 1 < len(members):
+                if rank[s] + 1 > rank[t] and rank[s] + 1 < len(main):
                     rank[t] = rank[s] + 1
                     moved = True
             if not moved:
                 break
-        touched = {i for e in flow for i in e}
-        settled = set(touched)
-        pending = [i for i in members if i not in settled]
-        while pending and settled:  # a reference-only node takes the column of a partner that has one
-            nxt = []
-            for i in pending:
-                partner = next((b if a == i else a for a, b in refs if i in (a, b) and (b if a == i else a) in settled), None)
-                if partner is None:
-                    nxt.append(i)
-                else:
-                    rank[i] = rank[partner]
-                    settled.add(i)
-            if len(nxt) == len(pending):
-                break
-            pending = nxt
         columns: dict[int, list[str]] = {}
-        for i in members:
+        for i in main:
             columns.setdefault(rank[i], []).append(i)
-        nbrs: dict[str, list[str]] = {i: [] for i in members}
-        for a, b in flow + refs:
+        nbrs: dict[str, list[str]] = {i: [] for i in main}
+        for a, b in flow:
             nbrs[a].append(b)
             nbrs[b].append(a)
         placed: dict[str, float] = {}
@@ -362,14 +358,32 @@ def layout_positions(sizes: dict[str, tuple[float, float]], edges: list[tuple[st
         tallest = max(heights.values())
         x = 0.0
         bottom = top
+        here: dict[str, tuple[float, float]] = {}
         for r in sorted(order):
             y = top + (tallest - heights[r]) / 2
             for i in order[r]:
-                out[i] = (x + (widths[r] - sizes[i][0]) / 2, y)
+                here[i] = (x + (widths[r] - sizes[i][0]) / 2, y)
                 y += sizes[i][1] + NODE_SEP
             x += widths[r] + RANK_SEP
             bottom = max(bottom, top + (tallest - heights[r]) / 2 + heights[r])
-        top = bottom + COMPONENT_GAP
+        under: dict[Optional[str], list[str]] = {}
+        for i in members:  # a kid hangs under the table at the other end of its first edge
+            if i in kids:
+                first = next((s, t) for s, t, _ in mine if i in (s, t))
+                other = first[1] if first[0] == i else first[0]
+                under.setdefault(other if other in here else None, []).append(i)
+        middle = (min(p[0] for p in here.values()) + max(p[0] + sizes[i][0] for i, p in here.items())) / 2
+        edge = float("-inf")
+        for child, group in sorted(under.items(), key=lambda kv: here[kv[0]][0] + sizes[kv[0]][0] / 2 if kv[0] else middle):
+            centre = here[child][0] + sizes[child][0] / 2 if child else middle
+            width = sum(sizes[k][0] for k in group) + KID_GAP * (len(group) - 1)
+            kx = max(centre - width / 2, edge + KID_GAP)
+            for k in group:
+                here[k] = (kx, bottom + max(KID_ROW_OFFSET - sizes[k][1] / 2, KID_ROW_MIN_GAP))
+                kx += sizes[k][0] + KID_GAP
+            edge = kx - KID_GAP
+        out.update(here)
+        top = max(y + sizes[i][1] for i, (_, y) in here.items()) + COMPONENT_GAP
     return out
 
 
@@ -420,7 +434,7 @@ def build_body(name: str, nodes: list[dict], edges: list[dict], previous: Option
     sizes = {n["id"]: estimate_size([label[n["id"]], *([n["id"].rsplit(".", 1)[0]] if external[n["id"]] else []),
                                      *([f"via {via[n['id']]}"] if via.get(n["id"]) else [])]) for n in nodes}
     load = {i: estimate_size([label[i], i.rsplit(".", 1)[0]]) for i in label}  # the size the page assumes when it reads the file
-    fresh = graph_lens.model_layout(sizes, edges) if lens == "model" else layout_positions(sizes, [(e["source"], e["target"], e["kind"]) for e in edges])
+    fresh = graph_lens.model_layout(sizes, edges) if lens == "model" else layout_positions(sizes, [(e["source"], e["target"], e["kind"]) for e in edges], focus["id"] if focus else None)
     kept = {}
     if previous and not relayout:
         for i, (x, y) in prior.items():

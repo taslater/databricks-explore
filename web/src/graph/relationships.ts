@@ -40,6 +40,7 @@ function adapt(r: Relationship): GraphEdge {
  * Lineage seen in both directions arrives as two directed edges. They become one `bidir` edge with
  * the legacy id `lineage:<a><-><b>` (names sorted), so saved diagrams and re-expansion agree on ids.
  */
+// Python twin: graphs.graph_edges (tests/test_parity.py and web/src/parity.test.ts run both on the same cases).
 export function toGraphEdges(rels: Relationship[]): GraphEdge[] {
   const out: GraphEdge[] = []
   const lineage = new Map<string, GraphEdge>()

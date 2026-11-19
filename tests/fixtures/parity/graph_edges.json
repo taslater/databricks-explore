@@ -1,0 +1,507 @@
+{
+ "note": "Python: graphs.graph_edges. TypeScript: toGraphEdges in web/src/graph/relationships.ts. Lineage seen both ways is one bidir edge; it is superseded only when every direction is.",
+ "cases": [
+  {
+   "name": "lineage in both directions is one bidir edge, last seen kept per direction",
+   "input": {
+    "relationships": [
+     {
+      "id": "lineage:c.s.a->c.s.b",
+      "kind": "lineage",
+      "source": {
+       "table": "c.s.a"
+      },
+      "target": {
+       "table": "c.s.b"
+      },
+      "directed": true,
+      "status": "derived",
+      "note": "",
+      "provenance": {
+       "origin": "unity-catalog",
+       "fetched_at": "2026-11-01T10:00:00Z"
+      },
+      "evidence": {
+       "last_seen": "2026-11-01T00:00:00Z"
+      },
+      "day": 1
+     },
+     {
+      "id": "lineage:c.s.b->c.s.a",
+      "kind": "lineage",
+      "source": {
+       "table": "c.s.b"
+      },
+      "target": {
+       "table": "c.s.a"
+      },
+      "directed": true,
+      "status": "derived",
+      "note": "checked",
+      "provenance": {
+       "origin": "unity-catalog",
+       "fetched_at": "2026-11-01T10:00:00Z"
+      },
+      "evidence": {
+       "last_seen": "2026-11-03T00:00:00Z"
+      },
+      "day": 3
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "lineage:c.s.a<->c.s.b",
+     "source": "c.s.a",
+     "target": "c.s.b",
+     "kind": "lineage",
+     "directed": true,
+     "status": "derived",
+     "note": "checked",
+     "provenance": {
+      "origin": "unity-catalog",
+      "fetched_at": "2026-11-01T10:00:00Z"
+     },
+     "patch_ids": [
+      "lineage:c.s.a->c.s.b",
+      "lineage:c.s.b->c.s.a"
+     ],
+     "evidence": {
+      "last_seen": "2026-11-01T00:00:00Z"
+     },
+     "last_seen": "2026-11-03T00:00:00Z",
+     "bidir": true,
+     "last_seen_by_dir": {
+      "c.s.a->c.s.b": "2026-11-01T00:00:00Z",
+      "c.s.b->c.s.a": "2026-11-03T00:00:00Z"
+     }
+    }
+   ]
+  },
+  {
+   "name": "a superseded first direction does not supersede the pair",
+   "input": {
+    "relationships": [
+     {
+      "id": "lineage:c.s.a->c.s.b",
+      "kind": "lineage",
+      "source": {
+       "table": "c.s.a"
+      },
+      "target": {
+       "table": "c.s.b"
+      },
+      "directed": true,
+      "status": "superseded",
+      "note": "",
+      "provenance": {
+       "origin": "unity-catalog",
+       "fetched_at": "2026-11-01T10:00:00Z"
+      },
+      "evidence": {
+       "last_seen": "2026-11-01T00:00:00Z"
+      }
+     },
+     {
+      "id": "lineage:c.s.b->c.s.a",
+      "kind": "lineage",
+      "source": {
+       "table": "c.s.b"
+      },
+      "target": {
+       "table": "c.s.a"
+      },
+      "directed": true,
+      "status": "derived",
+      "note": "",
+      "provenance": {
+       "origin": "unity-catalog",
+       "fetched_at": "2026-11-01T10:00:00Z"
+      },
+      "evidence": {
+       "last_seen": "2026-11-02T00:00:00Z"
+      },
+      "day": 2
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "lineage:c.s.a<->c.s.b",
+     "source": "c.s.a",
+     "target": "c.s.b",
+     "kind": "lineage",
+     "directed": true,
+     "status": "derived",
+     "note": "",
+     "provenance": {
+      "origin": "unity-catalog",
+      "fetched_at": "2026-11-01T10:00:00Z"
+     },
+     "patch_ids": [
+      "lineage:c.s.a->c.s.b",
+      "lineage:c.s.b->c.s.a"
+     ],
+     "evidence": {
+      "last_seen": "2026-11-01T00:00:00Z"
+     },
+     "last_seen": "2026-11-02T00:00:00Z",
+     "bidir": true,
+     "last_seen_by_dir": {
+      "c.s.a->c.s.b": "2026-11-01T00:00:00Z",
+      "c.s.b->c.s.a": "2026-11-02T00:00:00Z"
+     }
+    }
+   ]
+  },
+  {
+   "name": "a superseded second direction does not supersede the pair",
+   "input": {
+    "relationships": [
+     {
+      "id": "lineage:c.s.a->c.s.b",
+      "kind": "lineage",
+      "source": {
+       "table": "c.s.a"
+      },
+      "target": {
+       "table": "c.s.b"
+      },
+      "directed": true,
+      "status": "derived",
+      "note": "",
+      "provenance": {
+       "origin": "unity-catalog",
+       "fetched_at": "2026-11-01T10:00:00Z"
+      },
+      "evidence": {
+       "last_seen": "2026-11-02T00:00:00Z"
+      },
+      "day": 2
+     },
+     {
+      "id": "lineage:c.s.b->c.s.a",
+      "kind": "lineage",
+      "source": {
+       "table": "c.s.b"
+      },
+      "target": {
+       "table": "c.s.a"
+      },
+      "directed": true,
+      "status": "superseded",
+      "note": "",
+      "provenance": {
+       "origin": "unity-catalog",
+       "fetched_at": "2026-11-01T10:00:00Z"
+      },
+      "evidence": {
+       "last_seen": "2026-11-01T00:00:00Z"
+      }
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "lineage:c.s.a<->c.s.b",
+     "source": "c.s.a",
+     "target": "c.s.b",
+     "kind": "lineage",
+     "directed": true,
+     "status": "derived",
+     "note": "",
+     "provenance": {
+      "origin": "unity-catalog",
+      "fetched_at": "2026-11-01T10:00:00Z"
+     },
+     "patch_ids": [
+      "lineage:c.s.a->c.s.b",
+      "lineage:c.s.b->c.s.a"
+     ],
+     "evidence": {
+      "last_seen": "2026-11-02T00:00:00Z"
+     },
+     "last_seen": "2026-11-02T00:00:00Z",
+     "bidir": true,
+     "last_seen_by_dir": {
+      "c.s.a->c.s.b": "2026-11-02T00:00:00Z",
+      "c.s.b->c.s.a": "2026-11-01T00:00:00Z"
+     }
+    }
+   ]
+  },
+  {
+   "name": "both directions superseded is superseded",
+   "input": {
+    "relationships": [
+     {
+      "id": "lineage:c.s.a->c.s.b",
+      "kind": "lineage",
+      "source": {
+       "table": "c.s.a"
+      },
+      "target": {
+       "table": "c.s.b"
+      },
+      "directed": true,
+      "status": "superseded",
+      "note": "",
+      "provenance": {
+       "origin": "unity-catalog",
+       "fetched_at": "2026-11-01T10:00:00Z"
+      },
+      "evidence": {
+       "last_seen": "2026-11-01T00:00:00Z"
+      }
+     },
+     {
+      "id": "lineage:c.s.b->c.s.a",
+      "kind": "lineage",
+      "source": {
+       "table": "c.s.b"
+      },
+      "target": {
+       "table": "c.s.a"
+      },
+      "directed": true,
+      "status": "superseded",
+      "note": "",
+      "provenance": {
+       "origin": "unity-catalog",
+       "fetched_at": "2026-11-01T10:00:00Z"
+      },
+      "evidence": {
+       "last_seen": "2026-11-01T00:00:00Z"
+      }
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "lineage:c.s.a<->c.s.b",
+     "source": "c.s.a",
+     "target": "c.s.b",
+     "kind": "lineage",
+     "directed": true,
+     "status": "superseded",
+     "note": "",
+     "provenance": {
+      "origin": "unity-catalog",
+      "fetched_at": "2026-11-01T10:00:00Z"
+     },
+     "patch_ids": [
+      "lineage:c.s.a->c.s.b",
+      "lineage:c.s.b->c.s.a"
+     ],
+     "evidence": {
+      "last_seen": "2026-11-01T00:00:00Z"
+     },
+     "last_seen": "2026-11-01T00:00:00Z",
+     "bidir": true,
+     "last_seen_by_dir": {
+      "c.s.a->c.s.b": "2026-11-01T00:00:00Z",
+      "c.s.b->c.s.a": "2026-11-01T00:00:00Z"
+     }
+    }
+   ]
+  },
+  {
+   "name": "one superseded direction alone stays superseded",
+   "input": {
+    "relationships": [
+     {
+      "id": "lineage:c.s.a->c.s.b",
+      "kind": "lineage",
+      "source": {
+       "table": "c.s.a"
+      },
+      "target": {
+       "table": "c.s.b"
+      },
+      "directed": true,
+      "status": "superseded",
+      "note": "",
+      "provenance": {
+       "origin": "unity-catalog",
+       "fetched_at": "2026-11-01T10:00:00Z"
+      },
+      "evidence": {
+       "last_seen": "2026-11-01T00:00:00Z"
+      }
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "lineage:c.s.a<->c.s.b",
+     "source": "c.s.a",
+     "target": "c.s.b",
+     "kind": "lineage",
+     "directed": true,
+     "status": "superseded",
+     "note": "",
+     "provenance": {
+      "origin": "unity-catalog",
+      "fetched_at": "2026-11-01T10:00:00Z"
+     },
+     "patch_ids": [
+      "lineage:c.s.a->c.s.b"
+     ],
+     "evidence": {
+      "last_seen": "2026-11-01T00:00:00Z"
+     },
+     "last_seen": "2026-11-01T00:00:00Z",
+     "bidir": false,
+     "last_seen_by_dir": {
+      "c.s.a->c.s.b": "2026-11-01T00:00:00Z"
+     }
+    }
+   ]
+  },
+  {
+   "name": "foreign key gets its columns, constraint and label",
+   "input": {
+    "relationships": [
+     {
+      "id": "fk:c.s.b->c.s.a",
+      "kind": "fk",
+      "source": {
+       "table": "c.s.b"
+      },
+      "target": {
+       "table": "c.s.a"
+      },
+      "directed": true,
+      "status": "derived",
+      "note": "",
+      "provenance": {
+       "origin": "unity-catalog",
+       "source_ref": "fk_b_a"
+      },
+      "evidence": null,
+      "columns": [
+       {
+        "source": "a_id",
+        "target": "id"
+       },
+       {
+        "source": "a_tenant",
+        "target": "tenant"
+       }
+      ]
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "fk:c.s.b->c.s.a",
+     "source": "c.s.b",
+     "target": "c.s.a",
+     "kind": "fk",
+     "directed": true,
+     "status": "derived",
+     "note": "",
+     "provenance": {
+      "origin": "unity-catalog",
+      "source_ref": "fk_b_a"
+     },
+     "patch_ids": [
+      "fk:c.s.b->c.s.a"
+     ],
+     "constraint": "fk_b_a",
+     "child_columns": [
+      "a_id",
+      "a_tenant"
+     ],
+     "parent_columns": [
+      "id",
+      "tenant"
+     ],
+     "label": "a_id, a_tenant"
+    }
+   ]
+  },
+  {
+   "name": "a stored join patches through its members",
+   "input": {
+    "relationships": [
+     {
+      "id": "join_mined:1",
+      "kind": "join_mined",
+      "source": {
+       "table": "c.s.a"
+      },
+      "target": {
+       "table": "c.s.c"
+      },
+      "directed": true,
+      "status": "proposed",
+      "note": "mined",
+      "provenance": {
+       "origin": "unity-catalog",
+       "fetched_at": "2026-11-01T10:00:00Z"
+      },
+      "evidence": null,
+      "members": [
+       "join_mined:1",
+       "join_mined:2"
+      ]
+     },
+     {
+      "id": "manual:7",
+      "kind": "manual",
+      "source": {
+       "table": "c.s.b"
+      },
+      "target": {
+       "table": "c.s.c"
+      },
+      "directed": true,
+      "status": "accepted",
+      "note": "",
+      "provenance": {
+       "origin": "unity-catalog",
+       "fetched_at": "2026-11-01T10:00:00Z"
+      },
+      "evidence": null
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "join_mined:1",
+     "source": "c.s.a",
+     "target": "c.s.c",
+     "kind": "join_mined",
+     "directed": true,
+     "status": "proposed",
+     "note": "mined",
+     "provenance": {
+      "origin": "unity-catalog",
+      "fetched_at": "2026-11-01T10:00:00Z"
+     },
+     "patch_ids": [
+      "join_mined:1",
+      "join_mined:2"
+     ]
+    },
+    {
+     "id": "manual:7",
+     "source": "c.s.b",
+     "target": "c.s.c",
+     "kind": "manual",
+     "directed": true,
+     "status": "accepted",
+     "note": "",
+     "provenance": {
+      "origin": "unity-catalog",
+      "fetched_at": "2026-11-01T10:00:00Z"
+     },
+     "patch_ids": [
+      "manual:7"
+     ]
+    }
+   ]
+  }
+ ]
+}

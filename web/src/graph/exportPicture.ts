@@ -4,11 +4,13 @@ import { toCanvas } from 'html-to-image'
 import type { Cardinality, GraphEdge } from '../api/types'
 import type { FactsByTable } from '../api/nodeFacts'
 import { typeLegend, type NodeColors } from './colorBy'
-import { edgeShown } from './derive'
+import { collapseGraph, type Grouping } from './collapse'
+import { deriveFlow, edgeShown } from './derive'
 import { legendOf } from './EdgeFamilies'
-import { edgeStyle, FAMILY_LABEL } from './edgeStyles'
+import { edgeStyle, familyOf, FAMILY_LABEL } from './edgeStyles'
 import { hasEnds } from './EdgeEnds'
-import type { EdgeFilters, FlowNode } from './types'
+import { traceColumnEdges, traceNodes, type ActiveTrace } from './traceDraw'
+import type { EdgeFilters, FlowEdge, FlowNode } from './types'
 
 /** One line of the picture's legend: a line sample, a color square, or text alone. */
 export type LegendItem =
@@ -28,9 +30,11 @@ export interface LegendInput {
 /** The same words as the page's legend and the MCP picture's. */
 export const ENDS_TEXT = 'ends: || exactly one, o| zero or one, o< zero or more'
 
-/** The legend of what the picture draws and nothing else: the edge families shown, dashed, the ends, the key markers, what the fill means. */
+/** (graph_export.legend is the Python twin; web/src/parity.test.ts and tests/test_parity.py run both on the same cases.) The legend of what the picture draws and nothing else: the edge families shown, dashed, the ends, the key markers, what the fill means. */
 export function pictureLegend(input: LegendInput): LegendItem[] {
-  const { families, inferred, superseded } = legendOf(input.edges.filter((e) => edgeShown(e, input.filters)))
+  const shownEdges = input.edges.filter((e) => edgeShown(e, input.filters))
+  const { families, inferred, superseded } = legendOf(shownEdges)
+  const shownEnds = Object.fromEntries(shownEdges.filter((e) => familyOf(e.kind) === 'reference').map((e) => [e.id, input.ends?.[e.id] ?? null]))
   const out: LegendItem[] = families.map((f) => {
     const s = edgeStyle(f, false)
     return { kind: 'line', text: FAMILY_LABEL[f], stroke: s.stroke, width: s.strokeWidth ?? 1.6, dash: s.strokeDasharray }
@@ -38,16 +42,46 @@ export function pictureLegend(input: LegendInput): LegendItem[] {
   const line = (text: string, s: ReturnType<typeof edgeStyle>): LegendItem => ({ kind: 'line', text, stroke: s.stroke, width: s.strokeWidth ?? 1.6, dash: s.strokeDasharray })
   if (inferred) out.push(line('dashed: inferred or proposed', edgeStyle('reference', true)))
   if (superseded) out.push(line('no longer holds', edgeStyle('flow', false, true)))
-  if (families.includes('reference') && hasEnds(input.ends)) out.push({ kind: 'text', text: ENDS_TEXT })
+  if (hasEnds(shownEnds)) out.push({ kind: 'text', text: ENDS_TEXT })
   const columns = input.nodes.filter((n) => !n.hidden && n.data.showColumns).flatMap((n) => n.data.columns ?? [])
   if (columns.some((c) => c.pk)) out.push({ kind: 'text', text: 'key icon: primary key' })
   if (columns.some((c) => c.fk)) out.push({ kind: 'text', text: 'arrow icon: foreign key' })
-  const shown = input.nodes.filter((n) => !n.hidden)
+  const shown = input.nodes.filter((n) => !n.hidden && !n.data.summary) // a collapsed group's node has a look of its own
   if (shown.length > 0) {
     const entries = input.colorBy === 'type' ? typeLegend(shown.map((n) => n.data.kind)) : (input.colors?.legend.entries ?? [])
     for (const e of entries) out.push({ kind: 'swatch', text: input.colorBy === 'type' ? e.value : `${input.colorBy}: ${e.value}`, fill: e.fill })
   }
   return out
+}
+
+export interface SceneInput {
+  nodes: FlowNode[]
+  edges: FlowEdge[]
+  columnEdges: FlowEdge[]
+  focusSchema: string | null
+  filters: EdgeFilters
+  grouping: Grouping
+  groupTags: Record<string, string>
+  trace: ActiveTrace | null
+}
+
+/**
+ * What the canvas draws, as the export reads it: the visible nodes (a collapsed group is one node, with its `summary`) and the table-level
+ * edges (a chain of pass-through views is one edge; a column trace adds its tables but its hops sit between rows, so they are not edges here).
+ */
+export function exportScene(input: SceneInput): { nodes: FlowNode[]; edges: GraphEdge[] } {
+  const traced = traceNodes(input.nodes, input.trace)
+  const view = collapseGraph({ nodes: traced, edges: input.edges, filters: input.filters, grouping: input.grouping, groupTags: input.groupTags })
+  const flow = deriveFlow({
+    nodes: view.nodes,
+    edges: view.edges,
+    columnEdges: traceColumnEdges(input.columnEdges, input.nodes, input.trace),
+    focusSchema: input.focusSchema,
+    filters: input.filters,
+    hoverId: null,
+    forceHidden: view.hidden,
+  })
+  return { nodes: flow.nodes.filter((n) => !n.hidden), edges: flow.edges.filter((e) => !e.hidden && !e.data!.info.source_column).map((e) => e.data!.info) }
 }
 
 /** The date, YYYY-MM-DD, of the oldest read among the evidence shown: the edges' provenance and the cached size reads. Null when none is dated. */

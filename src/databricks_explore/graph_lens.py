@@ -104,7 +104,7 @@ def _names(tables: list[str]) -> str:
 
 
 def roles(ids: list[str], edges: list[dict]) -> dict[str, dict]:
-    """{table: {role: fact | dimension, reason, depth}} for the tables a key reference touches. A fact references others and nothing references it."""
+    """Twin of rolesOf in web/src/graph/lens.ts (tests/test_parity.py). {table: {role: fact | dimension, reason, depth}} for the tables a key reference touches. A fact references others and nothing references it."""
     pairs = reference_pairs(edges, set(ids))
     row = depths(ids, pairs)
     out: dict[str, dict] = {}
@@ -121,7 +121,7 @@ def roles(ids: list[str], edges: list[dict]) -> dict[str, dict]:
 
 
 def model_layout(sizes: dict[str, tuple[float, float]], edges: list[dict]) -> dict[str, tuple[float, float]]:
-    """Top-left positions for the Model lens. `sizes` is {id: (width, height)}, `edges` the graph's edges (only references count).
+    """Twin of modelPart in web/src/graph/modelLayout.ts (tests/test_parity.py). Top-left positions for the Model lens. `sizes` is {id: (width, height)}, `edges` the graph's edges (only references count).
 
     Facts sit in a middle row, left to right. The tables they reference are above and below, alternating, each centered on the
     facts that reference it, so one referenced by two facts sits between them. A dimension of a dimension goes one row further out,

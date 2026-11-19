@@ -1,0 +1,278 @@
+{
+ "note": "Python: graph_export.legend. TypeScript: pictureLegend in web/src/graph/exportPicture.ts. Only the lines both sides word the same way are compared (the families, dashed, the ends); the key and fill lines differ by design. Python's lens flow is the page's All lens (flow and reference edges); model is the Model lens.",
+ "cases": [
+  {
+   "name": "flow and reference edges drawn",
+   "input": {
+    "lens": "flow",
+    "edges": [
+     {
+      "id": "l1",
+      "kind": "lineage",
+      "source": "c.s.a",
+      "target": "c.s.b",
+      "status": "derived"
+     },
+     {
+      "id": "f1",
+      "kind": "fk",
+      "source": "c.s.b",
+      "target": "c.s.c",
+      "status": "derived"
+     }
+    ],
+    "cards": {},
+    "keys": {}
+   },
+   "expected": [
+    "data flows",
+    "key reference"
+   ]
+  },
+  {
+   "name": "a proposed join adds the dashed line",
+   "input": {
+    "lens": "flow",
+    "edges": [
+     {
+      "id": "l1",
+      "kind": "lineage",
+      "source": "c.s.a",
+      "target": "c.s.b",
+      "status": "derived"
+     },
+     {
+      "id": "j1",
+      "kind": "join_mined",
+      "source": "c.s.b",
+      "target": "c.s.c",
+      "status": "proposed"
+     }
+    ],
+    "cards": {},
+    "keys": {}
+   },
+   "expected": [
+    "data flows",
+    "key reference",
+    "dashed: inferred or proposed"
+   ]
+  },
+  {
+   "name": "superseded, rejected, meaning and self edges are not drawn",
+   "input": {
+    "lens": "flow",
+    "edges": [
+     {
+      "id": "f1",
+      "kind": "fk",
+      "source": "c.s.b",
+      "target": "c.s.c",
+      "status": "derived"
+     },
+     {
+      "id": "l1",
+      "kind": "lineage",
+      "source": "c.s.a",
+      "target": "c.s.b",
+      "status": "superseded"
+     },
+     {
+      "id": "l2",
+      "kind": "lineage",
+      "source": "c.s.a",
+      "target": "c.s.c",
+      "status": "rejected"
+     },
+     {
+      "id": "s1",
+      "kind": "sketch",
+      "source": "c.s.a",
+      "target": "c.s.b",
+      "status": "derived"
+     },
+     {
+      "id": "f2",
+      "kind": "fk",
+      "source": "c.s.a",
+      "target": "c.s.a",
+      "status": "derived"
+     }
+    ],
+    "cards": {},
+    "keys": {}
+   },
+   "expected": [
+    "key reference"
+   ]
+  },
+  {
+   "name": "ends are explained when a drawn reference edge has one",
+   "input": {
+    "lens": "flow",
+    "edges": [
+     {
+      "id": "f1",
+      "kind": "fk",
+      "source": "c.s.b",
+      "target": "c.s.a",
+      "status": "derived"
+     }
+    ],
+    "cards": {
+     "f1": {
+      "source": {
+       "end": "one"
+      },
+      "target": {
+       "end": "zero_many"
+      }
+     }
+    },
+    "keys": {}
+   },
+   "expected": [
+    "key reference",
+    "ends: || exactly one, o| zero or one, o< zero or more"
+   ]
+  },
+  {
+   "name": "the model lens draws only references",
+   "input": {
+    "lens": "model",
+    "edges": [
+     {
+      "id": "l1",
+      "kind": "lineage",
+      "source": "c.s.a",
+      "target": "c.s.b",
+      "status": "derived"
+     },
+     {
+      "id": "f1",
+      "kind": "fk",
+      "source": "c.s.b",
+      "target": "c.s.c",
+      "status": "derived"
+     }
+    ],
+    "cards": {
+     "f1": {
+      "source": {
+       "end": "one"
+      },
+      "target": {
+       "end": "zero_many"
+      }
+     }
+    },
+    "keys": {}
+   },
+   "expected": [
+    "key reference",
+    "ends: || exactly one, o| zero or one, o< zero or more"
+   ]
+  },
+  {
+   "name": "a proposed reference in the model lens, no ends known",
+   "input": {
+    "lens": "model",
+    "edges": [
+     {
+      "id": "j1",
+      "kind": "join_mined",
+      "source": "c.s.a",
+      "target": "c.s.b",
+      "status": "proposed"
+     }
+    ],
+    "cards": {
+     "j1": {
+      "source": null,
+      "target": null
+     }
+    },
+    "keys": {}
+   },
+   "expected": [
+    "key reference",
+    "dashed: inferred or proposed"
+   ]
+  },
+  {
+   "name": "ends of an edge that is not drawn are not explained",
+   "input": {
+    "lens": "flow",
+    "edges": [
+     {
+      "id": "f1",
+      "kind": "fk",
+      "source": "c.s.b",
+      "target": "c.s.a",
+      "status": "derived"
+     },
+     {
+      "id": "f2",
+      "kind": "fk",
+      "source": "c.s.c",
+      "target": "c.s.a",
+      "status": "superseded"
+     }
+    ],
+    "cards": {
+     "f2": {
+      "source": {
+       "end": "one"
+      },
+      "target": {
+       "end": "zero_many"
+      }
+     }
+    },
+    "keys": {}
+   },
+   "expected": [
+    "key reference"
+   ]
+  },
+  {
+   "name": "ends on a flow edge are not explained",
+   "input": {
+    "lens": "flow",
+    "edges": [
+     {
+      "id": "l1",
+      "kind": "lineage",
+      "source": "c.s.a",
+      "target": "c.s.b",
+      "status": "derived"
+     }
+    ],
+    "cards": {
+     "l1": {
+      "source": {
+       "end": "one"
+      },
+      "target": {
+       "end": "zero_many"
+      }
+     }
+    },
+    "keys": {}
+   },
+   "expected": [
+    "data flows"
+   ]
+  },
+  {
+   "name": "nothing drawn",
+   "input": {
+    "lens": "flow",
+    "edges": [],
+    "cards": {},
+    "keys": {}
+   },
+   "expected": []
+  }
+ ]
+}
