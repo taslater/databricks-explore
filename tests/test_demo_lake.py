@@ -114,9 +114,18 @@ def test_lineage_has_every_kind_of_writer_and_file_upstreams(client):
     assert len(files) == 8
     assert [i["has_permission"] for t, i in files if t.endswith("raw_returns")] == [False]
     assert all(i["path"].startswith("s3://demo-landing/") for t, i in files if not t.endswith("raw_returns"))
-    edges = {(e["source"], e["target"]) for e in client.get(f"/api/relations?name={FACT}").json["edges"] if e["kind"] == "lineage"}
-    assert edges == {(f"{LAKE}.silver.order_lines", FACT), (f"{LAKE}.silver.v_orders_current", FACT),
-                     (FACT, f"{LAKE}.gold.fact_returns"), (FACT, f"{LAKE}.gold.daily_revenue")}
+    found = client.get(f"/api/relations?name={FACT}").json["edges"]
+    edges = {(e["source"], e["target"]) for e in found if e["kind"] == "lineage"}
+    assert edges == {(f"{LAKE}.silver.order_lines", FACT), (f"{LAKE}.silver.v_orders_current", FACT), (FACT, f"{LAKE}.gold.fact_returns")}
+    # the materialized view reads the fact in its SQL, so that pair is one view-dependency edge (#19), not a lineage edge
+    assert {(e["source"], e["target"]) for e in found if e["kind"] == "view_dep"} == {(FACT, f"{LAKE}.gold.daily_revenue")}
+    assert not any(e.get("superseded") for e in found)
+
+
+def test_no_lake_edge_is_superseded(client):
+    for t in demo_lake.TABLES:
+        edges = client.get("/api/relations", query_string={"name": t}).json["edges"]
+        assert not [e["id"] for e in edges if e.get("superseded")], t
 
 
 def test_table_lineage_rows_carry_statement_ids_and_text(client):
