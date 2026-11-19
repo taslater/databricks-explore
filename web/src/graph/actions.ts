@@ -9,6 +9,7 @@ import type { CanvasConnector, CanvasWindow, GraphEdge } from '../api/types'
 import { schemaOf } from './format'
 import { useGraphStore } from './graphStore'
 import { columnLevel, columnsOf } from './columns'
+import { runColumns } from './columnsRun'
 import { isPlaceholder } from './format'
 import { openSqlInCanvas } from '../ask/canvasAction'
 import { JOIN_KEYS_STALE_MS } from '../api/hooks'
@@ -231,15 +232,17 @@ export function useGraphActions() {
     }
 
     /** The keys level on every table node, or columns off for all. The choice stays on for nodes added later. */
-    async function setAllColumns(show: boolean) {
+    async function setAllColumns(show: boolean, stop?: () => boolean) {
       useGraphStore.getState().setColumnsOn(show)
-      const ids = useGraphStore.getState().nodes.filter((n) => !isPlaceholder(n.id)).map((n) => n.id)
-      for (const id of ids) {
-        useGraphStore.getState().setAllColumns(id, false)
-        if (show) await showColumns(id)
-        else useGraphStore.getState().setShowColumns(id, false)
-      }
-      relayoutSoon()
+      await runColumns({
+        show,
+        ids: () => useGraphStore.getState().nodes.filter((n) => !isPlaceholder(n.id)).map((n) => n.id),
+        reset: (id) => useGraphStore.getState().setAllColumns(id, false),
+        load: showColumns,
+        hide: (id) => useGraphStore.getState().setShowColumns(id, false),
+        stop,
+      })
+      if (!stop?.()) relayoutSoon()
     }
 
     /** Re-reads everything on screen: table edges for every node, column edges for the ones showing columns. */

@@ -2,6 +2,7 @@
 import { useEffect, useMemo } from 'react'
 import { columnLevel } from './columns'
 import { useGraphActions } from './actions'
+import { columnsBusy } from './columnsRun'
 import { useGraphStore } from './graphStore'
 import { anyOverlap, graphRoles, isModified, LENS_HINT, LENS_LABEL, LENSES } from './lens'
 import { layoutInput } from './layoutInput'
@@ -27,10 +28,10 @@ export function LensSwitch() {
       const keys = request === 'keys'
       const tables = useGraphStore.getState().nodes.filter((n) => !n.id.startsWith('ph:'))
       const needed = keys ? tables.some((n) => columnLevel(n.data) !== 'keys') : tables.some((n) => n.data.showColumns)
-      if (needed) {
-        await actions.setAllColumns(keys)
-        await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
-      }
+      // A run for the lens before this one may still be loading columns; it ends at its next table, and this one follows it.
+      if (needed || columnsBusy()) await actions.setAllColumns(keys, () => !live)
+      // Tables the lens shows again were measured at the level they had when they were last drawn; give them the time to be measured as they are now.
+      if (live) await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
       if (!live) return
       useGraphStore.getState().finishLensColumns()
       // Positions that came back were made for the sizes the nodes had then. When they no longer fit, lay the graph out again.
