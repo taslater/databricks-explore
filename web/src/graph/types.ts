@@ -1,5 +1,5 @@
 import type { Edge, Node } from '@xyflow/react'
-import type { Cardinality, GraphEdge, GraphEdgeKind } from '../api/types'
+import type { Cardinality, FileUpstream, GraphEdge, GraphEdgeKind, SelfRefFk } from '../api/types'
 import type { EdgeTransform } from '../api/edgeTransforms'
 import type { NodeFacts } from '../api/nodeFacts'
 import type { ColumnInfo } from './columns'
@@ -18,6 +18,9 @@ export type TableNodeData = {
   pinned?: boolean
   selfRef: boolean
   selfRefLastSeen?: string
+  /** Self-referencing foreign keys, and files the table is loaded from: the markers of nodeMarks.ts. */
+  selfRefFks?: SelfRefFk[]
+  files?: FileUpstream[]
   /** The object does not exist. Drawn dashed with no fill, never expanded. */
   missing?: boolean
   missingReason?: string
@@ -33,11 +36,17 @@ export type TableNodeData = {
   showSchema?: boolean
   external?: boolean
   via?: string
+  /** Neighbors not on the graph, upstream and downstream (set by withNeighborCounts, never saved). */
+  more?: { up: number; down: number }
+  /** Side keys (`r`, or `r:column` on a row) that carry edges in and out, so they anchor apart (graph/anchors.ts). */
+  anchorSplit?: string[]
   faded?: boolean
   /** The table's `system.certification_status` tag, added at draw time (concepts/certification.ts) and never saved. */
   certification?: 'certified' | 'deprecated'
   /** The grain and the size and freshness last read, added at draw time (graph/nodeFacts.ts) and never saved. */
   facts?: NodeFacts
+  /** The fill chosen by "Color by", added at draw time (graph/colorBy.ts) and never saved. Absent in type mode. */
+  fill?: string
 }
 
 export type FlowNode = Node<TableNodeData, 'table'>

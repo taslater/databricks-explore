@@ -60,13 +60,13 @@ export function EdgeEnd({ x, y, side, end, stroke, width, opacity = 1 }: { x: nu
   )
 }
 
-/** The reference edges that can have ends, as the server wants them. Column-level edges and placeholders have none. */
-export function endCandidates(edges: ReadonlyArray<FlowEdge>): Array<{ id: string; kind: string; source: string; target: string }> {
-  const out: Array<{ id: string; kind: string; source: string; target: string }> = []
+/** The reference edges that can have ends, as the server wants them: table edges and the column edges that refine them (a foreign key's column pair). Placeholders have none. */
+export function endCandidates(edges: ReadonlyArray<FlowEdge>): Array<{ id: string; kind: string; source: string; target: string; source_column?: string; target_column?: string }> {
+  const out: Array<{ id: string; kind: string; source: string; target: string; source_column?: string; target_column?: string }> = []
   for (const e of edges) {
     const i = e.data!.info
-    if (!END_KINDS.includes(i.kind) || i.source_column || i.source.startsWith('ph:') || i.target.startsWith('ph:')) continue
-    out.push({ id: i.id, kind: i.kind, source: i.source, target: i.target })
+    if (!END_KINDS.includes(i.kind) || i.source.startsWith('ph:') || i.target.startsWith('ph:')) continue
+    out.push({ id: i.id, kind: i.kind, source: i.source, target: i.target, ...(i.source_column && i.target_column && { source_column: i.source_column, target_column: i.target_column }) })
   }
   return out.slice(0, 400)
 }
@@ -75,7 +75,8 @@ export function endCandidates(edges: ReadonlyArray<FlowEdge>): Array<{ id: strin
 export function useCardinality() {
   const profile = useUiStore((s) => s.connectedProfile)
   const edges = useGraphStore((s) => s.edges)
-  const wanted = useMemo(() => endCandidates(edges), [edges])
+  const columnEdges = useGraphStore((s) => s.columnEdges)
+  const wanted = useMemo(() => endCandidates([...edges, ...columnEdges]), [edges, columnEdges])
   const key = wanted.map((e) => `${e.id}|${e.source}|${e.target}`).sort()
   return useQuery({
     queryKey: ['cardinality', profile, key],

@@ -84,6 +84,18 @@ export interface TableInfo {
 
 // ---- Relationship graph ---------------------------------------------------
 
+export interface SelfRefFk {
+  constraint?: string | null
+  columns: string[]
+  parent_columns: string[]
+}
+
+export interface FileUpstream {
+  path: string
+  readable: boolean
+  last_seen?: string | null
+}
+
 export type GraphNodeKind = string // the object's lowercased table_type; "view" for PERSISTED_VIEW; default "table"
 
 export interface GraphNode {
@@ -93,6 +105,10 @@ export interface GraphNode {
   focus?: boolean
   self_ref?: boolean
   self_ref_last_seen?: string
+  /** Foreign keys of the object that point at itself (`self_ref` is set for these too). */
+  self_ref_fks?: SelfRefFk[]
+  /** File upstreams: the table is loaded from files. `path` is empty and `readable` false when the API hides it. */
+  files?: FileUpstream[]
   /** The object does not exist (renamed or dropped). `missing_reason` says why, `renamed_to` is a table of the same schema and name elsewhere. */
   missing?: boolean
   missing_reason?: string
@@ -125,11 +141,37 @@ export interface CardinalityEnd {
   why: string
 }
 
+/** What one profiling statement measured for a reference edge A.(k) -> B.(k) (POST /api/relationships/profile/run), with its date. */
+export interface RelationshipProfile {
+  source: string
+  target: string
+  /** The key columns profiled: [column of the source, column of the target]. */
+  pairs: Array<[string, string]>
+  a_rows: number
+  a_null_rows: number
+  a_distinct_keys: number
+  b_rows: number
+  b_distinct_keys: number
+  /** Keys that appear more than once in the target. */
+  b_repeated_keys: number
+  /** Source rows (and distinct keys) whose key has no match in the target. */
+  orphan_rows: number
+  orphan_keys: number
+  /** Target keys no source row uses. */
+  unused_keys: number
+  max_fanout: number
+  p95_fanout: number
+  measured_at: string
+  sql_hash: string
+}
+
 /** The known ends of a reference edge (POST /api/relationships/cardinality). An unknown end is null, never "one". */
 export interface Cardinality {
   source: CardinalityEnd | null
   target: CardinalityEnd | null
   sentence: string
+  /** The measurement the ends come from, when the relationship was profiled. */
+  profile?: RelationshipProfile
 }
 
 /** What the graph draws and saves for one edge. The first group is the legacy shape, the second comes from /api/relationships. */

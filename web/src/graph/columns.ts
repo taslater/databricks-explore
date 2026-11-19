@@ -4,18 +4,49 @@ import type { TableInfo } from '../api/types'
 export interface ColumnInfo {
   name: string
   type: string
+  /** Part of the primary key, or of a foreign key (read from the table's constraints). Set only when true. */
+  pk?: boolean
+  fk?: boolean
 }
 
-/** A wide table shows this many columns at most, unless the user asks for all. Columns with an edge always show. */
-export const COLUMN_LIMIT = 12
+/** How many columns a node lists: none, the keys and connected ones, or all. A node's button cycles them. */
+export type ColumnLevel = 'none' | 'keys' | 'all'
+
+/** The level a node is at. `showColumns` is the node being open at all, `allColumns` the step past keys. */
+export function columnLevel(d: { showColumns?: boolean; allColumns?: boolean }): ColumnLevel {
+  return !d.showColumns ? 'none' : d.allColumns ? 'all' : 'keys'
+}
+
+/** The level after this one: none, keys, all, then none again. */
+export const nextLevel = (level: ColumnLevel): ColumnLevel => (level === 'none' ? 'keys' : level === 'keys' ? 'all' : 'none')
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+const record = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null)
+
+/** The lowercased primary key columns and foreign key columns declared in a table's constraints. */
+export function keyColumns(constraints: readonly unknown[] | undefined): { pk: Set<string>; fk: Set<string> } {
+  const pk = new Set<string>()
+  const fk = new Set<string>()
+  for (const c of constraints ?? []) {
+    const con = record(c)
+    for (const n of strings(record(con?.primary_key_constraint)?.child_columns)) pk.add(n.toLowerCase())
+    for (const n of strings(record(con?.foreign_key_constraint)?.child_columns)) fk.add(n.toLowerCase())
+  }
+  return { pk, fk }
+}
+
+/** A type in a row: its base, so `struct<a:int,b:string>` reads `struct<…>` and `decimal(10,2)` stays as it is. */
+export const baseType = (type: string): string => type.replace(/<[\s\S]*$/, '<…>')
 
 /** The columns of a `tables.get` payload, in table order. Entries without a name are dropped. */
 export function columnsOf(info: TableInfo): ColumnInfo[] {
   const out: ColumnInfo[] = []
+  const { pk, fk } = keyColumns(info.table_constraints)
   for (const c of info.columns ?? []) {
     if (typeof c.name !== 'string' || !c.name) continue
     const text = c.type_text ?? c.type_name
-    out.push({ name: c.name, type: typeof text === 'string' ? text : '' })
+    const lower = c.name.toLowerCase()
+    out.push({ name: c.name, type: typeof text === 'string' ? text : '', ...(pk.has(lower) && { pk: true }), ...(fk.has(lower) && { fk: true }) })
   }
   return out
 }
@@ -28,20 +59,22 @@ export function findColumn(columns: readonly ColumnInfo[], name: string | undefi
 }
 
 /**
- * The columns a node draws. A table of up to COLUMN_LIMIT columns shows all of them. A wider one shows the
- * columns that have an edge (`involved`) and then the first others, up to the limit, in table order.
+ * The columns a node draws. At the keys level a column earns its row by being a key (primary or foreign) or by having
+ * a visible column edge (`involved`), in table order; `all` draws every column. The rest are the `+N more` row.
  */
 export function visibleColumns(
   columns: readonly ColumnInfo[],
   involved: Iterable<string>,
   all: boolean,
 ): ColumnInfo[] {
-  if (all || columns.length <= COLUMN_LIMIT) return [...columns]
+  if (all) return [...columns]
   const wanted = new Set([...involved].map((n) => n.toLowerCase()))
-  const picked = columns.filter((c) => wanted.has(c.name.toLowerCase()))
-  const room = Math.max(0, COLUMN_LIMIT - picked.length)
-  const extra = new Set(columns.filter((c) => !wanted.has(c.name.toLowerCase())).slice(0, room))
-  return columns.filter((c) => wanted.has(c.name.toLowerCase()) || extra.has(c))
+  return columns.filter((c) => c.pk || c.fk || wanted.has(c.name.toLowerCase()))
+}
+
+/** The rows a node draws now: none while its columns are off or not yet loaded. */
+export function rowsOf(d: { columns?: ColumnInfo[]; showColumns?: boolean; allColumns?: boolean; involved?: string[] }): ColumnInfo[] {
+  return d.showColumns && d.columns ? visibleColumns(d.columns, d.involved ?? [], !!d.allColumns) : []
 }
 
 export type HandleRole = 's' | 't'

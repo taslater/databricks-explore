@@ -1,11 +1,13 @@
 // Client state for the relationship graph. Server data is in TanStack Query. This store holds only what the user has built on screen.
 import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange } from '@xyflow/react'
 import { create } from 'zustand'
-import type { GraphEdge, RelationsResponse } from '../api/types'
+import type { GraphEdge, GraphNode, RelationsResponse } from '../api/types'
 import type { ColumnInfo } from './columns'
 import { nameOf, schemaOf } from './format'
-import { computeLayout } from './layout'
+import { computeLayout, computeScopedLayout } from './layout'
 import { nodeSize, viaMap } from './derive'
+import type { NeighborSet } from './neighbors'
+import type { ColorBy } from './colorBy'
 import type { DiagramPayload } from './diagram'
 import type { DiagramRevision } from '../api/diagrams'
 import type { EdgeFilters, FlowEdge, FlowNode, Selection } from './types'
@@ -48,6 +50,8 @@ interface GraphState {
   mineDialog: boolean
   /** Draw the concepts linked to the tables on the graph (the Concepts toggle). Not part of a saved diagram. */
   showConcepts: boolean
+  /** What a node's fill means (the Color by menu). Saved with the graph as `color_by`. */
+  colorBy: ColorBy
   focusSchema: string | null
   selection: Selection
   hoverId: string | null
@@ -55,8 +59,20 @@ interface GraphState {
   status: { text: string; error: boolean }
   /** Run dagre on the next render where every visible node has been measured. */
   layoutPending: boolean
+  /** When set, the next layout only redoes the parts of the graph holding these nodes (a node's column level changed). */
+  layoutScope: string[] | null
   /** Fit the view on the next render where every visible node has been measured. */
   fitPending: boolean
+  /** Flow neighbors read for each table (neighbors.ts), for the counts at a node's sides. Never saved. */
+  neighbors: Record<string, NeighborSet>
+  /** The tables each expansion added, by `<table>|<up or down>`, so it can be collapsed. Never saved. */
+  expansions: Record<string, string[]>
+  setNeighbors: (id: string, set: NeighborSet) => void
+  recordExpansion: (key: string, ids: string[]) => void
+  /** A table's own facts from its relationships response (kind, self-reference, files), for a node that was added as a neighbor. No layout. */
+  applyNodeFacts: (node: GraphNode) => void
+  /** Takes tables off the graph, with the edges that touch them. */
+  removeNodes: (ids: string[]) => void
   /** The saved graph on screen, for live sync with agents. Null for a graph built here and never saved or loaded. */
   openDiagram: OpenDiagram | null
   /** Someone else saved the open graph while the page held unsaved changes: the page asks (Reload or Keep mine). */
@@ -83,6 +99,7 @@ interface GraphState {
   setColumnsOn: (on: boolean) => void
   setMineDialog: (open: boolean) => void
   setShowConcepts: (show: boolean) => void
+  setColorBy: (colorBy: ColorBy) => void
   /** Stores a node's columns and shows them. */
   setColumns: (id: string, columns: ColumnInfo[]) => void
   setShowColumns: (id: string, show: boolean) => void
@@ -94,7 +111,9 @@ interface GraphState {
   /** Adds the nodes and edges of one relationships response. Existing nodes and edges stay in place, but an edge already on screen takes the fresh info (status, note, evidence). */
   mergeRelations: (resp: RelationsResponse) => void
   clear: () => void
-  requestLayout: () => void
+  requestLayout: (scope?: string[]) => void
+  /** requestLayout after React Flow has measured the nodes whose size just changed. */
+  requestLayoutSoon: (scope?: string[]) => void
   runLayout: () => void
   finishFit: () => void
   loadDiagram: (payload: DiagramPayload) => void
@@ -108,14 +127,48 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   columnsOn: false,
   mineDialog: false,
   showConcepts: false,
+  colorBy: 'type',
   focusSchema: null,
   selection: null,
   hoverId: null,
   filters: DEFAULT_FILTERS,
   status: { text: '', error: false },
   layoutPending: false,
+  layoutScope: null,
   fitPending: false,
   viewport: null,
+  neighbors: {},
+  expansions: {},
+  setNeighbors: (id, found) => set({ neighbors: { ...get().neighbors, [id]: found } }),
+  recordExpansion: (key, ids) => set({ expansions: { ...get().expansions, [key]: [...new Set([...(get().expansions[key] ?? []), ...ids])] } }),
+  applyNodeFacts: (fact) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) =>
+        n.id !== fact.id
+          ? n
+          : {
+              ...n,
+              data: {
+                ...n.data,
+                kind: fact.kind,
+                ...(fact.self_ref ? { selfRef: true, selfRefLastSeen: fact.self_ref_last_seen, selfRefFks: fact.self_ref_fks } : {}),
+                ...(fact.files ? { files: fact.files } : {}),
+              },
+            },
+      ),
+    })),
+  removeNodes: (ids) =>
+    set((s) => {
+      const gone = new Set(ids)
+      const touches = (e: FlowEdge) => gone.has(e.source) || gone.has(e.target)
+      return {
+        nodes: s.nodes.filter((n) => !gone.has(n.id)),
+        edges: s.edges.filter((e) => !touches(e)),
+        columnEdges: s.columnEdges.filter((e) => !touches(e)),
+        selection: s.selection?.kind === 'node' && gone.has(s.selection.id) ? null : s.selection,
+        layoutPending: true,
+      }
+    }),
   setViewport: (viewport) => set({ viewport }),
   openDiagram: null,
   diagramChanged: null,
@@ -139,6 +192,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   setColumnsOn: (columnsOn) => set({ columnsOn }),
   setMineDialog: (mineDialog) => set({ mineDialog }),
   setShowConcepts: (showConcepts) => set({ showConcepts }),
+  setColorBy: (colorBy) => set({ colorBy }),
   setColumns: (id, columns) =>
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, columns, showColumns: true } } : n)),
@@ -183,9 +237,10 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
           if (n.self_ref) {
             nodes[idx] = {
               ...nodes[idx],
-              data: { ...nodes[idx].data, selfRef: true, selfRefLastSeen: n.self_ref_last_seen },
+              data: { ...nodes[idx].data, selfRef: true, selfRefLastSeen: n.self_ref_last_seen, selfRefFks: n.self_ref_fks },
             }
           }
+          if (n.files) nodes[idx] = { ...nodes[idx], data: { ...nodes[idx].data, files: n.files } }
           continue
         }
         nodes.push({
@@ -199,6 +254,8 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
             focus: first && !!n.focus,
             selfRef: !!n.self_ref,
             selfRefLastSeen: n.self_ref_last_seen,
+            selfRefFks: n.self_ref_fks,
+            files: n.files,
             ...(n.missing ? { missing: true, missingReason: n.missing_reason, renamedTo: n.renamed_to } : null),
           },
         })
@@ -213,7 +270,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
         edges.push({ id: e.id, source: e.source, target: e.target, data: { info: e } })
         edgeIds.add(e.id)
       }
-      return { nodes, edges, layoutPending: true }
+      return { nodes, edges, layoutPending: true, layoutScope: null }
     }),
 
   clear: () =>
@@ -226,36 +283,42 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       layoutPending: false,
       fitPending: false,
       viewport: null,
+      neighbors: {},
+      expansions: {},
       openDiagram: null,
       diagramChanged: null,
     }),
 
-  requestLayout: () => set({ layoutPending: true }),
+  requestLayout: (scope) =>
+    set((s) => ({ layoutPending: true, layoutScope: scope && (!s.layoutPending || s.layoutScope) ? [...(s.layoutScope ?? []), ...scope] : null })),
+  requestLayoutSoon: (scope) => void setTimeout(() => useGraphStore.getState().requestLayout(scope), 250),
 
   runLayout: () =>
     set((s) => {
       const via = viaMap(s.edges)
-      const positions = computeLayout(
-        s.nodes.map((n) => {
-          const size = nodeSize(n, s.focusSchema, via.get(n.id))
-          return {
-            id: n.id,
-            width: size.width,
-            height: size.height,
-            focus: n.data.focus || !!n.data.pinned,
-            x: n.position.x,
-            y: n.position.y,
-          }
-        }),
-        s.edges.map((e) => ({ source: e.source, target: e.target, kind: e.data!.info.kind })),
-      )
+      const laid = s.nodes.map((n) => {
+        const size = nodeSize(n, s.focusSchema, via.get(n.id))
+        return {
+          id: n.id,
+          width: size.width,
+          height: size.height,
+          focus: n.data.focus || !!n.data.pinned,
+          x: n.position.x,
+          y: n.position.y,
+        }
+      })
+      const links = s.edges.map((e) => ({ source: e.source, target: e.target, kind: e.data!.info.kind }))
+      // A level change only moves the parts of the graph it touches, and leaves the view where it is, unless they would then overlap.
+      const scoped = s.layoutScope ? computeScopedLayout(laid, links, s.layoutScope) : null
+      const positions = scoped ?? computeLayout(laid, links)
       return {
+        layoutScope: null,
+        fitPending: !scoped,
         nodes: s.nodes.map((n) => {
           const p = positions.get(n.id)
           return p ? { ...n, position: p } : n
         }),
         layoutPending: false,
-        fitPending: true,
       }
     }),
 
@@ -266,7 +329,9 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       nodes: payload.nodes,
       edges: payload.edges,
       columnEdges: [],
+      expansions: {},
       focusSchema: payload.focusSchema,
+      colorBy: payload.colorBy ?? 'type',
       selection: null,
       hoverId: null,
       layoutPending: false,

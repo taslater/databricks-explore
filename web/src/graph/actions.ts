@@ -8,7 +8,7 @@ import { useUiStore } from '../store/uiStore'
 import type { CanvasConnector, CanvasWindow, GraphEdge } from '../api/types'
 import { schemaOf } from './format'
 import { useGraphStore } from './graphStore'
-import { columnsOf } from './columns'
+import { columnLevel, columnsOf } from './columns'
 import { isPlaceholder } from './format'
 import { openSqlInCanvas } from '../ask/canvasAction'
 import { JOIN_KEYS_STALE_MS } from '../api/hooks'
@@ -16,6 +16,8 @@ import { joinSql, planJoins } from './joinQuery'
 import { newTableIds } from './columns'
 import { patchIds, toColumnEdges, toRelations } from './relationships'
 import { edgeShown } from './derive'
+import { makeExpansion } from './expansion'
+import { neighborSet } from './neighbors'
 import { lineagePath, pathConnectors, planSend, sendSummary, type PathDirection } from './sendSelection'
 
 export function messageOf(e: unknown): string {
@@ -61,6 +63,7 @@ export function useGraphActions() {
   const qc = useQueryClient()
 
   return useMemo(() => {
+    const expansion = makeExpansion(qc, columnsForArrivals)
     /**
      * Loads /api/relationships for one object (derived edges plus stored ones) and merges it into the graph.
      * `refresh` forces a Databricks re-read of the derived part.
@@ -86,6 +89,7 @@ export function useGraphActions() {
         )
         const before = useGraphStore.getState().nodes.map((n) => n.id)
         useGraphStore.getState().mergeRelations(resp)
+        useGraphStore.getState().setNeighbors(name, neighborSet(resp, name))
         // Errors stay visible. The legacy UI overwrote them with "loaded".
         if (resp.errors.length) useGraphStore.getState().setStatus(resp.errors.join(' | '), true)
         else useGraphStore.getState().setStatus(`loaded ${name}`)
@@ -95,6 +99,12 @@ export function useGraphActions() {
       } catch (e) {
         useGraphStore.getState().setStatus(messageOf(e), true)
       }
+    }
+
+    /** Columns for the tables that arrived since `before`, when Show columns is on. */
+    function columnsForArrivals(before: string[]) {
+      const arrived = newTableIds(useGraphStore.getState().columnsOn, before, useGraphStore.getState().nodes)
+      if (arrived.length > 0) void showColumnsOf(arrived)
     }
 
     /** Starts a new graph centered on one object. */
@@ -149,9 +159,9 @@ export function useGraphActions() {
       }
     }
 
-    /** Waits for React Flow to measure the nodes whose size just changed, then lays the graph out again. */
-    function relayoutSoon() {
-      setTimeout(() => useGraphStore.getState().requestLayout(), 250)
+    /** Waits for React Flow to measure the nodes whose size just changed, then lays out again the parts of the graph they are in (all of it with no ids). */
+    function relayoutSoon(ids?: string[]) {
+      useGraphStore.getState().requestLayoutSoon(ids)
     }
 
     /**
@@ -189,18 +199,30 @@ export function useGraphActions() {
       } catch (e) {
         useGraphStore.getState().setStatus(messageOf(e), true)
       }
-      relayoutSoon()
+      relayoutSoon([id])
     }
 
     function hideColumns(id: string) {
       useGraphStore.getState().setShowColumns(id, false)
-      relayoutSoon()
+      relayoutSoon([id])
     }
 
-    function toggleColumns(id: string) {
-      const node = useGraphStore.getState().nodes.find((n) => n.id === id)
-      if (node?.data.showColumns) hideColumns(id)
-      else void showColumns(id)
+    /** A node's column level one step on: none, keys, all, none. The level shows on the node's button. */
+    function cycleColumns(id: string) {
+      const g = useGraphStore.getState()
+      const node = g.nodes.find((n) => n.id === id)
+      if (!node) return
+      const level = columnLevel(node.data)
+      if (level === 'none') {
+        g.setAllColumns(id, false)
+        void showColumns(id)
+      } else if (level === 'keys') {
+        g.setAllColumns(id, true)
+        relayoutSoon([id])
+      } else {
+        g.setAllColumns(id, false)
+        hideColumns(id)
+      }
     }
 
     /** Columns on several nodes, one after another: each can mean a warehouse query. */
@@ -208,11 +230,12 @@ export function useGraphActions() {
       for (const id of ids) await showColumns(id)
     }
 
-    /** Columns on every table node, or off for all. The choice stays on for nodes added later. */
+    /** The keys level on every table node, or columns off for all. The choice stays on for nodes added later. */
     async function setAllColumns(show: boolean) {
       useGraphStore.getState().setColumnsOn(show)
       const ids = useGraphStore.getState().nodes.filter((n) => !isPlaceholder(n.id)).map((n) => n.id)
       for (const id of ids) {
+        useGraphStore.getState().setAllColumns(id, false)
         if (show) await showColumns(id)
         else useGraphStore.getState().setShowColumns(id, false)
       }
@@ -338,6 +361,7 @@ export function useGraphActions() {
     }
 
     return {
+      ...expansion,
       sendTables,
       sendPath,
       queryTables,
@@ -348,7 +372,7 @@ export function useGraphActions() {
       connect,
       showColumns,
       hideColumns,
-      toggleColumns,
+      cycleColumns,
       setAllColumns,
       refreshGraph,
       showColumnEdge,

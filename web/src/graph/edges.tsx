@@ -2,6 +2,8 @@ import { BaseEdge, getBezierPath, type EdgeProps } from '@xyflow/react'
 import { edgeStyle, FAMILY_STYLE, isInferred, type EdgeFamily } from './edgeStyles'
 import { EdgeEnd } from './EdgeEnds'
 import { EdgeGrainGlyph } from './NodeFacts'
+import { OrphanTick } from './OrphanTick'
+import { hasOrphans } from './relProfile'
 import { EdgeTransformGlyphs } from './EdgeTransforms'
 import type { FlowEdge } from './types'
 
@@ -48,6 +50,9 @@ function makeEdge(family: EdgeFamily, superseded = false) {
             {data.cardinality.source && <EdgeEnd x={sourceX} y={sourceY} side={sourcePosition} end={data.cardinality.source.end} {...endLook(data.faded, rejected)} />}
             {data.cardinality.target && <EdgeEnd x={targetX} y={targetY} side={targetPosition} end={data.cardinality.target.end} {...endLook(data.faded, rejected)} />}
           </>
+        )}
+        {family === 'reference' && hasOrphans(data?.cardinality) && (
+          <OrphanTick x={targetX} y={targetY} side={targetPosition} profile={data!.cardinality!.profile!} faded={data?.faded} />
         )}
         <EdgeGrainGlyph id={id} change={data?.transform?.glyphs.includes('aggregate') ? undefined : data?.grainChange} x={labelX} y={labelY} faded={data?.faded} />
         <EdgeTransformGlyphs id={id} transform={data?.transform} x={targetX} y={targetY} side={targetPosition} faded={data?.faded} />

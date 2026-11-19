@@ -27,6 +27,23 @@ const NODE_FILL: Record<string, string> = {
 
 export const nodeFill = (kind: string): string => NODE_FILL[kind] ?? '#eee'
 
+/** Light fills for "Color by", dark text stays readable on each. A value takes its slot from a hash of its text (valueColors in colorBy.ts). */
+export const PALETTE = ['#f9d5d3', '#fde7c4', '#fbf3b9', '#d4edc9', '#c9eee6', '#cfe3fa', '#e0d6f5', '#f6d3ec'] as const
+/** Values beyond the eight palette slots. */
+export const OTHER_FILL = '#d9dde1'
+/** A node with no value for what the graph is colored by. */
+export const NO_VALUE_FILL = '#ffffff'
+
+/** A small stable hash of a string (FNV-1a), the same in every graph and every session. */
+export function hashText(s: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h >>> 0
+}
+
 /** A table that does not exist yet is `ph:<uuid>`. */
 export const isPlaceholder = (fullName: string): boolean => fullName.startsWith('ph:')
 
