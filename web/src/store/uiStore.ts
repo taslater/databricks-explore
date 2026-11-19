@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { parseTypes, type TypeGroup } from '../graph/objectTypes'
 
 export type MainView = 'graph' | 'canvas' | 'concepts' | 'ask'
 
@@ -25,6 +26,14 @@ function readPickRegex(): boolean {
   }
 }
 
+function readPickTypes(): TypeGroup[] {
+  try {
+    return parseTypes(localStorage.getItem('pickTypes'))
+  } catch {
+    return []
+  }
+}
+
 /** UI-only state. Server data lives in TanStack Query (src/api/hooks.ts). */
 interface UiState {
   view: MainView
@@ -45,6 +54,8 @@ interface UiState {
   pickMode: PickMode
   /** Whether the picker's filter is a regular expression (the `.*` toggle). Remembered in localStorage like pickMode. */
   pickRegex: boolean
+  /** The object types the picker is narrowed to; empty shows everything. Remembered in localStorage like pickMode. */
+  pickTypes: TypeGroup[]
   /** Whether the Canvas tab shows the properties panel (the Details area). Not persisted. */
   canvasDetailsOpen: boolean
   /** Drill-down position in the object picker. */
@@ -58,6 +69,7 @@ interface UiState {
   setRestoreMessage: (message: string | null) => void
   setPickMode: (mode: PickMode) => void
   setPickRegex: (on: boolean) => void
+  setPickTypes: (types: TypeGroup[]) => void
   setDrill: (drill: { catalog: string | null; schema: string | null }) => void
 }
 
@@ -73,6 +85,7 @@ export const useUiStore = create<UiState>()(
       restoreMessage: null,
       pickMode: readPickMode(),
       pickRegex: readPickRegex(),
+      pickTypes: readPickTypes(),
       canvasDetailsOpen: false,
       drill: { catalog: null, schema: null },
       setView: (view) => set({ view }),
@@ -103,6 +116,14 @@ export const useUiStore = create<UiState>()(
           // Storage can be unavailable. The switch still applies for this session.
         }
         set({ pickRegex })
+      },
+      setPickTypes: (pickTypes) => {
+        try {
+          localStorage.setItem('pickTypes', JSON.stringify(pickTypes))
+        } catch {
+          // Storage can be unavailable. The choice still applies for this session.
+        }
+        set({ pickTypes })
       },
       setDrill: (drill) => set({ drill }),
     }),

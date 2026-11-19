@@ -101,12 +101,18 @@ Response: `{"fetched_at": str, "data": [{"name": str, "comment": str|null}]}`, s
 
 Response: `{"fetched_at": str, "data": [{"name": str, "full_name": "cat.sch.name", "type": str|null, "comment": str|null}]}`, sorted by `name`. Names starting with `__` (materialized-view and streaming-table backing tables) are excluded.
 
+### `GET /api/functions?catalog=<cat>&schema=<sch>`
+
+*Needs connection.* *Cached* per schema (Unity Catalog `functions.list`). Supports `?refresh=1`.
+
+Response: `{"fetched_at": str, "data": [{"name": str, "full_name": "cat.sch.name", "type": "FUNCTION", "comment": str|null}]}`, sorted by `name`. Same shape as `/api/objects`, so the picker lists both together and tells them apart by `type`.
+
 ### `GET /api/search?q=<text>`
 
 *Needs connection.* Case-insensitive substring match on the table name. No cache. Returns at most 300 results.
 
-- If a warehouse is selected, queries `system.information_schema.tables` (excluding `__`-prefixed names) and returns `"source": "information_schema"`.
-- Otherwise searches everything in the local cache, across all catalogs: every `objects.json` (schemas browsed before) and every fetched `obj/*.json` (tables opened before). The term matches the table name or the full `catalog.schema.table` name; name matches come first. It returns `"source": "tables already browsed (pick a SQL warehouse to search everything, or type the full name)"`. A table that was never browsed is not found this way; `GET /api/object?name=<catalog.schema.table>` (one `tables.get`, then cached) reads it by its full name.
+- If a warehouse is selected, queries `system.information_schema.tables` and `system.information_schema.routines` in one statement (excluding `__`-prefixed names) and returns `"source": "information_schema"`. Functions come back with `"type": "FUNCTION"`.
+- Otherwise searches everything in the local cache, across all catalogs: every `objects.json` and `functions.json` (schemas browsed before) and every fetched `obj/*.json` (tables opened before). The term matches the table name or the full `catalog.schema.table` name; name matches come first. It returns `"source": "tables already browsed (pick a SQL warehouse to search everything, or type the full name)"`. A table that was never browsed is not found this way; `GET /api/object?name=<catalog.schema.table>` (one `tables.get`, then cached) reads it by its full name.
 
 Response:
 

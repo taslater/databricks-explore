@@ -1,5 +1,6 @@
 // The object picker's filter box: the input, the `.*` regex switch, an inline regex error, and match highlighting.
-import type { KeyboardEvent } from 'react'
+import type { KeyboardEvent, Ref } from 'react'
+import { TYPE_GROUPS, toggleType, type TypeGroup } from './objectTypes'
 import { highlightParts, type Range } from './pickerMatch'
 
 export const FILTER_HELP =
@@ -18,13 +19,16 @@ interface Props {
   onToggleRegex?: () => void
   /** An invalid-regex message to show under the input. */
   error: string | null
+  /** The input element, so a list click can give focus back to it. */
+  inputRef?: Ref<HTMLInputElement>
 }
 
 /** Filter input with the `.*` switch inside its right edge. A red outline and a message mark an invalid regex. */
-export function PickerFilter({ value, onChange, onKeyDown, placeholder, regex, onToggleRegex, error }: Props) {
+export function PickerFilter({ value, onChange, onKeyDown, placeholder, regex, onToggleRegex, error, inputRef }: Props) {
   return (
     <div className="pick-filter-wrap">
       <input
+        ref={inputRef}
         className={`pick-filter${error ? ' invalid' : ''}`}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -49,6 +53,43 @@ export function PickerFilter({ value, onChange, onKeyDown, placeholder, regex, o
         </button>
       )}
       {error && <div className="pick-filter-error">{error}</div>}
+    </div>
+  )
+}
+
+/**
+ * One chip per object type group, to narrow the list. `present` is the groups the current list has; the others are
+ * greyed, not hidden, so the row does not jump (null means unknown, nothing greyed). A selected chip stays clickable
+ * even when its group is absent, so the choice can always be undone.
+ */
+export function TypeChips({
+  selected,
+  present,
+  onChange,
+}: {
+  selected: readonly TypeGroup[]
+  present: ReadonlySet<TypeGroup> | null
+  onChange: (next: TypeGroup[]) => void
+}) {
+  return (
+    <div className="pick-types" role="group" aria-label="Filter by object type">
+      {TYPE_GROUPS.map((g) => {
+        const on = selected.includes(g.id)
+        const absent = present !== null && !present.has(g.id)
+        return (
+          <button
+            key={g.id}
+            type="button"
+            className={`pick-type${on ? ' on' : ''}${absent ? ' absent' : ''}`}
+            aria-pressed={on}
+            title={absent && !on ? `${g.title} (none in this list)` : g.title}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onChange(toggleType(selected, g.id))}
+          >
+            {g.label}
+          </button>
+        )
+      })}
     </div>
   )
 }

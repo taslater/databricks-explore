@@ -83,6 +83,28 @@ def test_the_warehouse_query_filters_each_part_and_keeps_the_underscore_filter()
     assert got["data"][0]["full_name"] == "dev.hr.emp_x"
 
 
+def test_the_warehouse_search_also_reads_routines_with_the_same_filters():
+    ex = FakeWarehouse([{"table_catalog": "dev", "table_schema": "hr", "table_name": "full_name", "table_type": "FUNCTION"}])
+    got = ex.search("dev.hr.full")
+    statement, params = ex.calls[0]
+    assert "UNION ALL" in statement and "system.information_schema.routines" in statement
+    assert "left(routine_name, 2) <> '__'" in statement
+    for col in ("routine_catalog", "routine_schema", "routine_name"):
+        assert f"lower({col}) LIKE" in statement
+    assert params == {"cat": "dev", "sch": "hr", "q": "%full%"}  # one parameter set serves both halves
+    assert got["data"] == [{"full_name": "dev.hr.full_name", "name": "full_name", "type": "FUNCTION"}]
+
+
+def test_the_cache_search_finds_cached_functions(tmp_path):
+    p = tmp_path / "dev" / "hr" / "functions.json"
+    p.parent.mkdir(parents=True)
+    p.write_text(json.dumps({"fetched_at": "x", "data": [
+        {"name": "full_name", "full_name": "dev.hr.full_name", "type": "FUNCTION", "comment": None}]}), encoding="utf-8")
+    ex = SimpleNamespace(root=tmp_path, warehouse_id=None, profile="dev")
+    assert dbx.cached_search(ex, "full_n")["data"] == [{"full_name": "dev.hr.full_name", "name": "full_name", "type": "FUNCTION"}]
+    assert [h["full_name"] for h in dbx.cached_search(ex, "dev.hr.f*")["data"]] == ["dev.hr.full_name"]
+
+
 def test_a_plain_term_sends_only_the_name_and_a_glob_sends_a_whole_name_pattern():
     ex = FakeWarehouse()
     ex.search("orders")
