@@ -45,9 +45,7 @@ test('a chain of views that only pass data on is one edge marked "via 2 views"',
   await expect(pill).toHaveText('via 2 views')
 })
 
-// Fails today: back in Flow, the saved positions come back and then a second layout moves every table (about 60 px
-// across, a different spot on each run). Remove the fixme once the lens round trip leaves the tables alone.
-test.fixme('Flow, Model and back to Flow puts every table where it was', async ({ page }) => {
+test('Flow, Model and back to Flow puts every table where it was', async ({ page }) => {
   await start(page)
   await openFact(page)
   const all = await settled(page)
@@ -67,7 +65,17 @@ test.fixme('Flow, Model and back to Flow puts every table where it was', async (
   await lens(page, 'Flow').click()
   await expect(node(page, 'silver.order_lines')).toBeVisible()
   expect(await settled(page)).toEqual(flow)
+})
 
+// #65: on CI's runner, returning to All after Flow and Model re-lays the graph out. It passes locally.
+test.fixme('returning to the All lens puts every table where it was', async ({ page }) => {
+  await start(page)
+  await openFact(page)
+  const all = await settled(page)
+  await lens(page, 'Flow').click()
+  await expect(tables(page)).toHaveCount(5)
+  await lens(page, 'Model').click()
+  await expect(node(page, 'gold.dim_date')).toBeVisible()
   await lens(page, 'All').click()
   await expect(tables(page)).toHaveCount(9)
   expect(await settled(page)).toEqual(all)

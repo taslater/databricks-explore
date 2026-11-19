@@ -167,6 +167,11 @@ const soonTimers = new Set<ReturnType<typeof setTimeout>>()
 /** Drops the layout that is running and the ones waiting on a timer, for a change that puts the nodes where they should stand. */
 export function cancelLayouts(): void {
   layoutEpoch++
+  dropSoonLayouts()
+}
+
+/** Drops the layouts waiting on a timer (a lens switch that keeps its positions does not want the ones its column change queued). */
+export function dropSoonLayouts(): void {
   for (const t of soonTimers) clearTimeout(t)
   soonTimers.clear()
 }
