@@ -736,6 +736,15 @@ What a node's fill means. A saved graph's `color_by` is `type` (the default: eac
 
 Fills come from a palette of eight light colors. A value takes the slot its text hashes to and, when that is taken, the next free one, going through the values in sorted order; with more than eight values the eight on most nodes get a slot and the rest are "other" (grey). A node with no value stays white. Certification (certified green, deprecated red) and freshness (late amber, on time green) use fixed colors; a table is "on time" only when it has a write cadence.
 
+### Export: `POST /api/graph/mermaid`
+
+Mermaid text for what the Graph shows, for a pull request, wiki or README (GitHub renders it). Body `{"lens": "flow" | "model", "nodes": [{"id", "kind"}], "edges": [<graph edge>], "glyphs"?: {"<edge id>": ["aggregate", "join", ...]}}` (at most 400 each; the page sends the nodes and edges it draws). Answers `{"mermaid": "..."}`. It reads `tables.get` (a REST call when not cached) and the relationship store, never the warehouse. Meaning, rejected and superseded edges are left out (the page's defaults).
+
+- `flow`: `flowchart LR`. A node is `n1`, `n2`, ... (sorted by table name) labelled with the table's name, or `schema.name` for every table when two share a name; a view is `([...])`, a materialized or streaming table `[[...]]`. A flow edge is `-->` (`<-->` for lineage both ways, `-.->` when proposed) and is labelled with the glyphs of `glyphs` (the page sends each flow edge's transform glyphs from `POST /api/edge-transforms`; Σ aggregate, ⋈ join, ∪ union, 1 dedupe, ▽ filter) when given; a reference edge is `---` (`-.-` when proposed) labelled with its join columns.
+- `model`: `erDiagram`. Each table lists its primary and foreign key columns (`type name PK, FK`, the type without its arguments). Each reference edge is one line with the referenced table first (a foreign key's parent; for a join, the side known to be one) and the crow's-foot ends of `POST /api/relationships/cardinality`, `..` instead of `--` when proposed, and the join columns as the label. An end that is not known is written as zero or more, which claims nothing, and a `%%` comment under `erDiagram` lists those edges.
+
+400 for an unknown lens or a malformed body. MCP `export_graph` returns the same text for a saved graph, or a PNG.
+
 ## 6. Concepts
 
 A small business glossary over the catalog. Implemented in `concepts.py`, stored in the relationship store of the connected profile (section 4), so every route *needs a connection*. Errors as in section 4: **400** `{"error": "<path>: <reason>"}`, **404** for an unknown concept or link. Concepts and their links are part of the section 4 export and import, which stay all-or-nothing.

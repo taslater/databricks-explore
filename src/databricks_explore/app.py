@@ -9,6 +9,7 @@ from werkzeug.exceptions import HTTPException, MethodNotAllowed, NotFound
 
 from . import __version__, canvases
 from . import cardinality
+from . import graph_export
 from . import concepts
 from . import dbx
 from . import demo
@@ -461,6 +462,33 @@ def relationship_cardinality():
         out = cardinality.for_edges(edges, object_of, lambda t: relationships.join_keys(store, t, object_of(t)) if nodefacts.table_name(t) else None,
                                     relprofile.lookup(e.profile))
     return jsonify({"cardinality": out})
+
+
+@app.post("/api/graph/mermaid")
+def graph_mermaid():
+    """Mermaid text for the tables and edges the page shows: a flowchart (lens flow) or an erDiagram (lens model). Reads tables.get and the store; never the warehouse."""
+    body = request.get_json(silent=True)
+    lens = body.get("lens") if isinstance(body, dict) else None
+    nodes, edges = (body.get("nodes"), body.get("edges")) if isinstance(body, dict) else (None, None)
+    if lens not in graph_export.LENSES:
+        raise relationships.RelationshipInvalid("lens: expected flow or model")
+    if not isinstance(nodes, list) or not all(isinstance(n, dict) and isinstance(n.get("id"), str) for n in nodes):
+        raise relationships.RelationshipInvalid("nodes: expected a list of {id, kind}")
+    if not isinstance(edges, list) or not all(isinstance(x, dict) and isinstance(x.get("source"), str) and isinstance(x.get("target"), str) for x in edges):
+        raise relationships.RelationshipInvalid("edges: expected a list of graph edges")
+    if len(nodes) > 400 or len(edges) > 400:
+        raise relationships.RelationshipInvalid("nodes and edges: at most 400 each")
+    glyphs = body.get("glyphs") if isinstance(body.get("glyphs"), dict) else None
+    e = ex()
+
+    def object_of(t):
+        try:
+            return e.object(t)["data"] if nodefacts.table_name(t) else None
+        except Exception:
+            return None
+    with rel_store() as store:
+        read = graph_export.inputs([n["id"] for n in nodes], edges, object_of, lambda t: relationships.join_keys(store, t, object_of(t)) if nodefacts.table_name(t) else None) if lens == "model" else {}
+    return jsonify({"mermaid": graph_export.mermaid(lens, nodes, edges, read.get("keys"), read.get("cards"), glyphs)})
 
 
 @app.post("/api/node-facts")

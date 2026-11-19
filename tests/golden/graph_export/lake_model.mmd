@@ -1,0 +1,49 @@
+erDiagram
+  daily_revenue
+  dim_customer {
+    bigint customer_id PK
+    bigint referred_by_customer_id FK
+  }
+  dim_date {
+    int date_key PK
+  }
+  dim_product {
+    string sku PK
+  }
+  dim_store {
+    bigint store_id PK
+    string region_code PK
+  }
+  fact_order_lines {
+    bigint order_id PK
+    int line_no PK
+    bigint customer_id FK
+    string sku FK
+    int date_key FK
+    bigint store_id FK
+    string region_code FK
+  }
+  fact_returns {
+    bigint return_id PK
+    bigint order_id FK
+    int line_no FK
+    int date_key FK
+  }
+  fact_shipments {
+    bigint shipment_id PK
+    int date_key FK
+  }
+  revenue_metrics
+  session_funnel
+  orders {
+    bigint order_id PK
+  }
+  v_orders
+  v_orders_current
+  dim_customer |o--o{ fact_order_lines : "customer_id"
+  dim_date ||--o{ fact_order_lines : "date_key"
+  dim_product ||--o{ fact_order_lines : "sku"
+  dim_store ||--o{ fact_order_lines : "store_id, region_code"
+  dim_date |o--o{ fact_returns : "date_key"
+  fact_order_lines |o--o{ fact_returns : "order_id, line_no"
+  dim_date |o--o{ fact_shipments : "date_key"

@@ -3400,3 +3400,23 @@ button.app-dialog-danger {
 .write-strip rect.unknown {
   fill: #ccc;
 }
+
+/* Graph export dialog (graph/GraphExport.tsx) */
+.graph-export {
+  width: min(560px, 94vw);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.graph-export-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.graph-export-text {
+  width: 100%;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  box-sizing: border-box;
+}
