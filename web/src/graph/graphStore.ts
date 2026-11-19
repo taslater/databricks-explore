@@ -5,7 +5,7 @@ import type { GraphEdge, GraphNode, RelationsResponse } from '../api/types'
 import type { ColumnInfo } from './columns'
 import { nameOf, schemaOf } from './format'
 import { computeLayout, computeScopedLayout } from './layout'
-import { nodeSize, viaMap } from './derive'
+import { layoutInput } from './layoutInput'
 import type { NeighborSet } from './neighbors'
 import type { ColorBy } from './colorBy'
 import type { DiagramPayload } from './diagram'
@@ -57,10 +57,12 @@ interface GraphState {
   hoverId: string | null
   filters: EdgeFilters
   status: { text: string; error: boolean }
-  /** Run dagre on the next render where every visible node has been measured. */
+  /** Lay the graph out on the next render where every visible node has been measured. */
   layoutPending: boolean
   /** When set, the next layout only redoes the parts of the graph holding these nodes (a node's column level changed). */
   layoutScope: string[] | null
+  /** The next layout starts over, ignoring where the nodes are now (the Re-layout button). Otherwise nodes already placed keep their order. */
+  layoutFresh: boolean
   /** Fit the view on the next render where every visible node has been measured. */
   fitPending: boolean
   /** Flow neighbors read for each table (neighbors.ts), for the counts at a node's sides. Never saved. */
@@ -114,10 +116,14 @@ interface GraphState {
   requestLayout: (scope?: string[]) => void
   /** requestLayout after React Flow has measured the nodes whose size just changed. */
   requestLayoutSoon: (scope?: string[]) => void
-  runLayout: () => void
+  runLayout: () => Promise<void>
   finishFit: () => void
   loadDiagram: (payload: DiagramPayload) => void
 }
+
+/** The nodes an earlier layout (or a saved diagram) positioned: the next layout keeps their order. */
+const placedIds = new Set<string>()
+let layoutRunning = false
 
 export const useGraphStore = create<GraphState>()((set, get) => ({
   nodes: [],
@@ -135,6 +141,7 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
   status: { text: '', error: false },
   layoutPending: false,
   layoutScope: null,
+  layoutFresh: false,
   fitPending: false,
   viewport: null,
   neighbors: {},
@@ -273,7 +280,8 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       return { nodes, edges, layoutPending: true, layoutScope: null }
     }),
 
-  clear: () =>
+  clear: () => {
+    placedIds.clear()
     set({
       nodes: [],
       edges: [],
@@ -287,44 +295,55 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       expansions: {},
       openDiagram: null,
       diagramChanged: null,
-    }),
+    })
+  },
 
   requestLayout: (scope) =>
-    set((s) => ({ layoutPending: true, layoutScope: scope && (!s.layoutPending || s.layoutScope) ? [...(s.layoutScope ?? []), ...scope] : null })),
+    set((s) => ({
+      layoutPending: true,
+      layoutFresh: s.layoutFresh || !scope,
+      layoutScope: scope && (!s.layoutPending || s.layoutScope) ? [...(s.layoutScope ?? []), ...scope] : null,
+    })),
   requestLayoutSoon: (scope) => void setTimeout(() => useGraphStore.getState().requestLayout(scope), 250),
 
-  runLayout: () =>
-    set((s) => {
-      const via = viaMap(s.edges)
-      const laid = s.nodes.map((n) => {
-        const size = nodeSize(n, s.focusSchema, via.get(n.id))
+  runLayout: async () => {
+    // One layout at a time: a call made while one runs is dropped, and the request it carried stays pending.
+    if (layoutRunning) return
+    layoutRunning = true
+    try {
+      const s = get()
+      const fresh = s.layoutFresh
+      const { nodes: laid, links } = layoutInput(s, fresh ? new Set() : placedIds)
+      const ids = laid.map((n) => n.id).join('|')
+      const scope = s.layoutScope
+      // A level change only moves the parts of the graph it touches, and leaves the view where it is, unless they would then overlap.
+      const scoped = scope ? await computeScopedLayout(laid, links, scope) : null
+      const positions = scoped ?? (await computeLayout(laid, links))
+      for (const id of positions.keys()) placedIds.add(id)
+      set((now) => {
+        // Nodes added or a new scope requested while this ran: the positions still apply, and another layout follows.
+        const settled = now.nodes.map((n) => n.id).join('|') === ids && now.layoutScope === scope
         return {
-          id: n.id,
-          width: size.width,
-          height: size.height,
-          focus: n.data.focus || !!n.data.pinned,
-          x: n.position.x,
-          y: n.position.y,
+          layoutScope: settled ? null : now.layoutScope,
+          fitPending: !scoped,
+          layoutFresh: settled ? false : now.layoutFresh,
+          nodes: now.nodes.map((n) => {
+            const p = positions.get(n.id)
+            return p ? { ...n, position: p } : n
+          }),
+          layoutPending: !settled,
         }
       })
-      const links = s.edges.map((e) => ({ source: e.source, target: e.target, kind: e.data!.info.kind }))
-      // A level change only moves the parts of the graph it touches, and leaves the view where it is, unless they would then overlap.
-      const scoped = s.layoutScope ? computeScopedLayout(laid, links, s.layoutScope) : null
-      const positions = scoped ?? computeLayout(laid, links)
-      return {
-        layoutScope: null,
-        fitPending: !scoped,
-        nodes: s.nodes.map((n) => {
-          const p = positions.get(n.id)
-          return p ? { ...n, position: p } : n
-        }),
-        layoutPending: false,
-      }
-    }),
+    } finally {
+      layoutRunning = false
+    }
+  },
 
   finishFit: () => set({ fitPending: false }),
 
-  loadDiagram: (payload) =>
+  loadDiagram: (payload) => {
+    placedIds.clear()
+    for (const n of payload.nodes) placedIds.add(n.id)
     set({
       nodes: payload.nodes,
       edges: payload.edges,
@@ -336,5 +355,6 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
       hoverId: null,
       layoutPending: false,
       fitPending: true,
-    }),
+    })
+  },
 }))

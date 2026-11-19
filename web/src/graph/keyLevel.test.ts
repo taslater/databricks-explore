@@ -79,9 +79,9 @@ describe('layout of one part of the graph', () => {
   const n = (id: string, x: number, y: number, height = 40): LayoutNode => ({ id, width: 100, height, focus: false, x, y })
   const flow = (source: string, target: string) => ({ source, target, kind: 'lineage' })
 
-  it('lays out again only the part that holds the node, keeping its top-left corner', () => {
+  it('lays out again only the part that holds the node, keeping its top-left corner', async () => {
     const nodes = [n('a', 0, 0, 200), n('b', 300, 0), n('c', 0, 400), n('d', 300, 400)]
-    const out = computeScopedLayout(nodes, [flow('a', 'b'), flow('c', 'd')], ['a'])!
+    const out = (await computeScopedLayout(nodes, [flow('a', 'b'), flow('c', 'd')], ['a']))!
     expect(out.get('c')).toEqual({ x: 0, y: 400 })
     expect(out.get('d')).toEqual({ x: 300, y: 400 })
     expect(Math.min(out.get('a')!.x, out.get('b')!.x)).toBe(0)
@@ -89,19 +89,19 @@ describe('layout of one part of the graph', () => {
     expect(out.get('b')!.x).toBeGreaterThan(out.get('a')!.x)
   })
 
-  it('gives up when the part would run into another, so the caller lays everything out', () => {
+  it('gives up when the part would run into another, so the caller lays everything out', async () => {
     const nodes = [n('a', 0, 0, 500), n('b', 300, 0), n('c', 0, 400), n('d', 300, 400)]
-    expect(computeScopedLayout(nodes, [flow('a', 'b'), flow('c', 'd')], ['a'])).toBeNull()
+    expect(await computeScopedLayout(nodes, [flow('a', 'b'), flow('c', 'd')], ['a'])).toBeNull()
   })
 })
 
 describe('the reference row under a graph', () => {
-  it('keeps clear of the node above it when the nodes in it are tall', () => {
+  it('keeps clear of the node above it when the nodes in it are tall', async () => {
     const main: LayoutNode = { id: 'fact', width: 100, height: 100, focus: true, x: 0, y: 0 }
     const tall: LayoutNode = { id: 'dim', width: 100, height: 300, focus: false, x: 0, y: 0 }
-    const pos = computeLayout([main, tall], [{ source: 'fact', target: 'dim', kind: 'fk' }])
+    const pos = await computeLayout([main, tall], [{ source: 'fact', target: 'dim', kind: 'fk' }])
     expect(pos.get('dim')!.y).toBeGreaterThanOrEqual(pos.get('fact')!.y + 100 + 40)
-    const short = computeLayout([main, { ...tall, height: 40 }], [{ source: 'fact', target: 'dim', kind: 'fk' }])
+    const short = await computeLayout([main, { ...tall, height: 40 }], [{ source: 'fact', target: 'dim', kind: 'fk' }])
     expect(short.get('dim')!.y + 20).toBe(short.get('fact')!.y + 100 + 90) // a short node is still centered 90 below, as before
   })
 })
