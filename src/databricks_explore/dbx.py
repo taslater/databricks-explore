@@ -27,7 +27,7 @@ CACHE, LOGS, DIAGRAMS = DATA / "cache", DATA / "logs", DATA / "diagrams"
 for d in (CACHE, LOGS, DIAGRAMS):
     d.mkdir(parents=True, exist_ok=True)
 
-MAX_NEIGHBOR_READS = 40  # tables.get calls one relations() makes for neighbors that are not cached
+MAX_NEIGHBOR_READS = 40  # tables.get calls one relations() makes for neighbors that are not cached (or, on refresh, for any)
 
 # Column lineage for one table, either end. One row per column pair; event_time is reduced to the latest.
 COLUMN_LINEAGE_SQL = """SELECT source_table_full_name, source_column_name, target_table_full_name, target_column_name,
@@ -397,7 +397,8 @@ class Explorer:
         column-lineage API, plus the view's own SQL when the table is a view; see column_lineage_api).
         Cached like the other metadata, and a cached copy is returned even when no warehouse is selected.
         Raises RuntimeError without a warehouse when the fallback finds nothing, and whatever the warehouse says
-        (no access) when the fallback finds nothing either.
+        (no access) when the fallback finds nothing either. An empty system table answer (it lags a new write by
+        minutes to hours) also falls back to the API; both empty gives the empty system answer.
         """
         def fetch():
             if not self.warehouse_id:
@@ -405,13 +406,18 @@ class Explorer:
                                    "Pick a SQL warehouse to read system.access.column_lineage.")
             return self.sql(COLUMN_LINEAGE_SQL, t=full_name)
         try:
-            return {**self._cached(f"{self._dir(full_name)}/column_lineage/{safe(full_name)}.json", fetch, refresh),
-                    "source": "system_table"}
+            system = {**self._cached(f"{self._dir(full_name)}/column_lineage/{safe(full_name)}.json", fetch, refresh),
+                      "source": "system_table"}
+            if system["data"]:
+                return system
         except Exception:
             fallback = self.column_lineage_api(full_name, refresh)
             if not fallback["data"]:
                 raise
             return {**fallback, "source": "api"}
+        # the system table answered with nothing: it trails the REST API by minutes to hours, so ask the API too
+        fallback = self.column_lineage_api(full_name, refresh)
+        return {**fallback, "source": "api"} if fallback["data"] else system
 
     def column_lineage_api(self, full_name, refresh=False):
         """Column lineage with no warehouse: the REST API (one call per column) and the view's SQL. Cached, never raises.
@@ -572,16 +578,22 @@ class Explorer:
         except (OSError, ValueError, KeyError):
             return None
 
-    def _resolve(self, name, need_info=False, budget=None):
+    def _resolve(self, name, need_info=False, budget=None, refresh=False):
         """What is known about a neighbor: {"exists": True | False | None, "info", "type", "reason", "renamed_to"}.
 
         Reads the cache first (the object, then the schema's object list, unless `need_info`) and only then calls
         tables.get, at most `budget[0]` times. A failure that means "not there" is remembered for the process and
-        is not an error; any other failure leaves `exists` None."""
+        is not an error; any other failure leaves `exists` None. With `refresh` a cached object is read again (it may
+        have been dropped or replaced since), within the same budget; once that is spent the cached copy is used."""
         if name in self._gone:
             return self._gone[name]
         cached = self.root / f"{self._dir(name)}/obj/{safe(name)}.json"
-        if not cached.exists():
+        reread = False
+        if cached.exists():
+            if refresh and budget is not None and budget[0] > 0:
+                budget[0] -= 1
+                reread = True
+        else:
             if not need_info:
                 try:
                     listed = json.loads((self.root / f"{self._dir(name)}/objects.json").read_text(encoding="utf-8"))["data"]
@@ -595,7 +607,7 @@ class Explorer:
                     return {"exists": None, "info": None, "type": None}
                 budget[0] -= 1
         try:
-            info = self.object(name)["data"]
+            info = self.object(name, reread)["data"]
             return {"exists": True, "info": info, "type": info.get("table_type")}
         except Exception as e:
             if not neighbors.is_not_found(e):
@@ -617,6 +629,7 @@ class Explorer:
         no longer holds is marked `superseded` (see neighbors.is_superseded). A pair that has a view dependency and
         lineage is one `view_dep` edge, whose `last_read` is the lineage time."""
         nodes, edges, errors = {}, {}, []
+        focus_gone = False  # tables.get said the object does not exist
         if refresh:
             self._gone.clear()
         infos = {}  # lowercased name -> tables.get data, for the object and the neighbors that were read
@@ -652,6 +665,7 @@ class Explorer:
                                                            "source": t, "target": full_name, "kind": "view_dep"}
         except Exception as e:
             errors.append(f"tables.get: {clean_error(e)}")
+            focus_gone = neighbors.is_not_found(e)
 
         flows = {}  # (source, target) -> lineage time, in the order met
         hints = {}  # neighbor -> the lineage API's table type, a guess for its kind
@@ -683,7 +697,8 @@ class Explorer:
                     if direction == "downstreams":
                         downstream.add(other)
         except Exception as e:
-            errors.append(f"lineage: {clean_error(e)}")
+            if not focus_gone:  # for an object that no longer exists the lineage API answers a misleading "no permission"
+                errors.append(f"lineage: {clean_error(e)}")
 
         if files:
             nodes[full_name]["files"] = [{"path": p, "readable": ok, "last_seen": ts} for (p, ok), ts in sorted(files.items())]
@@ -691,7 +706,7 @@ class Explorer:
         # Look every neighbor up. A downstream neighbor's own metadata says whether the edge into it still holds.
         budget = [MAX_NEIGHBOR_READS]
         for nid in [n for n in nodes if n != full_name]:
-            r = self._resolve(nid, nid in downstream, budget)
+            r = self._resolve(nid, nid in downstream, budget, refresh)
             if r["info"]:
                 infos[nid.lower()] = r["info"]
             nodes[nid]["kind"] = neighbors.kind_of(r["type"], hints.get(nid))

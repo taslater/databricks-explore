@@ -93,10 +93,10 @@ def walk(rows_of: Callable[[str], list], table: str, column: str, direction: str
 
 
 @lru_cache(maxsize=256)
-def _expressions(sql: str, catalog: str, schema: str, known: tuple) -> Optional[dict]:
+def _expressions(sql: str, catalog: str, schema: str, known: tuple, columns: tuple = ()) -> Optional[dict]:
     """sqltools.column_expressions, remembered by the SQL; None for SQL that does not parse."""
     try:
-        return sqltools.column_expressions(sql, catalog or None, schema or None, known)
+        return sqltools.column_expressions(sql, catalog or None, schema or None, known, columns)
     except ValueError:
         return None
 
@@ -133,7 +133,9 @@ def classify_hops(ex, hops: list[dict]) -> dict[str, dict]:
         sql = origins[t]["sql"]
         if sql:
             catalog, schema = (t.lower().split(".") + ["", ""])[:2]
-            done[t] = _expressions(sql, catalog, schema, tuple(sorted(sources[t])))
+            info = (ex.cached_object(t) or {}).get("data") or {}  # an INSERT's query names its outputs by the table's column order
+            columns = tuple(c["name"] for c in sorted(info.get("columns") or [], key=lambda c: c.get("position", 0)) if c.get("name"))
+            done[t] = _expressions(sql, catalog, schema, tuple(sorted(sources[t])), columns)
     for h in hops:
         t = h["target"]["table"]
         h.update(classify(h, done[t]) if t in done else {"class": None, "label": None, "expr": None, "note": origins[t]["note"] or "no_sql"})

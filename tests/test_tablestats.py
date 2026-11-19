@@ -36,6 +36,14 @@ def test_a_write_keeps_who_wrote_it_and_what_it_replaced():
     assert (a["replaces"], a["notebook"]) == (False, "9")
 
 
+def test_a_job_write_without_a_job_name_is_named_by_its_id():
+    # as DESCRIBE HISTORY returned it live for a notebook task of a job: jobName and triggerType are null
+    live = json.dumps({"jobName": None, "jobOwnerId": None, "workspaceId": "7474647601842271", "jobId": "1096488465001547",
+                       "jobRunId": "536826605476176", "runId": "83314497053508", "triggerType": None})
+    (w,) = ts.data_writes([entry(1, "WRITE", rows=1, mode="Append", job=live)])
+    assert (w["job"], w["job_id"]) == ("1096488465001547", "1096488465001547")
+
+
 def writes_every(hours, count, last_hours_ago, op="WRITE"):
     return ts.data_writes([entry(last_hours_ago + i * hours, op) for i in range(count)])
 
@@ -93,7 +101,9 @@ def test_summarize_with_no_writes_says_nothing_is_late():
 
 def test_skip_reasons():
     assert ts.skip_reason({"table_type": "MANAGED", "data_source_format": "DELTA"}) is None
-    assert ts.skip_reason({"table_type": "MATERIALIZED_VIEW"}) is None
+    # live on dbx-free: DESCRIBE DETAIL on a materialized view fails with EXPECT_TABLE_NOT_VIEW; a streaming table reads fine
+    assert "materialized" in ts.skip_reason({"table_type": "MATERIALIZED_VIEW"})
+    assert ts.skip_reason({"table_type": "STREAMING_TABLE"}) is None
     assert "view" in ts.skip_reason({"table_type": "VIEW"})
     assert "metric" in ts.skip_reason({"table_type": "METRIC_VIEW"})
     assert "not a Delta" in ts.skip_reason({"table_type": "EXTERNAL", "data_source_format": "CSV"})
@@ -158,9 +168,9 @@ def test_the_plan_lists_the_statements_and_skips_views(client):
     client.post("/api/warehouse", json={"id": "demo-wh-1"})
     names = [f"{LAKE}.{t}" for t in ("silver.orders", "silver.v_orders", "gold.revenue_metrics", "gold.daily_revenue")]
     plan = client.post("/api/table-stats/plan", json={"tables": names}).get_json()
-    assert [s["sql"] for s in plan["statements"] if s["name"] == "history"] == [
-        f"DESCRIBE HISTORY `{LAKE}`.`silver`.`orders` LIMIT 50", f"DESCRIBE HISTORY `{LAKE}`.`gold`.`daily_revenue` LIMIT 50"]
-    assert {s["table"] for s in plan["skipped"]} == {f"{LAKE}.silver.v_orders", f"{LAKE}.gold.revenue_metrics"}
+    assert [s["sql"] for s in plan["statements"] if s["name"] == "history"] == [f"DESCRIBE HISTORY `{LAKE}`.`silver`.`orders` LIMIT 50"]
+    # daily_revenue is a materialized view: live, DESCRIBE DETAIL on one fails with EXPECT_TABLE_NOT_VIEW
+    assert {s["table"] for s in plan["skipped"]} == {f"{LAKE}.silver.v_orders", f"{LAKE}.gold.revenue_metrics", f"{LAKE}.gold.daily_revenue"}
 
 
 def test_reading_needs_a_warehouse_then_caches_and_the_demo_has_one_late_table(client):
