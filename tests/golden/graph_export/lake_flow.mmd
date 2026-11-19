@@ -1,0 +1,29 @@
+flowchart LR
+  n1[["daily_revenue"]]
+  n2["dim_customer"]
+  n3["dim_date"]
+  n4["dim_product"]
+  n5["dim_store"]
+  n6["fact_order_lines"]
+  n7["fact_returns"]
+  n8["fact_shipments"]
+  n9(["revenue_metrics"])
+  n10["session_funnel"]
+  n11["orders"]
+  n12(["v_orders"])
+  n13(["v_orders_current"])
+  n3 --> n1
+  n6 --> n1
+  n6 ---|"customer_id"| n2
+  n6 ---|"date_key"| n3
+  n6 ---|"sku"| n4
+  n6 ---|"store_id, region_code"| n5
+  n6 --> n7
+  n6 --> n9
+  n7 ---|"date_key"| n3
+  n7 ---|"order_id, line_no"| n6
+  n8 ---|"date_key"| n3
+  n11 --> n12
+  n12 --> n13
+  n13 --> n6
+  n13 --> n8

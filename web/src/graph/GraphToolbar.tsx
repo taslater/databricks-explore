@@ -7,6 +7,7 @@ import { useUiStore } from '../store/uiStore'
 import { messageOf } from './actions'
 import { toDiagramBody, fromDiagram } from './diagram'
 import { ColorByControl } from './ColorByControl'
+import { GraphExportButton } from './GraphExport'
 import { useMiningWatcher } from './MiningPanel'
 import { TableStatsButton } from './TableStatsDialog'
 import { useSuggestions } from '../api/hooks'
@@ -231,6 +232,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
       <TableStatsButton />
       <CertificationControl />
       <ColorByControl />
+      <GraphExportButton />
       <span className="spacer" />
       <span
         style={{ flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}

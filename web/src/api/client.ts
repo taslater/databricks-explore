@@ -92,6 +92,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const getCardinality = (edges: Array<{ id: string; kind: string; source: string; target: string; source_column?: string; target_column?: string }>) =>
   request<{ cardinality: Record<string, import('./types').Cardinality | null> }>('POST', '/api/relationships/cardinality', { edges }).then((r) => r.cardinality)
 
+/** Mermaid text for the tables and edges the Graph shows: a flowchart (lens flow) or an erDiagram (lens model). Reads cached table metadata, never the warehouse. */
+export const getMermaid = (body: { lens: 'flow' | 'model'; nodes: Array<{ id: string; kind: string }>; edges: import('./types').GraphEdge[]; glyphs?: Record<string, string[]> }) =>
+  request<{ mermaid: string }>('POST', '/api/graph/mermaid', body).then((r) => r.mermaid)
+
 const get = <T>(path: string) => request<T>('GET', path)
 const post = <T>(path: string, body: unknown) => request<T>('POST', path, body)
 const patch = <T>(path: string, body: unknown) => request<T>('PATCH', path, body)

@@ -42,7 +42,7 @@ For the "Agent access" panel in the top bar. Same Host and Origin checks as `/mc
 ```json
 {"url": "http://127.0.0.1:8765/mcp", "token": "...",
  "command": "claude mcp add --transport http databricks-explore http://127.0.0.1:8765/mcp --header \"Authorization: Bearer ...\"",
- "tools": 45}
+ "tools": 46}
 ```
 
 ### `POST /api/agent-access/token`
@@ -183,6 +183,7 @@ A saved graph is a diagram saved from the Graph tab: `data/diagrams/<name>.json`
 | `get_graph` | `*name`, `format` (`text` default, `json`) | Text: the header (counts, revision, who wrote last, saved time), the focus schema and what it is colored by, one line per table (`catalog.schema.table [kind] focus pinned`) and one per edge (`source -> target  kind (family) status (join columns)`, the family being `flow`, `reference` or `meaning`; `<->` for lineage both ways). The Graph's filters are not saved with a graph, so there are none to report. `json`: `{name, title, revision, by, saved_at, focus_schema, color_by, nodes: [{table, kind, focus?, pinned?, x, y}], edges: [{id, kind, family, cardinality?, source, target, status, directed, bidir?, columns?, parent_columns?, note?}]}`, compact |
 | `create_graph` | `*name`, `*tables` (1-60), `focus`, `color_by` | Saves a graph with a node for each table and an edge for each relationship the app knows between two of them. An existing name is an error. Needs a connected profile |
 | `update_graph` | `*name`, `add`, `remove`, `relayout`, `color_by` | Adds or removes tables (their edges go with them), derives the edges again for the new set, keeps the positions of tables that stay unless `relayout`, and places added tables clear of them. Removing every table is an error (use `delete_graph`). `color_by` (`type`, `schema`, `catalog`, `owner`, `certification`, `freshness` or `tag:<key>`) sets what the fill means (`contracts/api.md`, "Color by"); a graph keeps it when its tables change. Needs a connected profile |
+| `export_graph` | `*name`, `format` (`mermaid` default, `png`), `lens` (`flow` default, `model`), `title`, `caption`, `width` (the widest a png may be, 400-4000, default 1200; it is drawn at its natural size and shrunk to fit) | `mermaid` returns the text GitHub renders: lens `flow` is a `flowchart LR` of the flow edges (reference edges as plain lines labelled with their columns, dashed when proposed), lens `model` an `erDiagram` of the reference edges with each table's key columns (`PK`, `FK`) and its crow's-foot ends where they are known (an unknown end is written as zero or more, which claims nothing, and a `%%` comment lists those edges). `png` returns an image block and a text block: the picture has the title (default the graph's name), the caption, the tables at their saved positions, and under them a legend of only what is drawn and the date the facts were read (the oldest cached read, else the day of the export). Read only: the saved graph, the cache and the store, never a query. Without a connection it draws what the saved edges carry (no key columns, no ends) |
 | `rename_graph` | `*name`, `*new_name` | Renames the graph (and the title inside the file). A taken name is an error |
 | `delete_graph` | `*name` | Moves the file to `diagrams/.trash/<name>.<time>.r<revision>.json` in the data folder, so the person can restore it by hand. Not read-only (`destructiveHint` is true) |
 
