@@ -10,6 +10,7 @@ import { fmtAge, fmtTime, lastPart } from './format'
 import { NodeMarkDetails } from './NodeMarkDetails'
 import { useGraphStore } from './graphStore'
 import { canReview, patchIds } from './relationships'
+import { EdgeGrainDetails, NodeFactsDetails } from './NodeFacts'
 import type { FlowEdge, FlowNode } from './types'
 
 /** Right panel for the graph: visibility filters, actions, and details for the selected node or edge. */
@@ -209,6 +210,7 @@ function NodeDetails({ id, node }: { id: string; node: FlowNode }) {
       <div className="hint">cached {payload.fetched_at}</div>
       <NodeMarkDetails data={node.data} />
       <p>{str(t.comment)}</p>
+      <NodeFactsDetails id={id} />
       {constraints.length > 0 && (
         <>
           <h4>Constraints</h4>
@@ -246,6 +248,7 @@ function EdgeDetails({ edge }: { edge: FlowEdge }) {
   return (
     <div>
       <EdgeBody info={info} />
+      <EdgeGrainDetails edge={edge} />
       <EdgeProvenance info={info} />
       <EdgeReview key={edge.id} info={info} />
     </div>

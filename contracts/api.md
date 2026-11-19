@@ -667,6 +667,20 @@ A cached copy is used when no warehouse is selected. When the system table canno
 
 ---
 
+
+### Card facts: `POST /api/node-facts`, `POST /api/table-stats/plan`, `POST /api/table-stats/read`
+
+What the Graph shows on a card besides its name. Body for all three: `{"tables": ["cat.sch.tbl", ...]}` (at most 100; placeholders and names that are not `catalog.schema.table` are skipped; 400 when `tables` is not a list of strings).
+
+`POST /api/node-facts` answers `{"facts": {"<table>": {"grain": <grain>|null, "stats": <stats>|null}}}`. It reads the cached `tables.get` data (fetching it when missing, a REST call) and the cached size and history, and **never runs a query**. A table that cannot be read is left out.
+
+- `grain` is `{"label", "columns", "basis", "source"}`. `basis` is `primary_key` (a declared key), `group_by`, `dedupe` (`row_number() = 1` in `QUALIFY`, or in `WHERE` on a subquery or CTE) or `distinct`, the last three from a view or materialized view definition; first match wins in that order. `label` is `per order_id × line_no`, `per 5 columns` (more than three), `per k (latest)` or `distinct rows`; `source` says where it came from in words. Key columns are named as the view names them (the select alias when there is one). A metric view, a table with neither key nor definition, a set operation, ROLLUP or CUBE, and SQL sqlglot cannot read have `grain: null`.
+- `stats` is `{"fetched_at", "bytes", "files", "rows", "clustering", "partitioning", "last_write", "cadence_seconds", "late", "writes", "history_error"}`. `rows` is known only when the latest data write replaced the whole table (CTAS, `CREATE OR REPLACE TABLE AS SELECT`, an overwrite, a complete-mode streaming update) with nothing changing it since, and is then that write's `numOutputRows`; otherwise `null`. A data write is WRITE, MERGE, UPDATE, DELETE, STREAMING UPDATE, CTAS, `CREATE OR REPLACE`/`REPLACE TABLE AS SELECT`, COPY INTO or TRUNCATE; OPTIMIZE, VACUUM and property or tag changes are not. `last_write` is `{"at", "operation", "rows", "job", "notebook", "user"}` or `null`. `cadence_seconds` is the median gap between the latest 10 writes (`null` under 3 writes). `late` is true when the time since the last write is over twice the cadence and over an hour; it is computed at each read, from the cache. `writes` is `[{"at", "rows"}]`, the last 20, oldest first.
+
+`POST /api/table-stats/plan` answers `{"statements": [{"table", "name": "detail"|"history", "sql"}], "skipped": [{"table", "reason"}], "warehouse_id"}`: the statements a read would run (`DESCRIBE DETAIL <t>` and `DESCRIBE HISTORY <t> LIMIT 50`), and the tables it would not (views, metric views, non-Delta tables, tables that cannot be read).
+
+`POST /api/table-stats/read` runs those statements on the selected warehouse (this can start a stopped warehouse), four tables at a time, replaces each table's cached answer (`stats/<table>.json` in the profile's cache folder, `{"fetched_at", "data"}`) and answers `{"facts": {...as node-facts, for the tables read}, "skipped": [...], "errors": {"<table>": "<message>"}}`. A table whose statements fail is listed in `errors` and its cache is left as it was; when only DESCRIBE HISTORY fails the size is kept and `history_error` says why. With no warehouse selected it answers **400** and runs nothing.
+
 ## 6. Concepts
 
 A small business glossary over the catalog. Implemented in `concepts.py`, stored in the relationship store of the connected profile (section 4), so every route *needs a connection*. Errors as in section 4: **400** `{"error": "<path>: <reason>"}`, **404** for an unknown concept or link. Concepts and their links are part of the section 4 export and import, which stay all-or-nothing.

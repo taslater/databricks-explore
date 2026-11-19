@@ -1,6 +1,7 @@
 """The Flask app: REST routes, the built React UI and the MCP server. Start it with the `databricks-explore` command."""
 import mimetypes
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from flask import Flask, abort, jsonify, request, send_from_directory
@@ -15,10 +16,12 @@ from . import graphs
 from . import layout
 from . import mcp_server
 from . import mining
+from . import nodefacts
 from . import ontology
 from . import relationships
 from . import sqltools
 from . import starexpand
+from . import tablestats
 from .mcp_server import tools_canvas
 from .mcp_server.tooling import Context, ToolError
 
@@ -407,6 +410,66 @@ def concept_suggest_run():
     result = ex().query(concepts.TAG_SQL, None, concepts.TAG_ROW_CAP)
     with rel_store() as store:
         return jsonify(concepts.tag_run(store, result))
+
+
+# ---------- card facts (nodefacts.py, tablestats.py): the grain, and size and freshness read on demand ----------
+
+def _table_names(body):
+    """The catalog.schema.table names in a request body's `tables` (placeholders are skipped). 400 when it is not a list of names."""
+    tables = body.get("tables") if isinstance(body, dict) else None
+    if not isinstance(tables, list) or not all(isinstance(t, str) for t in tables):
+        raise relationships.RelationshipInvalid("tables: expected a list of table names")
+    names = [t for t in dict.fromkeys(tables) if nodefacts.table_name(t)]
+    if len(names) > nodefacts.MAX_TABLES:
+        raise relationships.RelationshipInvalid(f"tables: at most {nodefacts.MAX_TABLES} at a time")
+    return names
+
+
+def _stats_plan(e, names):
+    """(tables to read, [{"table", "reason"}] for the ones with nothing to read): views, metric views and non-Delta tables are skipped."""
+    eligible, skipped = [], []
+    for t in names:
+        try:
+            reason = tablestats.skip_reason(e.object(t)["data"])
+        except Exception as err:
+            reason = f"cannot read the table: {dbx.clean_error(err)}"
+        (skipped.append({"table": t, "reason": reason}) if reason else eligible.append(t))
+    return eligible, skipped
+
+
+@app.post("/api/node-facts")
+def node_facts():
+    """The grain of each table and the size and freshness read before. Reads the cache and tables.get; never the warehouse."""
+    return jsonify({"facts": nodefacts.facts(ex(), _table_names(request.get_json(silent=True)))})
+
+
+@app.post("/api/table-stats/plan")
+def table_stats_plan():
+    """The statements `POST /api/table-stats/read` would run for these tables, and the tables it would skip."""
+    e = ex()
+    eligible, skipped = _stats_plan(e, _table_names(request.get_json(silent=True)))
+    return jsonify({"statements": [{"table": t, **s} for t in eligible for s in tablestats.statements(t)], "skipped": skipped,
+                    "warehouse_id": e.warehouse_id})
+
+
+@app.post("/api/table-stats/read")
+def table_stats_read():
+    """Run DESCRIBE DETAIL and DESCRIBE HISTORY for the tables and cache the answers (one at a time, replacing what was cached)."""
+    e = ex()
+    names = _table_names(request.get_json(silent=True))
+    if not e.warehouse_id:
+        raise ontology.NeedsWarehouse("Pick a SQL warehouse to read size and history.")
+    eligible, skipped = _stats_plan(e, names)
+
+    def one(t):
+        try:
+            e.table_stats(t, True)
+            return t, None
+        except Exception as err:
+            return t, dbx.clean_error(err)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        errors = {t: msg for t, msg in pool.map(one, eligible) if msg}
+    return jsonify({"facts": nodefacts.facts(e, eligible), "skipped": skipped, "errors": errors})
 
 
 # ---------- ontology import (ontology.py): read-only, into concepts with origin "ontology" ----------
