@@ -106,7 +106,7 @@ interface GraphState {
   recordExpansion: (key: string, ids: string[]) => void
   /** A table's own facts from its relationships response (kind, self-reference, files), for a node that was added as a neighbor. No layout. */
   applyNodeFacts: (node: GraphNode) => void
-  /** Takes tables off the graph, with the edges that touch them. */
+  /** Takes tables off the graph, with the edges that touch them, and forgets the expansions they were part of. */
   removeNodes: (ids: string[]) => void
   /** The saved graph on screen, for live sync with agents. Null for a graph built here and never saved or loaded. */
   openDiagram: OpenDiagram | null
@@ -267,11 +267,25 @@ export const useGraphStore = create<GraphState>()((set, get) => ({
     set((s) => {
       const gone = new Set(ids)
       const touches = (e: FlowEdge) => gone.has(e.source) || gone.has(e.target)
+      const edges = s.edges.filter((e) => !touches(e))
+      const columnEdges = s.columnEdges.filter((e) => !touches(e))
+      const selectionGone =
+        s.selection?.kind === 'node'
+          ? gone.has(s.selection.id)
+          : s.selection?.kind === 'edge' && ![...edges, ...columnEdges].some((e) => e.id === s.selection?.id)
+      // An expansion of a removed table is forgotten; another expansion no longer lists the removed tables.
+      const expansions = Object.fromEntries(
+        Object.entries(s.expansions)
+          .filter(([key]) => !gone.has(key.slice(0, key.lastIndexOf('|'))))
+          .map(([key, added]) => [key, added.filter((id) => !gone.has(id))]),
+      )
       return {
         nodes: s.nodes.filter((n) => !gone.has(n.id)),
-        edges: s.edges.filter((e) => !touches(e)),
-        columnEdges: s.columnEdges.filter((e) => !touches(e)),
-        selection: s.selection?.kind === 'node' && gone.has(s.selection.id) ? null : s.selection,
+        edges,
+        columnEdges,
+        selection: selectionGone ? null : s.selection,
+        hoverId: s.hoverId !== null && gone.has(s.hoverId) ? null : s.hoverId,
+        expansions,
         layoutPending: true,
       }
     }),

@@ -6,6 +6,7 @@ import {
   ReactFlowProvider,
   useReactFlow,
   type NodeMouseHandler,
+  type OnBeforeDelete,
   type OnConnectEnd,
   type EdgeMouseHandler,
   type NodeChange,
@@ -30,6 +31,7 @@ import { useCardinality, withCardinality } from './EdgeEnds'
 import { useEdgeTransforms } from './EdgeTransforms'
 import { withTransforms } from './transformText'
 import { EDGE_COLORS } from './format'
+import { removeFromGraph, REMOVE_KEYS } from './removal'
 import { useGraphStore } from './graphStore'
 import { GraphToolbar } from './GraphToolbar'
 import { MineDialog } from './MineDialog'
@@ -213,6 +215,10 @@ function GraphCanvas() {
     if (node.type === 'table') useGraphStore.getState().setHover(node.id)
   }
   const onNodeMouseLeave = () => useGraphStore.getState().setHover(null)
+  const onBeforeDelete: OnBeforeDelete<FlowNode | ConceptFlowNode | GroupBoxFlowNode, FlowEdge> = async ({ nodes }) => {
+    removeFromGraph(nodes.map((n) => n.id))
+    return false
+  }
 
   // Drag from a node's green handle (shown on hover) onto another node to store a manual edge.
   const onConnectEnd: OnConnectEnd = (event, state) => {
@@ -239,7 +245,9 @@ function GraphCanvas() {
       connectionMode={ConnectionMode.Loose}
       connectionLineStyle={CONNECTION_LINE_STYLE}
       zoomOnDoubleClick={false}
-      deleteKeyCode={null}
+      // Delete removes the selected tables through the store (removal.ts); React Flow's own deletion is always cancelled.
+      deleteKeyCode={REMOVE_KEYS}
+      onBeforeDelete={onBeforeDelete}
       defaultViewport={initialViewport ?? undefined}
       // Shift- or Cmd/Ctrl-click adds a node to the selection (Shift-drag on the pane still draws a box).
       multiSelectionKeyCode={MULTI_SELECT_KEYS}

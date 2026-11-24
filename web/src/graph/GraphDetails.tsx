@@ -20,6 +20,7 @@ import { TraceButtons, TraceDetails } from './ColumnTrace'
 import { EdgeHow } from './EdgeTransforms'
 import { CollapseDetails, GroupsSection } from './CollapseControls'
 import { EdgeGrainDetails, NodeFactsDetails } from './NodeFacts'
+import { RemoveButton } from './RemoveButton'
 import type { FlowEdge, FlowNode } from './types'
 
 /** Right panel for the graph: visibility filters, actions, and details for the selected node or edge. */
@@ -71,7 +72,7 @@ export function GraphDetails() {
         <GroupsSection />
       </section>
 
-      <p className="hint">Click a node or edge for details. Shift-click to select several. Double-click a node to expand it. Drag to arrange.</p>
+      <p className="hint">Click a node or edge for details. Shift-click to select several. Double-click a node to expand it. Drag to arrange. Delete removes the selected tables.</p>
 
       <div className="btns">
         <button
@@ -116,7 +117,10 @@ export function GraphDetails() {
         <button onClick={() => useGraphStore.getState().requestLayout()} disabled={!hasNodes}>
           Reset layout
         </button>
-        <button onClick={() => useGraphStore.getState().clear()}>Clear</button>
+        <RemoveButton />
+        <button onClick={() => useGraphStore.getState().clear()} title="Take every table off the graph and start again">
+          Clear
+        </button>
       </div>
 
       <div className="details-body">
