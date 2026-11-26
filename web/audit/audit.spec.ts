@@ -38,6 +38,10 @@ const SEVERITY: Record<string, 'high' | 'medium' | 'low' | 'info'> = {
   'small-target': 'info',
 }
 const WEIGHT = { high: 10, medium: 4, low: 1, info: 0 }
+const LOW_CONFIDENCE_FACTOR = 0.25 // a finding the rule labels low-confidence counts a quarter of its weight
+const LOW_CONFIDENCE_CAP = 15 // and all of them together never weigh more than this
+// Folders under the data dir that hold what a user creates; the caches and logs are left alone.
+const USER_DATA = ['canvases', 'canvas_history', 'diagrams', 'diagram_history', 'relationships']
 
 // ---- expected.json: by-design findings, a maintainer's decision. They stay in the report, marked expected, and do not count toward the score. ----
 type Expected = { rule: string; control: RegExp | string; root?: string; viewport?: string; reason: string; raw: unknown }
@@ -78,7 +82,9 @@ function expectedMatches(x: Expected, f: Finding): boolean {
 }
 
 type Act = { key: string; label: string; name: string; role: string }
-type Snap = { sig: string; struct: string; controls: Ctl[]; overlaps: Overlap[]; open: string[]; url: string }
+type Snap = { sig: string; struct: string; controls: Ctl[]; off: Off[]; meta: string; overlaps: Overlap[]; open: string[]; url: string }
+/** A control that is shown but disabled: kept out of the actions, but part of the loose comparison (enabled/disabled flips are not a change of state). */
+type Off = { role: string; name: string; pressed: string | null; expanded: string | null; sel: boolean }
 type Overlap = { a: string; b: string; ox: number; oy: number; top: string }
 type Ctl = {
   role: string
@@ -100,11 +106,12 @@ type Ctl = {
   href: string | null
   hit: string | null // null when the centre is not on the page, '' when the hit element is the control or inside it
   clipped: boolean
+  sel: boolean // part of the selection: aria-selected, a selected class, a resize handle, or inside such an element
   tid: string // data-testid or id
   dpath: string // tag:nth-child chain up to body
   cls: string // sorted class list
 }
-type State = { id: string; sig: string; struct: string; path: Act[]; depth: number; actions: Act[]; explored: Set<string>; shot: string; controls: Ctl[]; open: string[] }
+type State = { id: string; sig: string; struct: string; path: Act[]; depth: number; actions: Act[]; explored: Set<string>; shot: string; controls: Ctl[]; off: Off[]; meta: string; open: string[] }
 type Edge = { from: string; action: string; to: string; label: string }
 type Where = { root: string; viewport: string; stateId: string }
 type Finding = {
@@ -115,6 +122,7 @@ type Finding = {
   occluder?: string
   screenshot: string
   repro: string[]
+  confidence: 'high' | 'low' // low: the rule itself says the evidence is incomplete or heuristic
   where: Where[]
 }
 
@@ -193,18 +201,29 @@ function collect() {
     const h = document.elementFromPoint(Math.min(Math.max(r.left + r.width / 2, 0), vw - 1), Math.min(Math.max(r.top + r.height / 2, 0), vh - 1))
     if (h && m.contains(h)) topModal = m
   }
+  /** Selection-related: aria-selected, a selected class or a resize handle on the element or an ancestor. Comparing states loosely ignores these. */
+  const selFlag = (e: Element) => {
+    if (e.getAttribute('aria-selected') === 'true') return true
+    for (let n: Element | null = e; n && n !== document.body; n = n.parentElement)
+      if (typeof (n as HTMLElement).className === 'string' && (n as HTMLElement).className.split(/\s+/).some((t) => /^selected$|^is-selected$|[-_]selected$|resize/i.test(t))) return true
+    return false
+  }
+  const off: Off[] = []
   const behind: string[] = []
   const counts = new Map<string, number>()
   const out: Ctl[] = []
   const els: HTMLElement[] = []
   for (const e of Array.from(document.querySelectorAll(SEL))) {
     const el = e as HTMLElement
-    if ((el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true') continue
     if (el.closest('[aria-hidden=true],[inert]')) continue
     const r = el.getBoundingClientRect()
     if (r.width <= 0 || r.height <= 0) continue
     const cs = getComputedStyle(el)
     if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) continue
+    if ((el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true') {
+      if ((!topModal || topModal.contains(el)) && visibleRect(el)) off.push({ role: roleOf(el), name: nameOf(el), pressed: el.getAttribute('aria-pressed'), expanded: el.getAttribute('aria-expanded'), sel: selFlag(el) })
+      continue
+    }
     if (topModal && !topModal.contains(el)) {
       // Out of scope, but it still tells states apart: the same dialog over a different page is a different state.
       behind.push(roleOf(el) + '|' + nameOf(el) + '|' + (el.getAttribute('aria-pressed') ?? '') + '|' + (el.getAttribute('aria-expanded') ?? ''))
@@ -228,7 +247,7 @@ function collect() {
       role, name, key: base + '#' + n,
       pressed: el.getAttribute('aria-pressed'), expanded: el.getAttribute('aria-expanded'),
       x: r.left, y: r.top, w: r.width, h: r.height, vx: vr.x, vy: vr.y, vw: vr.w, vh: vr.h, cx, cy, tag: el.tagName.toLowerCase(),
-      href: el.tagName === 'A' ? (el as HTMLAnchorElement).href : null, hit, clipped,
+      href: el.tagName === 'A' ? (el as HTMLAnchorElement).href : null, hit, clipped, sel: selFlag(el),
       tid: el.getAttribute('data-testid') || el.id || '', dpath: dpathOf(el), cls: classes(el),
     })
   }
@@ -253,7 +272,7 @@ function collect() {
     const r = el.getBoundingClientRect()
     const cs = getComputedStyle(el)
     if (r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && el.scrollWidth > el.clientWidth + 1 && cs.textOverflow !== 'ellipsis' && cs.overflowX !== 'visible')
-      out.push({ role: 'label', name: norm(el.textContent ?? '') || '(unnamed)', key: 'label|' + norm(el.textContent ?? ''), pressed: null, expanded: null, x: r.left, y: r.top, w: r.width, h: r.height, vx: r.left, vy: r.top, vw: r.width, vh: r.height, cx: r.left + r.width / 2, cy: r.top + r.height / 2, tag: 'label', href: null, hit: '', clipped: true, tid: '', dpath: '', cls: '' })
+      out.push({ role: 'label', name: norm(el.textContent ?? '') || '(unnamed)', key: 'label|' + norm(el.textContent ?? ''), pressed: null, expanded: null, x: r.left, y: r.top, w: r.width, h: r.height, vx: r.left, vy: r.top, vw: r.width, vh: r.height, cx: r.left + r.width / 2, cy: r.top + r.height / 2, tag: 'label', href: null, hit: '', clipped: true, sel: false, tid: '', dpath: '', cls: '' })
   }
   const overlays = ['[role=dialog]', '[role=menu]', '[role=listbox]'].map((s) => (document.querySelector(s) ? 1 : 0)).join('')
   // What Escape is expected to close: visible dialogs, menus, listboxes, open popovers, and controls that expanded a popup (aria-haspopup).
@@ -270,8 +289,14 @@ function collect() {
   els.forEach((el, i) => {
     if (out[i].expanded === 'true' && popupControls.has(el)) open.push('popup:' + out[i].key)
   })
-  return { controls: out, overlaps, overlays, open, path: location.pathname, behind: behind.sort().join('\n') }
+  return { controls: out, off, overlaps, overlays, open, path: location.pathname, behind: behind.sort().join('\n') }
 }
+
+/** One line per control of a state, for graph.json: enabled ones with their pressed/expanded state, disabled ones, and selection-related ones. */
+const describeControls = (s: Cmp) => [
+  ...s.controls.filter((c) => c.role !== 'label').map((c) => c.role + ' "' + c.name + '"' + (c.pressed != null ? ' pressed=' + c.pressed : '') + (c.expanded != null ? ' expanded=' + c.expanded : '') + (c.sel ? ' [selection]' : '')),
+  ...s.off.map((o) => o.role + ' "' + o.name + '"' + (o.pressed != null ? ' pressed=' + o.pressed : '') + (o.expanded != null ? ' expanded=' + o.expanded : '') + ' [disabled]' + (o.sel ? ' [selection]' : '')),
+]
 
 const fnv = (s: string) => {
   let h = 0x811c9dc5
@@ -282,13 +307,13 @@ const fnv = (s: string) => {
 const stable = (s: string) => s.replace(/\d+/g, '#')
 
 async function snapshot(page: Page): Promise<Snap> {
-  const { controls, overlaps, overlays, open, path, behind } = await page.evaluate(collect)
+  const { controls, off, overlaps, overlays, open, path, behind } = await page.evaluate(collect)
   const real = controls.filter((c) => c.role !== 'label')
   const items = real.map((c) => ({ r: c.role, n: stable(c.name), p: c.pressed, e: c.expanded }))
   const plain = items.map((i) => i.r + '|' + i.n + '|' + (i.e ?? '')).sort()
   const full = items.map((i) => i.r + '|' + i.n + '|' + (i.p ?? '') + '|' + (i.e ?? '')).sort()
   const bg = stable(behind)
-  return { sig: fnv(path + '\n' + overlays + '\n' + full.join('\n') + '\n' + bg), struct: fnv(path + '\n' + overlays + '\n' + plain.join('\n') + '\n' + bg), controls, overlaps, open, url: path }
+  return { sig: fnv(path + '\n' + overlays + '\n' + full.join('\n') + '\n' + bg), struct: fnv(path + '\n' + overlays + '\n' + plain.join('\n') + '\n' + bg), controls, off, meta: path + '\n' + overlays + '\n' + bg, overlaps, open, url: path }
 }
 
 async function settle(page: Page, ms = 300) {
@@ -305,6 +330,56 @@ function match(c: Ctl, list: Ctl[]): Ctl | undefined {
   }
   return L.find((x) => x.dpath === c.dpath && x.tag === c.tag) ?? L.find((x) => x.cls === c.cls && Math.abs(x.x - c.x) < 4 && Math.abs(x.y - c.y) < 4)
 }
+
+/** What a state is made of, for comparing: the page and overlay context plus every control (enabled or disabled). */
+type Cmp = { controls: Ctl[]; off: Off[]; meta: string }
+/**
+ * What differs between two states, as short phrases (empty: same). Loose comparison ignores selection: aria-selected, selected classes, resize
+ * handles (a control that is part of the selection may appear or disappear freely) and whether a control is enabled or disabled. Strict
+ * comparison reports those too, so a finding can say what a loose match overlooked.
+ */
+function diffStates(a: Cmp, b: Cmp, loose: boolean): string[] {
+  if (a.meta !== b.meta) return ['the page, dialogs or the background behind a dialog differ']
+  type Tally = { n: number; sel: number }
+  const tally = (s: Cmp) => {
+    const m = new Map<string, Tally>()
+    const add = (r: string, name: string, p: string | null, e: string | null, sel: boolean, off: boolean) => {
+      const k = r + ' "' + stable(name) + '"' + (p != null ? ' pressed=' + p : '') + (e != null ? ' expanded=' + e : '') + (loose ? '' : (sel ? ' [selection]' : '') + (off ? ' [disabled]' : ''))
+      const t = m.get(k) ?? { n: 0, sel: 0 }
+      t.n++
+      if (sel) t.sel++
+      m.set(k, t)
+    }
+    for (const c of s.controls) if (c.role !== 'label') add(c.role, c.name, c.pressed, c.expanded, c.sel, false)
+    for (const o of s.off) add(o.role, o.name, o.pressed, o.expanded, o.sel, true)
+    return m
+  }
+  const ta = tally(a)
+  const tb = tally(b)
+  const out: string[] = []
+  for (const k of new Set([...ta.keys(), ...tb.keys()])) {
+    const x = ta.get(k) ?? { n: 0, sel: 0 }
+    const y = tb.get(k) ?? { n: 0, sel: 0 }
+    const d = x.n - y.n
+    if (d === 0) continue
+    if (loose && (d > 0 ? x.sel >= d : y.sel >= -d)) continue // the surplus is part of the selection
+    out.push((d > 0 ? 'only before: ' : 'only after: ') + k + (Math.abs(d) > 1 ? ' x' + Math.abs(d) : ''))
+  }
+  return out
+}
+const brief = (d: string[]) => (d.length > 6 ? d.slice(0, 6).join('; ') + '; +' + (d.length - 6) + ' more' : d.join('; '))
+
+/** The opposite of a control's name: Hide X / Show X, Open / Close, Expand / Collapse, Maximize / Restore, Zoom In / Zoom Out. */
+const OPPOSITES: [RegExp, RegExp][] = [
+  [/^hide\b/i, /^show\b/i], [/^open\b/i, /^close\b/i], [/^expand\b/i, /^collapse\b/i], [/^maximi[sz]e\b/i, /^restore\b/i],
+  [/^minimi[sz]e\b/i, /^restore\b/i], [/^zoom in\b/i, /^zoom out\b/i], [/^enable\b/i, /^disable\b/i], [/^add\b/i, /^remove\b/i],
+]
+function counterpart(a: string, b: string): boolean {
+  const rest = (s: string, re: RegExp) => s.replace(re, '').replace(/\b(in|out)\b/i, '').trim().toLowerCase()
+  return OPPOSITES.some(([p, q]) => (p.test(a) && q.test(b) && rest(a, p) === rest(b, q)) || (q.test(a) && p.test(b) && rest(a, q) === rest(b, p)))
+}
+/** A control whose label says it leaves: a user would look for it whatever its position. */
+const LABELLED_EXIT = /^(close|cancel|dismiss|done|back|undo|restore|ok)\b/i
 
 test('crawl every top-level view and report UI defects', async ({ browser }, testInfo) => {
   rmSync(OUT, { recursive: true, force: true })
@@ -326,10 +401,13 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
     let page!: Page
     let leftApp = false
 
-    // Reset: a fresh browser context (new localStorage, so no draft) and an emptied server-side canvas folder, then the root's start state.
+    // Reset: a fresh browser context (new localStorage, so no draft) and emptied server-side stores, then the root's start state.
+    // Everything a click can persist must be wiped: canvases, saved diagrams and the relationship/concept database. Missing one makes
+    // every later reset start from a different state (Concepts: one saved concept made the start state differ for the rest of the crawl).
     async function reset(): Promise<Snap> {
       await ctx?.close().catch(() => {})
-      for (const d of ['canvases', 'canvas_history']) {
+      await new Promise((r) => setTimeout(r, 300)) // a request the closed page left in flight (a saved concept) must land before the wipe, not after it
+      for (const d of USER_DATA) {
         try {
           for (const f of readdirSync(join(dataDir, d))) rmSync(join(dataDir, d, f), { recursive: true, force: true })
         } catch {
@@ -367,6 +445,8 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
     let resetFailures = 0
     let replayMismatches = 0
     let startSig = ''
+    let startSnap: Snap | undefined
+    const resetDiffs: string[] = [] // what a failed reset looked like, to find the cause
     let cur: string | null = null // the state the page is verifiably in right now, so no reset is needed to act on it again
     const unverified: { edge: string; from: string; to: string; reason: string }[] = []
     const extra = { n: 0, max: EXTRA_ACTIONS }
@@ -403,7 +483,7 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
     const reproOf = (path: Act[]) => ['root "' + root + '" at ' + vpName, ...path.map((p) => p.label)]
 
     /** Records a finding once across all roots and viewports, remembering where else it showed up. */
-    function report(ruleId: string, control: string, detail: string, dedupe: string, st: { id: string; shot: string; path: Act[] }, occluder?: string) {
+    function report(ruleId: string, control: string, detail: string, dedupe: string, st: { id: string; shot: string; path: Act[] }, occluder?: string, confidence: 'high' | 'low' = 'high') {
       const k = ruleId + '|' + control + '|' + dedupe
       const where = { root, viewport: vpName, stateId: prefix + '-' + st.id }
       const f = findings.get(k)
@@ -411,7 +491,7 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
         if (!f.where.some((w) => w.root === root && w.viewport === vpName)) f.where.push(where)
         return
       }
-      findings.set(k, { ruleId, severity: SEVERITY[ruleId], control, detail, occluder, screenshot: st.shot, repro: reproOf(st.path), where: [where] })
+      findings.set(k, { ruleId, severity: SEVERITY[ruleId], control, detail, occluder, screenshot: st.shot, repro: reproOf(st.path), confidence, where: [where] })
     }
 
     function addFindings(state: State, snap: Snap) {
@@ -436,7 +516,7 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
       const id = 's' + states.size
       const shot = 'screens/' + prefix + '-' + id + '.png'
       await page.screenshot({ path: join(OUT, shot) }).catch(() => {})
-      const state: State = { id, sig: snap.sig, struct: snap.struct, path, depth: path.length, actions: actionsOf(snap), explored: new Set(), shot, controls: snap.controls, open: snap.open }
+      const state: State = { id, sig: snap.sig, struct: snap.struct, path, depth: path.length, actions: actionsOf(snap), explored: new Set(), shot, controls: snap.controls, off: snap.off, meta: snap.meta, open: snap.open }
       states.set(id, state)
       bySig.set(snap.sig, id)
       addFindings(state, snap)
@@ -454,6 +534,7 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
           const s = await reset()
           if (s.sig !== startSig) {
             resetFailures++
+            if (resetDiffs.length < 5 && startSnap) resetDiffs.push(brief(diffStates(startSnap, s, false)) || 'same controls, different signature')
             ok = false
           } else {
             for (const a of state.path)
@@ -491,9 +572,10 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
     }
 
     // ---- crawl ----
-    startSig = (await reset()).sig
+    startSnap = await reset()
+    startSig = startSnap.sig
     const first = await reset() // the second reset must give the same start; goTo checks it every time from here on
-    if (first.sig !== startSig) throw new Error('the start state of ' + root + ' is not stable across resets')
+    if (first.sig !== startSig) throw new Error('the start state of ' + root + ' is not stable across resets: ' + brief(diffStates(startSnap, first, false)))
     await discover(first, [])
     const crawl = { n: 0, max: MAX_ACTIONS }
     while (queue.length && states.size < MAX_STATES && crawl.n < crawl.max) {
@@ -506,21 +588,26 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
     const crawled = crawl.n
 
     // ---- explicit return attempts ----
+    // "Back at A" means loosely equal: the same apart from selection (aria-selected, selected classes, resize handles) and enabled/disabled flips.
+    // Graph nodes stay keyed by the strict signature; only the comparisons with A are loose.
+    const equiv = (x: string, y: string) => x === y || states.get(x)!.sig === states.get(y)!.sig || diffStates(states.get(x)!, states.get(y)!, true).length === 0
     const outgoing = (id: string) => edges.filter((e) => e.from === id)
     const reaches = (b: string, a: string): boolean => {
-      if (b === a) return true
+      if (equiv(b, a)) return true
       for (const e1 of outgoing(b)) {
-        if (e1.to === a) return true
-        for (const e2 of outgoing(e1.to)) if (e2.to === a) return true
+        if (equiv(e1.to, a)) return true
+        for (const e2 of outgoing(e1.to)) if (equiv(e2.to, a)) return true
       }
       return false
     }
-    const candidates = () => edges.filter((e) => e.from !== e.to && e.action !== 'press|Escape' && !ONE_WAY.test(e.label))
-    /** Tries the most likely ways back out of B first: the same control again (a toggle), Escape, then controls named like an undo. */
+    const candidates = () => edges.filter((e) => e.from !== e.to && e.action !== 'press|Escape' && !ONE_WAY.test(e.label) && !equiv(e.from, e.to))
+    const controlName = (label: string) => /"(.*)"/.exec(label)?.[1] ?? label
+    /** Likely ways back out of B first: the same control again (a toggle), its opposite (Hide/Show, Zoom In/Out), Escape, then controls named like an undo. */
+    const returnRank = (e: Edge, a: Act) =>
+      a.key === e.action ? 0 : counterpart(controlName(e.label), a.name) ? 1 : a.key === 'press|Escape' ? 2 : RETURN_WORDS.test(a.name) || LABELLED_EXIT.test(a.name) ? 3 : 4
     async function tryReturn(e: Edge) {
       const B = states.get(e.to)!
-      const rank = (a: Act) => (a.key === e.action ? 0 : a.key === 'press|Escape' ? 1 : RETURN_WORDS.test(a.name) ? 2 : 3)
-      const order = [...B.actions].sort((x, y) => rank(x) - rank(y))
+      const order = [...B.actions].sort((x, y) => returnRank(e, x) - returnRank(e, y))
       let tried = B.explored.size
       for (const a of order) {
         if (reaches(e.to, e.from) || tried >= PER_STATE_RETURN_TRIES || extra.n >= extra.max) break
@@ -539,6 +626,7 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
     const checked = (B: State) => B.explored.size >= Math.min(B.actions.length, PER_STATE_RETURN_TRIES)
     const seenEdge = new Set<string>()
     const visibleInA = (A: State, c: Ctl) => A.controls.some((x) => x.role !== 'label' && Math.hypot(x.cx - c.cx, x.cy - c.cy) <= 6)
+    const obscureSearch = { n: 0, max: EXTRA_ACTIONS } // extra actions spent looking for an obvious exit before calling one obscure
     for (const e of candidates()) {
       const A = states.get(e.from)!
       const B = states.get(e.to)!
@@ -551,28 +639,54 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
       }
       seenEdge.add(k)
       if (!back) {
-        report('irreversible-transition', e.label, A.id + ' -> ' + B.id + ': no way back to ' + A.id + ' within 2 actions (tried ' + B.explored.size + ' of ' + B.actions.length + ' actions in ' + B.id + ')', A.struct + '|' + B.struct, B)
+        report('irreversible-transition', e.label, A.id + ' -> ' + B.id + ': no way back to ' + A.id + ' within 2 actions (tried ' + B.explored.size + ' of ' + B.actions.length + ' actions in ' + B.id + '); ' + B.id + ' differs from ' + A.id + ' by: ' + (brief(diffStates(A, B, true)) || 'nothing visible'), A.struct + '|' + B.struct, B)
         continue
       }
-      // A way back exists. Is any of them one a user would find: no Escape, every control visible in A at the same screen position?
+      // A way back exists. Is any of them one a user would find: no Escape, every control visible in A at the same screen position,
+      // labelled as an exit (Close, Cancel...) or the opposite of something A shows (Hide X / Show X)?
       const stateOf = (id: string) => states.get(id)!
       const ctlOf = (from: string, ed: Edge) => stateOf(from).controls.find((c) => c.key === ed.action && c.role !== 'label')
-      const paths: Edge[][] = []
-      for (const e1 of outgoing(B.id)) {
-        if (e1.to === A.id) paths.push([e1])
-        else for (const e2 of outgoing(e1.to)) if (e2.to === A.id) paths.push([e1, e2])
+      const pathsBack = () => {
+        const ps: Edge[][] = []
+        for (const e1 of outgoing(B.id)) {
+          if (equiv(e1.to, A.id)) ps.push([e1])
+          else for (const e2 of outgoing(e1.to)) if (equiv(e2.to, A.id)) ps.push([e1, e2])
+        }
+        return ps
       }
       // A dialog that A lacked is left through its own buttons (Close, Cancel): those are the expected exit even though A never showed them.
       const dialogOpened = B.open.some((t) => /^dialog:/.test(t) && !A.open.includes(t))
-      const obvious = (p: Edge[]) => p.every((ed, i) => {
-        if (ed.action === 'press|Escape') return false
-        if (dialogOpened && i === 0) return true
-        const c = ctlOf(ed.from, ed)
-        return !!c && visibleInA(A, c)
-      })
+      // A dialog that A had and B closed: the way back is whatever opened it, which a modal hides in A by design.
+      const dialogClosed = A.open.some((t) => /^dialog:/.test(t) && !B.open.includes(t))
+      const obvious = (p: Edge[]) =>
+        p.every((ed, i) => {
+          if (ed.action === 'press|Escape') return false
+          if (dialogOpened && i === 0) return true
+          if (dialogClosed && i === 0) return true
+          const c = ctlOf(ed.from, ed)
+          if (!c) return false
+          return visibleInA(A, c) || LABELLED_EXIT.test(c.name) || A.controls.some((x) => x.role !== 'label' && counterpart(x.name, c.name))
+        })
+      let paths = pathsBack()
+      if (paths.length && !paths.some(obvious)) {
+        // The search for a way back stops at the first one it finds, often Escape. Try B's other actions, most likely exits first, before judging.
+        for (const a of [...B.actions].sort((x, y) => returnRank(e, x) - returnRank(e, y))) {
+          if (paths.some(obvious) || B.explored.size >= PER_STATE_RETURN_TRIES + 6 || obscureSearch.n >= obscureSearch.max) break
+          if (B.explored.has(a.key)) continue
+          await explore(B, a, obscureSearch, MAX_STATES + 20)
+          paths = pathsBack()
+        }
+      }
       if (paths.length && !paths.some(obvious)) {
         const how = paths[0].map((ed) => ed.label).join(' then ')
-        report('only-obscure-exit', e.label, A.id + ' -> ' + B.id + ': the only way back found is "' + how + '", which is Escape or a control that was not visible in ' + A.id + ' at the same position', A.struct + '|' + B.struct, B)
+        const L = states.get(paths[0][paths[0].length - 1].to)!
+        const lands = L.sig === A.sig ? '' : '; it lands in ' + L.id + ', which matches ' + A.id + ' apart from: ' + (brief(diffStates(A, L, false)) || 'nothing visible')
+        const unsearched = B.actions.length - B.explored.size
+        report(
+          'only-obscure-exit', e.label,
+          A.id + ' -> ' + B.id + ': the only way back found is "' + how + '", which is Escape or a control that was not visible in ' + A.id + ' at the same position' + lands + (unsearched > 0 ? ' (' + unsearched + ' of ' + B.actions.length + ' actions in ' + B.id + ' not tried, so a better exit may exist)' : ''),
+          A.struct + '|' + B.struct, B, undefined, unsearched > 0 ? 'low' : 'high',
+        )
       }
     }
 
@@ -605,9 +719,11 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
       const after = await snapshot(page)
       cur = after.sig === B.sig ? B.id : null
       if (after.sig === A.sig) continue
+      const differs = diffStates(A, after, true)
+      if (!differs.length) continue // back at A apart from selection (clicking inside a window selects it) and enabled/disabled flips
       const landed = bySig.get(after.sig) ?? (await discover(after, [...B.path, { key: cL.key, label: 'click ' + cL.role + ' "' + cL.name + '" (again)', name: cL.name, role: cL.role }], MAX_STATES + 20))
       const hit = cL.hit ? 'the click at (' + Math.round(x) + ',' + Math.round(y) + ') hit ' + cL.hit : 'the click at (' + Math.round(x) + ',' + Math.round(y) + ') hit the control itself'
-      report('toggle-not-undoable', e.label, A.id + ' -> ' + B.id + ' (control is now ' + cL.role + ' "' + cL.name + '"): clicking it again leads ' + (after.sig === B.sig ? 'nowhere (state unchanged)' : 'to ' + (landed ?? 'a new state') + ', not back to ' + A.id) + '; ' + hit, A.struct + '|' + B.struct, B)
+      report('toggle-not-undoable', e.label, A.id + ' -> ' + B.id + ' (control is now ' + cL.role + ' "' + cL.name + '"): clicking it again leads ' + (after.sig === B.sig ? 'nowhere (state unchanged)' : 'to ' + (landed ?? 'a new state') + ', not back to ' + A.id) + '; ' + hit + '; the result differs from ' + A.id + ' by: ' + brief(differs), A.struct + '|' + B.struct, B)
     }
 
     // ---- escape does nothing ----
@@ -619,21 +735,23 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
       const esc = B.actions.find((a) => a.key === 'press|Escape')!
       if (!B.explored.has(esc.key)) await explore(B, esc, { n: 0, max: 1 }, MAX_STATES + 20)
       const out = edges.find((x) => x.from === B.id && x.action === 'press|Escape')
-      if (out && out.to === B.id) report('escape-does-nothing', e.label, 'Escape in ' + B.id + ' (reached from ' + A.id + ') changes nothing, though ' + B.id + ' has ' + B.open.filter((t) => !A.open.includes(t)).join(', ') + ' that ' + A.id + ' lacked', A.struct, B)
+      if (out && out.to === B.id) report('escape-does-nothing', e.label, 'Escape in ' + B.id + ' (reached from ' + A.id + ') changes nothing, though ' + B.id + ' has ' + B.open.filter((t) => !A.open.includes(t)).join(', ') + ' that ' + A.id + ' lacked (heuristic: not every popup is meant to close on Escape)', A.struct, B, undefined, 'low')
     }
 
     const seconds = Math.round((Date.now() - tStart) / 1000)
-    crawls.push({ root, viewport: vpName, states: states.size, edges: edges.length, actions: actionCount, crawledActions: crawled, resetFailures, replayMismatches, unverifiedReturns: unverified.length, unverified, seconds })
+    crawls.push({ root, viewport: vpName, states: states.size, edges: edges.length, actions: actionCount, crawledActions: crawled, resetFailures, replayMismatches, resetDiffs, unverifiedReturns: unverified.length, unverified, seconds })
     graphs.push({
       root, viewport: vpName,
-      states: [...states.values()].map((s) => ({ id: prefix + '-' + s.id, sig: s.sig, depth: s.depth, path: s.path.map((p) => p.label), screenshot: s.shot, actions: s.actions.length, explored: s.explored.size })),
+      states: [...states.values()].map((s) => ({ id: prefix + '-' + s.id, sig: s.sig, depth: s.depth, path: s.path.map((p) => p.label), screenshot: s.shot, actions: s.actions.length, explored: s.explored.size, controls: describeControls(s) })),
       edges: edges.map((e) => ({ ...e, from: prefix + '-' + e.from, to: prefix + '-' + e.to })),
     })
     await ctx?.close().catch(() => {})
     console.log('audit crawl ' + root + ' ' + vpName + ': ' + states.size + ' states, ' + edges.length + ' edges, ' + actionCount + ' actions, ' + unverified.length + ' unverified, ' + seconds + 's')
   }
 
-  for (const vp of VIEWPORTS) for (const root of ROOTS) await runCrawl(root, vp)
+  const onlyRoots = (process.env.AUDIT_ROOTS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+  const onlyWidths = (process.env.AUDIT_VIEWPORTS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+  for (const vp of VIEWPORTS) for (const root of ROOTS) if ((!onlyRoots.length || onlyRoots.includes(root.toLowerCase())) && (!onlyWidths.length || onlyWidths.includes(String(vp.width)))) await runCrawl(root, vp)
 
   // ---- report ----
   const list = [...findings.values()].map((f) => ({ ...f, seenIn: f.where.length, expected: false as boolean, expectedReason: undefined as string | undefined }))
@@ -669,12 +787,21 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
   }
   const rootCauses = [...groups.values()].sort((a, b) => b.count - a.count).map(({ severity, ...g }) => ({ ...g, roots: [...g.roots] }))
   // Score: each distinct root cause counts once (a group of findings under one occluder is one cause), weighted by severity.
+  // Findings the rule labels low-confidence count a quarter, and together at most LOW_CONFIDENCE_CAP, so a pile of uncertain ones cannot pin the score.
   let total = 0
-  for (const f of counted) if (!f.occluder) total += WEIGHT[f.severity as keyof typeof WEIGHT]
+  let lowRaw = 0
+  for (const f of counted)
+    if (!f.occluder) {
+      const w = WEIGHT[f.severity as keyof typeof WEIGHT]
+      if (f.confidence === 'low') lowRaw += w * LOW_CONFIDENCE_FACTOR
+      else total += w
+    }
   for (const g of groups.values()) total += WEIGHT[g.severity as keyof typeof WEIGHT]
+  const lowCounted = Math.min(lowRaw, LOW_CONFIDENCE_CAP)
+  total += lowCounted
   const score = Math.round(100 * Math.exp(-total / 50))
   const summary = {
-    crawls: crawls.length, score, weightedCauses: total, findingsByRule: byRule, expectedByRule, staleExpected, rootCauses, perCrawl: crawls,
+    crawls: crawls.length, score, weightedCauses: total, lowConfidenceFindings: counted.filter((f) => f.confidence === 'low').length, lowConfidenceWeight: lowCounted, findingsByRule: byRule, expectedByRule, staleExpected, rootCauses, perCrawl: crawls,
     states: crawls.reduce((n, c) => n + (c.states as number), 0), actions: crawls.reduce((n, c) => n + (c.actions as number), 0),
     unverifiedReturns: crawls.reduce((n, c) => n + (c.unverifiedReturns as number), 0), seconds: Math.round((Date.now() - t0) / 1000),
   }
