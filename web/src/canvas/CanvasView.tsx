@@ -29,13 +29,13 @@ import { Palette } from '../sketch/panels/Palette'
 import { isPlacingTool, type SketchHost, type Tool } from '../sketch/types'
 import { deriveLinks } from './persistence/canvasFile'
 import { usePersistStore } from './persistence/persistStore'
-import { contentBounds, FIT_MIN_ZOOM, fitViewport, insetsFor, type ScreenRect, type Side } from './fitView'
+import { contentBounds, FIT_MIN_ZOOM, fitViewport, insetsFor, type Insets, type ScreenRect, type Side } from './fitView'
 import { QueryWindow, type QueryFlowNode } from './nodes/QueryWindow'
 import { NoteWindow, type NoteFlowNode } from './nodes/NoteWindow'
 import { TableCard, type TableFlowNode } from './nodes/TableCard'
 import { withBoundary } from './nodes/withBoundary'
 import { CanvasToolbar } from './CanvasToolbar'
-import { maximizedFrame, type Frame } from './maximize'
+import { MAX_INSET, maximizedFrame, type Frame } from './maximize'
 import { useQueryTables } from './linking/useQueryTables'
 import { tableEdges } from './linking/tableEdges'
 import { facingHandles } from './linking/handles'
@@ -105,12 +105,12 @@ function writeFlag(key: string, on: boolean) {
   }
 }
 
-/** The floating panels that can cover content, by the side of the canvas they hang from. */
+/**
+ * The panels that still float over the canvas, by the side they hang from. The buttons row, the canvas toolbar and the
+ * edit bar sit in strips above and below the canvas instead, so they take no space from it and cover nothing.
+ */
 const FLOATING_PANELS: readonly { selector: string; side: Side }[] = [
-  { selector: '.react-flow__panel.top-left', side: 'top' },
-  { selector: '.canvas-toolbar', side: 'top' },
   { selector: '.sk-palette', side: 'left' },
-  { selector: '.react-flow__panel.bottom-center', side: 'bottom' },
   { selector: '.canvas-controls', side: 'bottom' },
   { selector: '.react-flow__minimap', side: 'bottom' },
 ]
@@ -147,6 +147,7 @@ function CanvasInner() {
   const tool = useSketchStore((s) => s.tool)
   const snap = useSketchStore((s) => s.snap)
 
+  const pickerCollapsed = useUiStore((s) => s.pickerCollapsed)
   const canvasDetailsOpen = useUiStore((s) => s.canvasDetailsOpen)
   const setCanvasDetailsOpen = useUiStore((s) => s.setCanvasDetailsOpen)
 
@@ -211,7 +212,42 @@ function CanvasInner() {
   }, [openSeq, setViewport])
 
   const maximized = maximizedId !== null && windows.some((w) => w.id === maximizedId)
-  const frame = useMemo(() => (maximized ? maximizedFrame(viewport, box) : null), [maximized, viewport, box])
+  // A maximized window fills the canvas except for the panels floating over it (the sketch palette).
+  const [maxInsets, setMaxInsets] = useState<Insets>(MAX_INSET)
+  useEffect(() => {
+    const root = wrapRef.current
+    if (!maximized || !root) return
+    const measure = () => {
+      const wrap = screenRect(root)
+      const panels = [...root.querySelectorAll('.sk-palette')].map((el) => ({ side: 'left' as Side, rect: screenRect(el) }))
+      const measured = insetsFor(wrap, panels)
+      setMaxInsets({
+        top: MAX_INSET.top,
+        right: MAX_INSET.right,
+        bottom: MAX_INSET.bottom,
+        left: Math.max(MAX_INSET.left, measured.left),
+      })
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    root.querySelectorAll('.sk-palette').forEach((el) => ro.observe(el))
+    ro.observe(root)
+    return () => ro.disconnect()
+  }, [maximized])
+  const frame = useMemo(() => (maximized ? maximizedFrame(viewport, box, maxInsets) : null), [maximized, viewport, box, maxInsets])
+
+  // Escape restores a maximized window, unless it is closing a menu or the person is typing in a field.
+  useEffect(() => {
+    if (!maximized) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      const t = e.target as HTMLElement | null
+      if (t && t.closest('input, textarea, select, [role="dialog"], [aria-expanded="true"]')) return
+      setMaximized(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [maximized, setMaximized])
 
   const nodes = useMemo<Node[]>(() => {
     const selected = new Set(selectedIds)
@@ -326,97 +362,95 @@ function CanvasInner() {
   const empty = windows.length === 0 && sketchNodes.length === 0
 
   return (
-    <div
-      className={`canvas-root tool-${tool}${isPlacingTool(tool) ? ' placing' : ''}`}
-      ref={wrapRef}
-      onDoubleClick={onDoubleClick}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      onPointerDownCapture={interactions.onPointerDownCapture}
-    >
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        edgeTypes={sketchEdgeTypes}
-        onNodesChange={interactions.onNodesChange}
-        onEdgesChange={interactions.onEdgesChange}
-        onNodeDragStart={interactions.onNodeDragStart}
-        onNodeDragStop={interactions.onNodeDragStop}
-        onConnect={interactions.onConnect}
-        onReconnect={interactions.onReconnect}
-        onEdgeDoubleClick={interactions.onEdgeDoubleClick}
-        connectionMode={flow.connectionMode}
-        viewport={viewport}
-        minZoom={FIT_MIN_ZOOM}
-        onMove={(_, vp) => setViewport(vp)}
-        // Backspace would delete a window and its SQL. The Delete key is handled in useSketchKeys instead,
-        // and removes only sketch nodes, connectors and table cards.
-        deleteKeyCode={flow.deleteKeyCode}
-        selectionOnDrag={flow.selectionOnDrag && !maximized}
-        panActivationKeyCode={flow.panActivationKeyCode}
-        multiSelectionKeyCode={flow.multiSelectionKeyCode}
-        elevateNodesOnSelect={flow.elevateNodesOnSelect}
-        snapToGrid={flow.snapToGrid}
-        snapGrid={flow.snapGrid}
-        connectionRadius={flow.connectionRadius}
-        reconnectRadius={flow.reconnectRadius}
-        // Double-click adds a window, so it must not also zoom.
-        zoomOnDoubleClick={false}
-        // A maximized window fills the view, so the view is held still until it is restored.
-        panOnDrag={maximized ? false : flow.panOnDrag}
-        zoomOnScroll={!maximized}
-        zoomOnPinch={!maximized}
-        proOptions={{ hideAttribution: false }}
-      >
-        <Background gap={GRID} />
-        {!maximized && <Controls orientation="horizontal" showInteractive={false} className="canvas-controls" />}
-        {showMinimap && <MiniMap pannable zoomable />}
-        <Panel position="top-left">
-          <div className="canvas-topleft">
-            <div className="canvas-row">
-              <button onClick={addAtCentre} title="Add a query window (Q)">
-                + Query window
-              </button>
-              <button onClick={addNoteAtCentre} title="Add a Markdown note (N)">
-                + Note
-              </button>
-              <button onClick={toggleMinimap} aria-pressed={showMinimap} title="Show or hide the minimap">
-                Minimap
-              </button>
-              {maximized && <button onClick={() => setMaximized(null)}>Restore window</button>}
-            </div>
-          </div>
-        </Panel>
-        <Panel position="bottom-center">
-          <EditBar fileStem={canvasName ?? 'diagram'}>
-              <button
-                onClick={() => setCanvasDetailsOpen(!canvasDetailsOpen)}
-                aria-pressed={canvasDetailsOpen}
-                title="Show or hide the properties panel"
-              >
-                Properties
-              </button>
-          </EditBar>
-        </Panel>
-        <Panel position="center-left">
-          <Palette />
-        </Panel>
-        <Panel position="top-right">
-          <CanvasToolbar />
-        </Panel>
-      </ReactFlow>
-      {interactions.preview && (
-        <div
-          className="sk-place-preview"
-          style={{ left: interactions.preview.x, top: interactions.preview.y, width: interactions.preview.w, height: interactions.preview.h }}
-        />
-      )}
-      {empty && (
-        <div className="canvas-empty hint">
-          Pick a shape from the left to sketch, or double-click the canvas (or use "+ Query window") to add a query.
+    <div className={`canvas-root tool-${tool}${isPlacingTool(tool) ? ' placing' : ''}`}>
+      {/* The buttons and the canvas toolbar sit in a strip above the canvas, not over it. */}
+      <div className={`canvas-bar${pickerCollapsed ? ' with-picker-toggle' : ''}`}>
+        <div className="canvas-row">
+          <button onClick={addAtCentre} title="Add a query window (Q)">
+            + Query window
+          </button>
+          <button onClick={addNoteAtCentre} title="Add a Markdown note (N)">
+            + Note
+          </button>
+          <button onClick={toggleMinimap} aria-pressed={showMinimap} title="Show or hide the minimap">
+            Minimap
+          </button>
         </div>
-      )}
+        <CanvasToolbar />
+      </div>
+      <div
+        className="canvas-stage"
+        ref={wrapRef}
+        onDoubleClick={onDoubleClick}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        onPointerDownCapture={interactions.onPointerDownCapture}
+      >
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          edgeTypes={sketchEdgeTypes}
+          onNodesChange={interactions.onNodesChange}
+          onEdgesChange={interactions.onEdgesChange}
+          onNodeDragStart={interactions.onNodeDragStart}
+          onNodeDragStop={interactions.onNodeDragStop}
+          onConnect={interactions.onConnect}
+          onReconnect={interactions.onReconnect}
+          onEdgeDoubleClick={interactions.onEdgeDoubleClick}
+          connectionMode={flow.connectionMode}
+          viewport={viewport}
+          minZoom={FIT_MIN_ZOOM}
+          onMove={(_, vp) => setViewport(vp)}
+          // Backspace would delete a window and its SQL. The Delete key is handled in useSketchKeys instead,
+          // and removes only sketch nodes, connectors and table cards.
+          deleteKeyCode={flow.deleteKeyCode}
+          selectionOnDrag={flow.selectionOnDrag && !maximized}
+          panActivationKeyCode={flow.panActivationKeyCode}
+          multiSelectionKeyCode={flow.multiSelectionKeyCode}
+          elevateNodesOnSelect={flow.elevateNodesOnSelect}
+          snapToGrid={flow.snapToGrid}
+          snapGrid={flow.snapGrid}
+          connectionRadius={flow.connectionRadius}
+          reconnectRadius={flow.reconnectRadius}
+          // Double-click adds a window, so it must not also zoom.
+          zoomOnDoubleClick={false}
+          // A maximized window fills the view, so the view is held still until it is restored.
+          panOnDrag={maximized ? false : flow.panOnDrag}
+          zoomOnScroll={!maximized}
+          zoomOnPinch={!maximized}
+          proOptions={{ hideAttribution: false }}
+        >
+          <Background gap={GRID} />
+          {!maximized && <Controls orientation="horizontal" showInteractive={false} className="canvas-controls" />}
+          {showMinimap && !maximized && <MiniMap pannable zoomable />}
+          <Panel position="center-left">
+            <Palette />
+          </Panel>
+        </ReactFlow>
+        {interactions.preview && (
+          <div
+            className="sk-place-preview"
+            style={{ left: interactions.preview.x, top: interactions.preview.y, width: interactions.preview.w, height: interactions.preview.h }}
+          />
+        )}
+        {empty && (
+          <div className="canvas-empty hint">
+            Pick a shape from the left to sketch, or double-click the canvas (or use "+ Query window") to add a query.
+          </div>
+        )}
+      </div>
+      <div className="canvas-footer">
+        <EditBar fileStem={canvasName ?? 'diagram'}>
+          <button
+            onClick={() => setCanvasDetailsOpen(!canvasDetailsOpen)}
+            aria-pressed={canvasDetailsOpen}
+            title="Show or hide the properties panel"
+          >
+            Properties
+          </button>
+        </EditBar>
+      </div>
     </div>
   )
 }

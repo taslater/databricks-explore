@@ -143,9 +143,13 @@ function withWindowInView(
   windows: CanvasWindow[],
   win: CanvasWindow,
   viewport: CanvasViewport,
-): { windows: CanvasWindow[]; viewport?: CanvasViewport } {
-  const next = revealOnCanvas({ x: win.position.x, y: win.position.y, w: win.size.w, h: win.size.h }, viewport)
-  return next ? { windows, viewport: next } : { windows }
+): { windows: CanvasWindow[]; viewport?: CanvasViewport; maximizedId: null } {
+  const rect = { x: win.position.x, y: win.position.y, w: win.size.w, h: win.size.h }
+  // The other windows stay in view along with the new one when they all fit at a readable zoom.
+  const others = windows.filter((w) => w.id !== win.id).map((w) => ({ x: w.position.x, y: w.position.y, w: w.size.w, h: w.size.h }))
+  const next = revealOnCanvas(rect, viewport, others)
+  // A maximized window would hide the new one, so adding a window restores it first.
+  return next ? { windows, viewport: next, maximizedId: null } : { windows, maximizedId: null }
 }
 
 export const useCanvasStore = create<CanvasState>()((set, get) => ({

@@ -4,7 +4,7 @@ import { SCREEN_KEEP_OUT } from '../canvas/placement'
 import { useRunStore } from '../canvas/runState'
 
 beforeEach(() => {
-  useCanvasStore.setState({ windows: [], maximizedId: null, canvasName: null })
+  useCanvasStore.setState({ windows: [], maximizedId: null, canvasName: null, viewport: { x: 0, y: 0, zoom: 1 } })
   useRunStore.getState().clearAll()
 })
 

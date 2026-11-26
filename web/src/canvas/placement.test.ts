@@ -3,10 +3,7 @@ import { findFreePosition, PLACEMENT_GAP, type Rect, revealViewport } from './pl
 
 const size = { w: 300, h: 200 }
 const visible: Rect = { x: 0, y: 0, w: 1200, h: 800 }
-const keepOut: Rect[] = [
-  { x: 0, y: 0, w: 600, h: 110 },
-  { x: 0, y: 0, w: 72, h: 800 },
-]
+const keepOut: Rect[] = [{ x: 0, y: 0, w: 72, h: 800 }]
 
 function hits(a: Rect, b: Rect) {
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
@@ -82,20 +79,47 @@ describe('revealViewport', () => {
     expect(next).not.toBeNull()
     const { x, y, zoom } = next!
     expect(zoom).toBe(1)
-    // On screen the node now sits between the margins: left 88, top 120, right 24, bottom 80.
+    // On screen the node now sits between the margins: left 72, top 24, right 24, bottom 56.
     const sx = 200 + x
     const sy = 1500 + y
-    expect(sx).toBeGreaterThanOrEqual(88)
-    expect(sy).toBeGreaterThanOrEqual(120)
+    expect(sx).toBeGreaterThanOrEqual(72)
+    expect(sy).toBeGreaterThanOrEqual(24)
     expect(sx + 300).toBeLessThanOrEqual(1200 - 24)
-    expect(sy + 200).toBeLessThanOrEqual(800 - 80)
+    expect(sy + 200).toBeLessThanOrEqual(800 - 56)
   })
 
-  it('shows a node too big for the space from its top-left corner, so the title bar is visible', () => {
-    const next = revealViewport({ x: 5000, y: 5000, w: 3000, h: 3000 }, { x: 0, y: 0, zoom: 0.5 }, screen)!
-    expect(5000 * 0.5 + next.x).toBe(88)
-    expect(5000 * 0.5 + next.y).toBe(120)
-    expect(next.zoom).toBe(0.5)
+  it('zooms out to fit a node a little too big for the space, so its whole header is in view', () => {
+    const next = revealViewport({ x: 0, y: 0, w: 1400, h: 600 }, vp, screen)!
+    expect(next.zoom).toBeLessThan(1)
+    expect(next.zoom).toBeGreaterThanOrEqual(0.4)
+    expect(next.x).toBeGreaterThanOrEqual(72)
+    expect(1400 * next.zoom + next.x).toBeLessThanOrEqual(1200 - 24 + 1e-6)
+  })
+
+  it('shows a node far too big for the space from its top-left corner at the smallest zoom, so the title bar is visible', () => {
+    const next = revealViewport({ x: 5000, y: 5000, w: 6000, h: 6000 }, { x: 0, y: 0, zoom: 0.5 }, screen)!
+    expect(next.zoom).toBe(0.4)
+    expect(5000 * next.zoom + next.x).toBe(72)
+    expect(5000 * next.zoom + next.y).toBe(24)
+  })
+
+  it('zooms out to keep the neighbours in view with the new node, when they fit at a readable zoom', () => {
+    const neighbour = { x: 100, y: 100, w: 760, h: 520 }
+    const added = { x: 100, y: 700, w: 760, h: 520 }
+    const next = revealViewport(added, vp, screen, undefined, [neighbour])!
+    expect(next.zoom).toBeLessThan(1)
+    expect(next.zoom).toBeGreaterThanOrEqual(0.5)
+    for (const r of [neighbour, added]) {
+      expect(r.y * next.zoom + next.y).toBeGreaterThanOrEqual(24 - 1e-6)
+      expect((r.y + r.h) * next.zoom + next.y).toBeLessThanOrEqual(800 - 56 + 1e-6)
+    }
+  })
+
+  it('shows the new node alone when keeping the neighbours would need less than half size', () => {
+    const far = { x: 5000, y: 0, w: 760, h: 520 }
+    const added = { x: 0, y: 1500, w: 300, h: 200 }
+    const next = revealViewport(added, vp, screen, undefined, [far])!
+    expect(next.zoom).toBe(1)
   })
 
   it('counts a node under the palette or toolbars as not visible', () => {
