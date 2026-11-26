@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { hasWrapped, useOverflowLevel } from '../shared/useOverflowLevel'
 import { useCanvases } from '../api/hooks'
 import { useCanvasStore } from '../store/canvasStore'
 import { useUiStore } from '../store/uiStore'
@@ -112,6 +113,12 @@ export function CanvasToolbar({ onAddQuery, onAddNote, showMinimap, onToggleMini
   }
 
   const [moreOpen, setMoreOpen] = useState(false)
+  // When the strip would wrap (a wide font, a narrow window), Minimap, then Save, then + Note move into More; Save as and Open stay.
+  const barRef = useRef<HTMLDivElement>(null)
+  const overflow = useOverflowLevel(barRef, 3, hasWrapped)
+  const minimapInMore = overflow >= 1
+  const saveInMore = overflow >= 2
+  const noteInMore = overflow >= 3
   useEffect(() => {
     if (!moreOpen) return
     const close = (e: KeyboardEvent) => {
@@ -126,14 +133,16 @@ export function CanvasToolbar({ onAddQuery, onAddNote, showMinimap, onToggleMini
 
   return (
     <div className="ld-wrap">
-      <div className="canvas-toolbar" role="toolbar" aria-label="Canvas">
+      <div className="canvas-toolbar" role="toolbar" aria-label="Canvas" ref={barRef}>
         <div className="tb-group">
           <button className="primary" onClick={onAddQuery} title="Add a query window (Q)">
             + Query window
           </button>
-          <button onClick={onAddNote} title="Add a Markdown note (N)">
-            + Note
-          </button>
+          {!noteInMore && (
+            <button onClick={onAddNote} title="Add a Markdown note (N)">
+              + Note
+            </button>
+          )}
         </div>
         <span className="toolbar-sep" />
         <div className="tb-group">
@@ -202,11 +211,13 @@ export function CanvasToolbar({ onAddQuery, onAddNote, showMinimap, onToggleMini
               Open
             </button>
           )}
-          <button onClick={onSave}>Save</button>
+          {!saveInMore && <button onClick={onSave}>Save</button>}
           <button onClick={onSaveAs}>Save as</button>
-          <button onClick={onToggleMinimap} aria-pressed={showMinimap} title="Show or hide the minimap">
-            Minimap
-          </button>
+          {!minimapInMore && (
+            <button onClick={onToggleMinimap} aria-pressed={showMinimap} title="Show or hide the minimap">
+              Minimap
+            </button>
+          )}
           <button onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen} title="New diagram and the layout Doctor">
             More &#9662;
           </button>
@@ -214,6 +225,32 @@ export function CanvasToolbar({ onAddQuery, onAddNote, showMinimap, onToggleMini
       </div>
       {moreOpen && (
         <div className="canvas-more" role="group" aria-label="More canvas actions">
+          {saveInMore && (
+            <button
+              onClick={() => {
+                setMoreOpen(false)
+                onSave()
+              }}
+            >
+              Save
+            </button>
+          )}
+          {noteInMore && (
+            <button
+              onClick={() => {
+                setMoreOpen(false)
+                onAddNote()
+              }}
+              title="Add a Markdown note (N)"
+            >
+              + Note
+            </button>
+          )}
+          {minimapInMore && (
+            <button onClick={onToggleMinimap} aria-pressed={showMinimap} title="Show or hide the minimap">
+              Minimap
+            </button>
+          )}
           <button
             onClick={() => {
               setMoreOpen(false)

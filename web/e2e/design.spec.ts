@@ -3,15 +3,22 @@
 import { expect, test } from '@playwright/test'
 import { start } from './helpers'
 
+/** A wide UI font like the one a Linux runner falls back to (DejaVu Sans), so a layout that only fits with a narrow font fails here too. */
+const FONTS = [
+  { name: 'the default font', css: '' },
+  { name: 'a wide font', css: '* { font-family: Verdana, "DejaVu Sans", sans-serif !important; letter-spacing: 0.12em; }' },
+]
+
 const SIZES = [
   { width: 1500, height: 900 },
   { width: 1280, height: 720 },
 ]
 
-for (const size of SIZES) {
-  test(`the Canvas strip is one row, keeps Save as and the saved canvases in view, and More holds the rarer actions at ${size.width}x${size.height}`, async ({ page }) => {
+for (const size of SIZES) for (const font of FONTS) {
+  test(`the Canvas strip is one row, keeps Save as and the saved canvases in view, and More holds the rarer actions at ${size.width}x${size.height} with ${font.name}`, async ({ page }) => {
     await page.setViewportSize(size)
     await start(page)
+    if (font.css) await page.addStyleTag({ content: font.css })
     await page.getByRole('tab', { name: 'Canvas' }).click()
     const toolbar = page.getByRole('toolbar', { name: 'Canvas' })
     await expect(toolbar).toBeVisible()
@@ -43,9 +50,10 @@ test('Duplicate and Delete appear with a selection, and the run-all message sits
   await expect(page.getByText('Select to duplicate or delete')).toHaveCount(0)
 })
 
-test('the Graph toolbar fits two rows at 1500x900, saved-diagram actions wait for a pick, and an empty graph says what to do', async ({ page }) => {
+for (const font of FONTS) test(`the Graph toolbar fits two rows at 1500x900 with ${font.name}, saved-diagram actions wait for a pick, and an empty graph says what to do`, async ({ page }) => {
   await page.setViewportSize(SIZES[0])
   await start(page)
+  if (font.css) await page.addStyleTag({ content: font.css })
   await page.getByRole('tab', { name: 'Graph' }).click()
   const rows = page.locator('.graph-toolbar > .tb-row')
   await expect(rows).toHaveCount(2)
@@ -55,6 +63,8 @@ test('the Graph toolbar fits two rows at 1500x900, saved-diagram actions wait fo
   await expect(page.getByLabel('Saved diagrams')).toHaveAttribute('title', /load, rename or delete/)
   // Nothing to clear yet, and a disabled control says why.
   await expect(page.getByRole('button', { name: 'Clear', exact: true })).toHaveCount(0)
+  // With a wide font Show columns has moved into Tools.
+  if (!(await page.getByRole('button', { name: 'Show columns' }).isVisible())) await page.getByRole('button', { name: /^Tools/ }).click()
   await expect(page.getByRole('button', { name: 'Show columns' })).toHaveAttribute('title', /Add a table/)
   await expect(page.getByRole('button', { name: 'Find a table' })).toHaveClass(/primary/)
   // The empty canvas has one call to action, which focuses the picker's filter.

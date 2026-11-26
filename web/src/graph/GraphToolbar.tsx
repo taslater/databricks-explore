@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { hasWrapped, useOverflowLevel } from '../shared/useOverflowLevel'
 import * as api from '../api/client'
 import { useDiagrams } from '../api/hooks'
 import { CertificationControl } from '../concepts/CertificationControl'
@@ -67,6 +68,9 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
     window.addEventListener('keydown', close)
     return () => window.removeEventListener('keydown', close)
   }, [toolsOpen])
+  // When a row would wrap (a wide font, a narrow window), Show columns and Concepts, then Color by and Group by, move into Tools.
+  const barRef = useRef<HTMLDivElement>(null)
+  const overflow = useOverflowLevel(barRef, 2, (el) => Array.from(el.querySelectorAll<HTMLElement>(':scope > .tb-row:not(.tb-tools)')).some(hasWrapped))
   useMiningWatcher()
   useDiagramSync()
   const toggleDrawer = (d: 'suggestions' | 'usage') => useGraphStore.getState().setDrawer(drawer === d ? null : d)
@@ -175,8 +179,31 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
     if (g.openDiagram && changed) g.setOpenDiagram({ ...g.openDiagram, revision: changed.revision })
   }
 
+  /** Show columns and Concepts. They sit in the second row, and move into Tools when the toolbar would wrap. */
+  const viewControls = (
+    <div className="tb-group">
+      <button
+        style={NOWRAP}
+        onClick={() => void actions.setAllColumns(!allColumns)}
+        disabled={!hasNodes}
+        title={hasNodes ? 'Show or hide the columns of every table on the graph' : 'Add a table to the graph first'}
+      >
+        {allColumns ? 'Hide columns' : 'Show columns'}
+      </button>
+      <button
+        style={NOWRAP}
+        onClick={() => useGraphStore.getState().setShowConcepts(!showConcepts)}
+        aria-pressed={showConcepts}
+        disabled={!connected}
+        title={connected ? 'Draw the glossary concepts linked to the tables on the graph' : 'Connect to a workspace first'}
+      >
+        Concepts
+      </button>
+    </div>
+  )
+
   return (
-    <div className={`graph-toolbar${showPickerToggle ? ' with-picker-toggle' : ''}`}>
+    <div ref={barRef} className={`graph-toolbar${showPickerToggle ? ' with-picker-toggle' : ''}`}>
       <div className="tb-row">
         <div className="tb-group">
           <select
@@ -231,29 +258,15 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
         </span>
       </div>
       <div className="tb-row">
-        <div className="tb-group">
-          <button
-            style={NOWRAP}
-            onClick={() => void actions.setAllColumns(!allColumns)}
-            disabled={!hasNodes}
-            title={hasNodes ? 'Show or hide the columns of every table on the graph' : 'Add a table to the graph first'}
-          >
-            {allColumns ? 'Hide columns' : 'Show columns'}
-          </button>
-          <button
-            style={NOWRAP}
-            onClick={() => useGraphStore.getState().setShowConcepts(!showConcepts)}
-            aria-pressed={showConcepts}
-            disabled={!connected}
-            title={connected ? 'Draw the glossary concepts linked to the tables on the graph' : 'Connect to a workspace first'}
-          >
-            Concepts
-          </button>
-        </div>
-        <span className="toolbar-sep" />
-        <ColorByControl />
-        <span className="toolbar-sep" />
-        <GroupControl />
+        {overflow < 1 && viewControls}
+        {overflow < 1 && <span className="toolbar-sep" />}
+        {overflow < 2 && (
+          <>
+            <ColorByControl />
+            <span className="toolbar-sep" />
+            <GroupControl />
+          </>
+        )}
         <span className="spacer" />
         <button
           style={NOWRAP}
@@ -267,6 +280,16 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
       {/* Opens inside the toolbar, like the Canvas More panel, so the graph below gives way and nothing is covered. */}
       {toolsOpen && (
         <div className="tb-row tb-tools" role="group" aria-label="Graph tools">
+          {overflow >= 1 && viewControls}
+          {overflow >= 2 && (
+            <>
+              <span className="toolbar-sep" />
+              <ColorByControl />
+              <span className="toolbar-sep" />
+              <GroupControl />
+              <span className="toolbar-sep" />
+            </>
+          )}
           <div className="tb-group">
             <button
               style={NOWRAP}
