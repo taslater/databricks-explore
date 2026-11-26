@@ -8,7 +8,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { expect, test as base, type Browser, type BrowserContext, type Page } from '@playwright/test'
+import { expect, test as base, type Browser, type BrowserContext, type Page, type Request } from '@playwright/test'
 import { start } from '../e2e/helpers'
 import { SEVERITY, type Finding, type Part } from './report'
 
@@ -269,10 +269,34 @@ async function snapshotInner(page: Page): Promise<Snap> {
   return { sig: fnv(path + '\n' + overlays + '\n' + full.join('\n') + '\n' + bg), struct: fnv(path + '\n' + overlays + '\n' + plain.join('\n') + '\n' + bg), controls, off, meta: path + '\n' + overlays + '\n' + bg, overlaps, open, url: path }
 }
 
+/** Requests a page has made and not yet seen finish or fail. */
+const pendingRequests = new WeakMap<Page, Set<Request>>()
+const MUTATION_WATCH = 'window.__auditMut = performance.now(); new MutationObserver(() => { window.__auditMut = performance.now() }).observe(document, { subtree: true, childList: true, attributes: true, characterData: true })'
+
+/** Starts watching a page for the settle condition: its own requests, and (from the init script in its context) DOM mutations. */
+function watch(page: Page) {
+  const pending = new Set<Request>()
+  pendingRequests.set(page, pending)
+  page.on('request', (r) => pending.add(r))
+  page.on('requestfinished', (r) => pending.delete(r))
+  page.on('requestfailed', (r) => pending.delete(r))
+}
+
+/** The page has settled when none of its requests is pending and the DOM has not mutated for a quiet window (150 ms; 300 ms for ms > 300), capped at 3 s. */
 async function settle(page: Page, ms = 300) {
   const t = Date.now()
-  await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {})
-  await page.waitForTimeout(ms)
+  const quiet = ms > 300 ? 300 : 150
+  const pending = pendingRequests.get(page)
+  const cap = Date.now() + 3000
+  while (Date.now() < cap) {
+    if (pending?.size) {
+      await page.waitForTimeout(20)
+      continue
+    }
+    const since = await page.evaluate(() => new Promise<number>((r) => requestAnimationFrame(() => r(performance.now() - ((window as unknown as { __auditMut?: number }).__auditMut ?? 0))))).catch(() => quiet)
+    if (since >= quiet && !pending?.size) break
+    await page.waitForTimeout(Math.max(10, Math.min(quiet - since, 50)))
+  }
   tm.settleMs += Date.now() - t
   tm.settles++
 }
@@ -411,8 +435,12 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
     }
     async function resetInner(): Promise<Snap> {
       const tW = Date.now()
-      await ctx?.close().catch(() => {})
-      await new Promise((r) => setTimeout(r, 300)) // a request the closed page left in flight (a saved concept) must land before the wipe, not after it
+      // A request the old page left in flight (a saved concept) must land before the wipe, not after it: wait for the page's own requests, then close it.
+      if (page) {
+        const pend = pendingRequests.get(page)
+        for (const end = Date.now() + 1500; pend?.size && Date.now() < end; ) await new Promise((r) => setTimeout(r, 10))
+        await page.close().catch(() => {})
+      }
       for (const d of USER_DATA) {
         try {
           for (const f of readdirSync(join(dataDir, d))) rmSync(join(dataDir, d, f), { recursive: true, force: true })
@@ -421,8 +449,17 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
         }
       }
       tm.resetWipeMs += Date.now() - tW
-      ctx = await browser.newContext({ baseURL, viewport: vp })
+      // One browser context per crawl; each reset gets a new page in it (new sessionStorage) after the origin's stored data is cleared.
+      if (!ctx) {
+        ctx = await browser.newContext({ baseURL, viewport: vp })
+        await ctx.addInitScript(MUTATION_WATCH)
+      }
+      await ctx.clearCookies()
       page = await ctx.newPage()
+      watch(page)
+      const cdp = await ctx.newCDPSession(page)
+      await cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'all' })
+      await cdp.detach().catch(() => {})
       leftApp = false
       page.on('dialog', (d) => d.dismiss().catch(() => {}))
       page.on('popup', (p) => {
