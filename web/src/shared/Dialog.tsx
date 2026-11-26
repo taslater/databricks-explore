@@ -1,23 +1,37 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
-/** Esc closes the dialog. Listens in the capture phase, so an Esc that closes this dialog does not also close one beneath it. */
-function useEscape(onCancel: () => void) {
-  const latest = useRef(onCancel)
-  latest.current = onCancel
+/** The open modal dialogs, oldest first. Only the last one answers Esc. */
+const openModals: symbol[] = []
+
+/**
+ * What every modal dialog does: Esc closes it (only the topmost one), and when it closes, focus goes back to whatever had it
+ * when the dialog opened. Pass `active = false` while a dialog that is always mounted is closed.
+ */
+export function useModalBehavior(onClose: () => void, active = true) {
+  const latest = useRef(onClose)
+  latest.current = onClose
   useEffect(() => {
+    if (!active) return
+    const id = Symbol('modal')
+    openModals.push(id)
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
     function onKey(e: KeyboardEvent) {
-      if (e.key !== 'Escape') return
+      if (e.key !== 'Escape' || openModals[openModals.length - 1] !== id) return
       e.stopPropagation()
       e.preventDefault()
       latest.current()
     }
     window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [])
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      openModals.splice(openModals.indexOf(id), 1)
+      if (opener && opener !== document.body && opener.isConnected) opener.focus()
+    }
+  }, [active])
 }
 
 function Frame({ title, onCancel, children }: { title: string; onCancel: () => void; children: ReactNode }) {
-  useEscape(onCancel)
+  useModalBehavior(onCancel)
   return (
     <div className="modal-backdrop app-dialog-backdrop" role="presentation" onMouseDown={onCancel}>
       <div className="modal app-dialog" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()}>

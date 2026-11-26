@@ -167,7 +167,7 @@ button:disabled {
   position: absolute;
   top: 8px;
   left: 8px;
-  z-index: 1;
+  z-index: 10; /* above the strips (canvas-bar is 5) that leave room for it */
 }
 
 .placeholder {
@@ -720,10 +720,51 @@ table.cols td {
 
 /* ---- Canvas (C1) ---------------------------------------------------------- */
 
+/* The canvas is a column: a strip of buttons, the React Flow stage, and the edit bar. Only the sketch palette, the zoom
+   controls and the minimap float over the stage, so nothing covers a window's own buttons. */
 .canvas-root {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
+}
+
+.canvas-bar {
+  position: relative;
+  z-index: 5; /* its menus open over the stage */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px 12px;
+  padding: 6px 8px;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Leaves room for the show-picker button, which is absolutely positioned at the top left. */
+.canvas-bar.with-picker-toggle {
+  padding-left: 44px;
+}
+
+.canvas-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.canvas-stage > .react-flow {
+  position: absolute;
+  inset: 0;
+}
+
+.canvas-footer {
+  display: flex;
+  justify-content: center;
+  padding: 6px 8px;
+  background: #fff;
+  border-top: 1px solid var(--border);
 }
 
 .canvas-empty {
@@ -1081,13 +1122,24 @@ table.cols td {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
-  max-width: min(560px, 45vw);
-  padding: 4px 8px;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 1px 2px rgba(31, 35, 40, 0.12);
+}
+
+.canvas-bar .ld-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: stretch;
+}
+
+.canvas-bar .ld-wrap .canvas-toolbar {
+  align-self: flex-end;
+}
+
+/* The layout doctor opens inside the strip, so the strip grows and the canvas below it gives way; it never covers a window. */
+.canvas-bar .ld-panel {
+  width: auto;
+  max-height: min(40vh, 320px);
 }
 
 .canvas-name {
@@ -1939,13 +1991,6 @@ button.link {
 }
 
 /* ---- Sketch (src/sketch) ---------------------------------------------------------------- */
-.canvas-topleft {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: flex-start;
-}
-
 .canvas-row {
   display: flex;
   gap: 6px;
@@ -2580,6 +2625,7 @@ textarea.sk-editor {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(220px, 300px) 1fr;
+  grid-template-rows: minmax(0, 1fr); /* the editor scrolls inside the page instead of growing past it */
 }
 
 .concept-list {

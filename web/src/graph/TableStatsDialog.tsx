@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { useReadTableStats, useStatsPlan } from '../api/nodeFacts'
+import { useModalBehavior } from '../shared/Dialog'
 import { useUiStore } from '../store/uiStore'
 import { messageOf } from './actions'
 import { useGraphStore } from './graphStore'
@@ -41,6 +42,7 @@ export function TableStatsDialog() {
   const warehouseId = useUiStore((s) => s.warehouseId)
   const plan = useStatsPlan(tables ?? [])
   const read = useReadTableStats()
+  useModalBehavior(close, tables !== null)
   if (tables === null) return null
   const p = plan.data
   const tableCount = new Set(p?.statements.map((s) => s.table)).size

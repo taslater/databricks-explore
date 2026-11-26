@@ -17,13 +17,10 @@ export const PLACEMENT_GAP = 24
 /** Spacing of the grid of spots tried inside the visible area. */
 const GRID_STEP = 40
 /**
- * Screen-space strips covered by the floating canvas controls: the toolbar along the top (it can wrap onto a
- * second line), and the sketch palette down the left edge.
+ * Screen-space strip covered by the floating canvas controls: the sketch palette down the left edge. (The buttons,
+ * the toolbar and the edit bar sit outside the canvas.)
  */
-export const SCREEN_KEEP_OUT: readonly Rect[] = [
-  { x: 0, y: 0, w: 600, h: 110 },
-  { x: 0, y: 0, w: 72, h: 100000 },
-]
+export const SCREEN_KEEP_OUT: readonly Rect[] = [{ x: 0, y: 0, w: 72, h: 100000 }]
 
 function overlaps(a: Rect, b: Rect, margin = 0): boolean {
   return a.x < b.x + b.w + margin && b.x < a.x + a.w + margin && a.y < b.y + b.h + margin && b.y < a.y + a.h + margin
@@ -171,18 +168,23 @@ export interface Viewport {
 }
 
 /** Screen margins a revealed node keeps from the edges: room for the palette, the toolbars and the bottom bar. */
-export const REVEAL_MARGINS = { left: 88, top: 120, right: 24, bottom: 80 }
+export const REVEAL_MARGINS = { left: 72, top: 24, right: 24, bottom: 56 }
+/** The smallest zoom a reveal shrinks to, to fit a window bigger than the free space. */
+export const REVEAL_MIN_ZOOM = 0.4
+/** The smallest zoom at which a reveal keeps the other windows in view along with the new one. */
+export const REVEAL_CONTEXT_MIN_ZOOM = 0.5
 
 /**
  * The viewport that brings `rect` (canvas coordinates) into view at the same zoom, or null when it is already fully
- * visible. The node is centered in the space between the margins; one too big for that space is shown from its
- * top-left corner, so its title bar is on screen.
+ * visible. The node is centered in the space between the margins; one too big for that space is zoomed out to fit
+ * (down to REVEAL_MIN_ZOOM), and below that shown from its top-left corner, so its title bar is on screen.
  */
 export function revealViewport(
   rect: Rect,
   viewport: Viewport,
   screen: { w: number; h: number },
   margins: typeof REVEAL_MARGINS = REVEAL_MARGINS,
+  context: readonly Rect[] = [],
 ): Viewport | null {
   const z = viewport.zoom > 0 ? viewport.zoom : 1
   const sx = rect.x * z + viewport.x
@@ -195,15 +197,33 @@ export function revealViewport(
   if (fits) return null
   const availW = screen.w - margins.left - margins.right
   const availH = screen.h - margins.top - margins.bottom
-  const left = margins.left + Math.max(0, (availW - rect.w * z) / 2)
-  const top = margins.top + Math.max(0, (availH - rect.h * z) / 2)
-  return { x: left - rect.x * z, y: top - rect.y * z, zoom: z }
+  // Where the neighbours (`context`) can stay in view too, zoom out just enough to show them all with the new node.
+  if (context.length > 0) {
+    const all = [rect, ...context]
+    const x0 = Math.min(...all.map((r) => r.x))
+    const y0 = Math.min(...all.map((r) => r.y))
+    const w = Math.max(...all.map((r) => r.x + r.w)) - x0
+    const h = Math.max(...all.map((r) => r.y + r.h)) - y0
+    const zoomAll = Math.min(z, availW / w, availH / h)
+    if (zoomAll >= REVEAL_CONTEXT_MIN_ZOOM) {
+      return {
+        x: margins.left + (availW - w * zoomAll) / 2 - x0 * zoomAll,
+        y: margins.top + (availH - h * zoomAll) / 2 - y0 * zoomAll,
+        zoom: zoomAll,
+      }
+    }
+  }
+  // A window bigger than the free space is shrunk to fit, so its whole header (and its buttons) is in view.
+  const zoom = rect.w * z > availW || rect.h * z > availH ? Math.max(Math.min(z, REVEAL_MIN_ZOOM), Math.min(z, availW / rect.w, availH / rect.h)) : z
+  const left = margins.left + Math.max(0, (availW - rect.w * zoom) / 2)
+  const top = margins.top + Math.max(0, (availH - rect.h * zoom) / 2)
+  return { x: left - rect.x * zoom, y: top - rect.y * zoom, zoom }
 }
 
 /** revealViewport with the Canvas's size measured from the DOM (the window size when the Canvas is hidden). */
-export function revealOnCanvas(rect: Rect, viewport: Viewport): Viewport | null {
+export function revealOnCanvas(rect: Rect, viewport: Viewport, context: readonly Rect[] = []): Viewport | null {
   const box = canvasFlowElement()?.getBoundingClientRect()
   const w = box && box.width > 0 ? box.width : typeof window !== 'undefined' ? window.innerWidth : 1280
   const h = box && box.height > 0 ? box.height : typeof window !== 'undefined' ? window.innerHeight : 800
-  return revealViewport(rect, viewport, { w, h })
+  return revealViewport(rect, viewport, { w, h }, REVEAL_MARGINS, context)
 }

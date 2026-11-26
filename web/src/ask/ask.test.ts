@@ -76,9 +76,8 @@ describe('openSqlInCanvas', () => {
     const id = openSqlInCanvas('SELECT 1')
     const win = useCanvasStore.getState().windows.find((w) => w.id === id)
     expect(win).toMatchObject({ type: 'query', sql: 'SELECT 1' })
-    // On an empty canvas the corner is under the toolbar and palette, so the window starts clear of them.
+    // On an empty canvas the corner is under the palette, so the window starts clear of it.
     expect(win!.position.x).toBeGreaterThanOrEqual(72)
-    expect(win!.position.y).toBeGreaterThanOrEqual(110)
     expect(useUiStore.getState().view).toBe('canvas')
   })
 

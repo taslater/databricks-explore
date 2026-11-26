@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getAgentAccess, newAgentToken } from '../api/agent'
-import { ConfirmDialog } from './Dialog'
+import { ConfirmDialog, useModalBehavior } from './Dialog'
 
 /** The command with the token hidden, for showing on screen. */
 export function maskToken(command: string, token: string): string {
@@ -10,6 +10,7 @@ export function maskToken(command: string, token: string): string {
 
 /** "Agent access": the MCP URL and the ready-to-paste `claude mcp add` command, with Copy and New token. */
 export function AgentAccessPanel({ onClose }: { onClose: () => void }) {
+  useModalBehavior(onClose)
   const qc = useQueryClient()
   const access = useQuery({ queryKey: ['agent-access'], queryFn: getAgentAccess, staleTime: 0, retry: false })
   const rotate = useMutation({
