@@ -63,7 +63,7 @@ export function ArrangeMenu() {
   if (selectedIds.length < 2) return null
 
   return (
-    <div className="ld-menu when-selected" ref={ref}>
+    <div className="ld-menu" data-selection-ui ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
         disabled={busy}

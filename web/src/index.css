@@ -3911,7 +3911,7 @@ button.chip-button {
 }
 
 /* Controls that exist only while something is selected sit in a span that does not change the layout. */
-.when-selected {
+.selection-ui {
   display: contents;
 }
 

@@ -194,7 +194,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
           </select>
           {/* These act on the picked diagram, so they appear with one; a hint holds their place until then. */}
           {selected ? (
-            <span className="when-selected">
+            <span className="selection-ui" data-selection-ui>
               <button onClick={load} style={NOWRAP}>
                 Load
               </button>

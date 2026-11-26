@@ -103,7 +103,7 @@ export function EditBar({ fileStem, children }: { fileStem: string; children?: R
         <ArrangeIcon name="redo" />
       </button>
       {hasSelection ? (
-        <span className="when-selected">
+        <span className="selection-ui" data-selection-ui>
           <button onClick={duplicate} title="Duplicate (Cmd/Ctrl+D)">
             Duplicate
           </button>

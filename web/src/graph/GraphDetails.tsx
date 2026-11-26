@@ -77,7 +77,7 @@ export function GraphDetails() {
       <div className="btns">
         {/* These act on the picked tables, so they appear with a selection; a hint holds their place until then. */}
         {pickedTables.length > 0 || selectedNode ? (
-          <span className="when-selected">
+          <span className="selection-ui" data-selection-ui>
             <button
               onClick={() => actions.refreshSelected()}
               disabled={!selectedNode}
