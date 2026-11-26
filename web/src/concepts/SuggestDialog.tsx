@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useRunTagSuggestions, useTagPlan, type TagRunEntry, type TagRunResult } from '../api/concepts'
+import { useModalBehavior } from '../shared/Dialog'
 import { useUiStore } from '../store/uiStore'
 import { useConceptsStore } from './conceptsStore'
 
@@ -33,6 +34,7 @@ export function SuggestDialog() {
   const [result, setResult] = useState<TagRunResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const close = () => useConceptsStore.getState().setSuggestOpen(false)
+  useModalBehavior(close)
 
   async function go() {
     setError(null)

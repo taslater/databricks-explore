@@ -1,4 +1,5 @@
 // "Color by": the toolbar menu, the dialog that shows the SQL before tags are read, and the legend of the values on screen.
+import { useModalBehavior } from '../shared/Dialog'
 import { useMemo, useState } from 'react'
 import { useCertification } from '../api/concepts'
 import { useNodeFacts } from '../api/nodeFacts'
@@ -114,6 +115,7 @@ export function ColorByControl() {
 
 /** Confirm dialog for reading tags: the exact statements, then Run. Never automatic. */
 function TagsDialog({ tables, onClose, onRead }: { tables: string[]; onClose: () => void; onRead: (meta: MetaByTable) => void }) {
+  useModalBehavior(onClose)
   const warehouseId = useUiStore((s) => s.warehouseId)
   const plan = useTagsPlan(tables, true)
   const read = useReadTags()

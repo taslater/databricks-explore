@@ -1,5 +1,6 @@
 // The Graph's Export: a picture with its title, legend and date (download or copy), and Mermaid text for a pull request,
 // wiki or README. Local only: the picture is drawn in the page and the Mermaid comes from the app's own server.
+import { useModalBehavior } from '../shared/Dialog'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api/client'
 import { useNodeFacts } from '../api/nodeFacts'
@@ -61,15 +62,7 @@ function ExportDialog({ onClose }: { onClose: () => void }) {
   const [mermaid, setMermaid] = useState('')
   const firstField = useRef<HTMLInputElement>(null)
   useEffect(() => firstField.current?.focus(), [])
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      e.stopPropagation()
-      onClose()
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [onClose])
+  useModalBehavior(onClose)
 
   const { colorBy, colors } = useNodeColors()
   const ends = useCardinality().data

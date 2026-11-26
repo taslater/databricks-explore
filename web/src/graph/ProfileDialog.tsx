@@ -3,6 +3,7 @@ import { useCallback, type MouseEvent as ReactMouseEvent } from 'react'
 import { create } from 'zustand'
 import { getProfilePlan, useProfilePlan, useRunProfile, type ProfileEdge } from '../api/relProfile'
 import { openSqlInCanvas } from '../ask/canvasAction'
+import { useModalBehavior } from '../shared/Dialog'
 import { ContextMenu, wantsBrowserMenu, type MenuItem } from '../shared/ContextMenu'
 import { useUiStore } from '../store/uiStore'
 import { messageOf } from './actions'
@@ -47,6 +48,7 @@ export function ProfileDialog() {
   const warehouseId = useUiStore((s) => s.warehouseId)
   const plan = useProfilePlan(edges ?? [])
   const run = useRunProfile()
+  useModalBehavior(close, edges !== null)
   if (edges === null) return null
   const p = plan.data
   async function go() {

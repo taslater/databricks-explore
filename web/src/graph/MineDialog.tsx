@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useMiningPlan, useStartMining } from '../api/hooks'
+import { useModalBehavior } from '../shared/Dialog'
 import { useUiStore } from '../store/uiStore'
 import { messageOf } from './actions'
 import { useGraphStore } from './graphStore'
@@ -20,6 +21,7 @@ export function MineDialog() {
   const start = useStartMining()
 
   const close = () => useGraphStore.getState().setMineDialog(false)
+  useModalBehavior(close)
 
   async function run() {
     setError(null)
