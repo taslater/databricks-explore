@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useModalBehavior } from '../shared/Dialog'
 import { useAddLink, useConcepts, useCreateConcept } from '../api/concepts'
 
 const ALL = { q: '', domain: '', status: '' } as const
@@ -6,6 +7,7 @@ const NEW = 'new'
 
 /** Links a table to a concept with `describes`: pick an existing concept or create one by name. */
 export function LinkConceptDialog({ table, onClose }: { table: string; onClose: () => void }) {
+  useModalBehavior(onClose)
   const concepts = useConcepts(ALL)
   const create = useCreateConcept()
   const add = useAddLink()

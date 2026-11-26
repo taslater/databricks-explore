@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useImportPlan, useRunImport, type ImportEntry, type ImportReport, type ImportSource } from '../api/concepts'
+import { useModalBehavior } from '../shared/Dialog'
 import { useConceptsStore } from './conceptsStore'
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -108,6 +109,7 @@ export function ImportDialog() {
   const [result, setResult] = useState<ImportReport | null>(null)
   const [error, setError] = useState<string | null>(null)
   const close = () => useConceptsStore.getState().setImportOpen(false)
+  useModalBehavior(close)
 
   async function go() {
     setError(null)
