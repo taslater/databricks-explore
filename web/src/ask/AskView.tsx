@@ -77,8 +77,8 @@ export function AskView() {
         )}
         <div className="ask-examples" role="group" aria-label="Example questions">
           <span className="hint">Try</span>
-          {EXAMPLES.map((q) => (
-            <button key={q} className="chip-button" disabled={!connected || running} onClick={() => setText(q)}>
+          {EXAMPLES.map((q, i) => (
+            <button key={q} data-testid={`ask-example-${i}`} className="chip-button" disabled={!connected || running} onClick={() => setText(q)}>
               {q}
             </button>
           ))}
