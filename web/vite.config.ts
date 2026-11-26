@@ -6,7 +6,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   // web/e2e holds Playwright scenarios (npm run e2e), not unit tests.
-  test: { exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'] },
+  test: { exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**', 'audit/**'] },
   build: {
     outDir: '../src/databricks_explore/web_dist',
     emptyOutDir: true,

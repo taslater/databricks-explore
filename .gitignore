@@ -10,6 +10,8 @@ web/node_modules
 src/databricks_explore/web_dist/
 web/dist/
 web/test-results/
+web/audit-out/
+web/audit-baseline/
 web/playwright-report/
 dist/
 build/
