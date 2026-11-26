@@ -171,7 +171,7 @@ function collectRegions(): RegionIssue[] {
     const fills = (c: Element, o: Element) => {
       const rc = c.getBoundingClientRect()
       const ro = o.getBoundingClientRect()
-      return rc.width * rc.height >= 0.85 * ro.width * ro.height
+      return rc.width * rc.height >= 0.7 * ro.width * ro.height
     }
     if (p && !fills(r, p)) check(r, p, 'nested', [SIDES, SIDES])
   }

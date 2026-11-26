@@ -1,7 +1,8 @@
 // Display helpers ported from static/app.js. Pure functions, no React.
 
 /** One color per edge family (see edgeStyles.ts): flow is the strongest, meaning the lightest. */
-export const FAMILY_COLORS = { flow: '#2d3748', reference: '#2c7a7b', meaning: '#a0aec0' } as const
+/** Colours are CSS variables (index.css), so each has a light and a dark value and nothing here names a colour. */
+export const FAMILY_COLORS = { flow: 'var(--edge-flow)', reference: 'var(--edge-reference)', meaning: 'var(--edge-meaning)' } as const
 
 export const EDGE_COLORS: Record<string, string> = {
   lineage: FAMILY_COLORS.flow,
@@ -12,27 +13,27 @@ export const EDGE_COLORS: Record<string, string> = {
   sketch: FAMILY_COLORS.meaning,
   concept_link: FAMILY_COLORS.meaning,
   ontology: FAMILY_COLORS.meaning,
-  superseded: '#bbb',
+  superseded: 'var(--edge-superseded)',
 }
 
 const NODE_FILL: Record<string, string> = {
-  table: '#e3eaf2',
-  managed: '#e3eaf2',
-  external: '#e3eaf2',
-  view: '#ece4f7',
-  materialized_view: '#ece4f7',
-  metric_view: '#ece4f7',
-  streaming_table: '#e1f3e6',
+  table: 'var(--fill-table)',
+  managed: 'var(--fill-table)',
+  external: 'var(--fill-table)',
+  view: 'var(--fill-view)',
+  materialized_view: 'var(--fill-view)',
+  metric_view: 'var(--fill-view)',
+  streaming_table: 'var(--fill-streaming)',
 }
 
-export const nodeFill = (kind: string): string => NODE_FILL[kind] ?? '#eee'
+export const nodeFill = (kind: string): string => NODE_FILL[kind] ?? 'var(--fill-default)'
 
-/** Light fills for "Color by", dark text stays readable on each. A value takes its slot from a hash of its text (valueColors in colorBy.ts). */
-export const PALETTE = ['#f9d5d3', '#fde7c4', '#fbf3b9', '#d4edc9', '#c9eee6', '#cfe3fa', '#e0d6f5', '#f6d3ec'] as const
+/** Fills for "Color by": pale in light mode and deep in dark mode, so the text colour stays readable on each. A value takes its slot from a hash of its text (valueColors in colorBy.ts). */
+export const PALETTE = ['var(--pal-1)', 'var(--pal-2)', 'var(--pal-3)', 'var(--pal-4)', 'var(--pal-5)', 'var(--pal-6)', 'var(--pal-7)', 'var(--pal-8)'] as const
 /** Values beyond the eight palette slots. */
-export const OTHER_FILL = '#d9dde1'
+export const OTHER_FILL = 'var(--fill-other)'
 /** A node with no value for what the graph is colored by. */
-export const NO_VALUE_FILL = '#ffffff'
+export const NO_VALUE_FILL = 'var(--surface)'
 
 /** A small stable hash of a string (FNV-1a), the same in every graph and every session. */
 export function hashText(s: string): number {

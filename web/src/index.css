@@ -2,9 +2,11 @@
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   font-size: var(--fs-md);
   color: var(--text);
-  background: var(--white);
+  background: var(--surface-shell);
+  color-scheme: light;
 
-  /* Design tokens: the one place values are defined. Use these in every rule. */
+  /* Design tokens: the one place values are defined. Use these in every rule; nothing else in the app names a colour.
+     Each colour has a light value here and a dark one in the :root[data-theme='dark'] block below. */
   /* Spacing: a 4px scale (1px and 2px stay literal, for hairlines). */
   --space-1: 4px;
   --space-2: 8px;
@@ -19,13 +21,20 @@
   --fs-xl: 20px;
   --fw-normal: 400;
   --fw-strong: 600;
-  /* One neutral ramp. --muted is 5.4:1 on white and 4.9:1 on --grey-50. */
-  --white: #ffffff;
-  --grey-50: #f0f3f6;
-  --grey-100: #e0e5ea;
-  --border: #d0d7de;
-  --grey-300: #afb8c1;
-  --muted: #656d76;
+  /* Surface layers, from the back to the front:
+     shell (header, gutters) > panel (sidebars) > canvas (recessed, with a dot grid) > strip (a toolbar band) > surface (raised: cards, windows, dialogs, controls). */
+  --surface-shell: #ffffff;
+  --surface-panel: var(--grey-50);
+  --surface-canvas: #dbe1e9;
+  --surface-strip: var(--surface);
+  --surface: #ffffff;
+  --canvas-dot: #aeb8c4;
+  /* One neutral ramp. --muted is 5.2:1 on --surface-canvas, 6:1 on --surface. */
+  --grey-50: #eff2f6;
+  --hover: var(--grey-50);
+  --border: #cbd3dc;
+  --grey-300: #a9b3be;
+  --muted: #59616b;
   --grey-700: #424a53;
   --text: #1f2328;
   /* One accent, one danger, and the status colours the graph and run states need. */
@@ -35,6 +44,8 @@
   --accent-strong: #0550ae;
   /* Text and icons on an accent fill: 7.3:1 on --accent-strong, 5.0:1 on --accent. */
   --on-accent: #ffffff;
+  /* Text on a colour the user chose (sketch placeholder headers): white in both themes. */
+  --on-strong: #ffffff;
   --danger: #cf222e;
   --danger-soft: #ffebe9;
   --warn: #7d4e00;
@@ -44,15 +55,97 @@
   --ok-soft: #dafbe1;
   --purple: #8250df;
   --orange: #bc4c00;
+  /* Depth: a raised card rests on a soft shadow and lifts while selected or dragged; menus and dialogs float highest. */
+  --shadow-card: 0 1px 2px rgba(31, 35, 40, 0.1), 0 2px 6px rgba(31, 35, 40, 0.08);
+  --shadow-lift: 0 4px 10px rgba(31, 35, 40, 0.14), 0 12px 28px rgba(31, 35, 40, 0.16);
+  --shadow-pop: 0 8px 30px rgba(31, 35, 40, 0.28);
+  --shadow: var(--shadow-lift);
+  --scrim: rgba(27, 31, 36, 0.4);
+  --select-fill: rgba(9, 105, 218, 0.12);
+  --flash: rgba(9, 105, 218, 0.22);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2359616b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  /* Graph: edge colours by family, and the fills of the table cards (data-driven, so each has a dark variant). */
+  --edge-flow: #2d3748;
+  --edge-reference: #2c7a7b;
+  --edge-meaning: #8190a3;
+  --edge-superseded: #a0a0a0;
+  --edge-orphan: #d1242f;
+  --fill-table: #e3eaf2;
+  --fill-view: #ece4f7;
+  --fill-streaming: #e1f3e6;
+  --fill-default: #eeeeee;
+  --fill-other: #d9dde1;
+  --pal-1: #f9d5d3;
+  --pal-2: #fde7c4;
+  --pal-3: #fbf3b9;
+  --pal-4: #d4edc9;
+  --pal-5: #c9eee6;
+  --pal-6: #cfe3fa;
+  --pal-7: #e0d6f5;
+  --pal-8: #f6d3ec;
   /* Shape: one radius for controls, one for panels; one control height (24px for compact icon buttons). */
   --radius: 6px;
   --radius-panel: 8px;
   --control-h: 28px;
   --control-h-sm: 24px;
-  /* React Flow reads these for its zoom controls and resize handles. */
-  --shadow: 0 2px 8px rgba(31, 35, 40, 0.2);
 }
 
+/* Dark values for every token above. The theme script in index.html and src/theme.ts set data-theme from the stored choice or the system. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --surface-shell: #151a21;
+  --surface-panel: var(--grey-50);
+  --surface-canvas: #0d1117;
+  --surface: #222a35;
+  --canvas-dot: #2f3a48;
+  --grey-50: #1a2029;
+  --hover: #2d3743;
+  --border: #3b4755;
+  --grey-300: #566474;
+  --muted: #9aa7b6;
+  --grey-700: #c4cdd8;
+  --text: #e6edf3;
+  --accent: #58a6ff;
+  --accent-soft: #14304f;
+  --accent-line: #24527f;
+  --accent-strong: #79b8ff;
+  --on-accent: #0b1520;
+  --on-strong: #ffffff;
+  --danger: #ff7b72;
+  --danger-soft: #3d1a1d;
+  --warn: #e3b341;
+  --warn-soft: #3a2e0c;
+  --warn-line: #8a6a14;
+  --ok: #56d364;
+  --ok-soft: #12301b;
+  --purple: #b392f0;
+  --orange: #ffa657;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-lift: 0 4px 12px rgba(0, 0, 0, 0.55), 0 14px 32px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 8px 30px rgba(0, 0, 0, 0.7);
+  --scrim: rgba(0, 0, 0, 0.6);
+  --select-fill: rgba(88, 166, 255, 0.18);
+  --flash: rgba(88, 166, 255, 0.3);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239aa7b6' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --edge-flow: #a9b8cc;
+  --edge-reference: #5fc4c5;
+  --edge-meaning: #6b7a8e;
+  --edge-superseded: #6a727c;
+  --edge-orphan: #ff7b72;
+  --fill-table: #2b3a4d;
+  --fill-view: #3a3252;
+  --fill-streaming: #1f3d2b;
+  --fill-default: #2d333b;
+  --fill-other: #3a424d;
+  --pal-1: #5a2d2d;
+  --pal-2: #5a4220;
+  --pal-3: #54501f;
+  --pal-4: #2c4a27;
+  --pal-5: #1f4a44;
+  --pal-6: #25405f;
+  --pal-7: #3f3560;
+  --pal-8: #5a2d4c;
+}
 * {
   box-sizing: border-box;
 }
@@ -101,7 +194,7 @@ input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='color
 textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--white);
+  background: var(--surface);
 }
 
 button,
@@ -120,7 +213,7 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: var(--grey-50);
+  background: var(--hover);
   border-color: var(--grey-300);
 }
 
@@ -141,7 +234,7 @@ select:focus {
 select {
   appearance: none;
   padding-right: var(--space-5);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23656d76' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: var(--select-chevron);
   background-repeat: no-repeat;
   background-position: right var(--space-2) center;
   cursor: pointer;
@@ -187,7 +280,7 @@ button.ghost {
 }
 
 button.ghost:hover:not(:disabled) {
-  background: var(--grey-100);
+  background: var(--border);
   border-color: transparent;
 }
 
@@ -209,6 +302,8 @@ button.compact {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-1) var(--space-3);
+  background: var(--surface-shell);
+  border-top: 3px solid var(--accent);
   border-bottom: 1px solid var(--border);
 }
 
@@ -237,7 +332,7 @@ button.compact {
 .segmented button {
   border: 0;
   border-radius: 0;
-  background: var(--white);
+  background: var(--surface);
 }
 
 .segmented button + button {
@@ -251,17 +346,20 @@ button.compact {
 .segmented button.active,
 .segmented button.active:hover:not(:disabled) {
   background: var(--accent);
-  color: var(--white);
+  color: var(--on-accent);
 }
 
 .workspace {
   flex: 1;
   min-height: 0;
+  background: var(--surface-shell);
 }
 
+/* A gutter in the shell colour between the panels, with a hairline on each side. */
 .resize-handle {
   width: 6px;
-  background: var(--grey-100);
+  background: var(--surface-shell);
+  border-inline: 1px solid var(--border);
   cursor: col-resize;
 }
 
@@ -277,9 +375,30 @@ button.compact {
   padding: var(--space-2) var(--space-2);
 }
 
+/* Sidebars and panels sit on a tinted neutral. */
+.picker,
+.details {
+  background: var(--surface-panel);
+}
+
+.picker {
+  border-right: 1px solid var(--border);
+}
+
+.details {
+  border-left: 1px solid var(--border);
+}
+
+/* The workspace is a page (raised surface) for Concepts and Ask, and the recessed canvas for Graph and Canvas. */
 .main {
   position: relative;
   padding: 0;
+  background: var(--surface);
+}
+
+.main[data-view='canvas'],
+.main[data-view='graph'] {
+  background: var(--surface-canvas);
 }
 
 .panel-header,
@@ -353,11 +472,13 @@ button.compact {
   min-height: 0;
 }
 
+/* Toolbars are their own band: a lighter strip above the canvas. */
 .graph-toolbar {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
   padding: var(--space-1) var(--space-2);
+  background: var(--surface-strip);
   border-bottom: 1px solid var(--border);
   min-width: 0;
 }
@@ -449,6 +570,7 @@ button.compact {
   padding: var(--space-2);
   border: 1px solid var(--grey-300);
   border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
   color: var(--text);
   font-size: var(--fs-sm);
   line-height: 1.3;
@@ -475,6 +597,11 @@ button.compact {
 .tbl-node.is-selected {
   border-color: var(--orange);
   border-width: 3px;
+  box-shadow: var(--shadow-lift);
+}
+
+.react-flow__node.dragging .tbl-node {
+  box-shadow: var(--shadow-lift);
 }
 
 .tbl-node.is-faded {
@@ -498,7 +625,7 @@ button.compact {
   padding: 0 var(--space-1);
   border: 1px solid var(--grey-300);
   border-radius: var(--radius-panel);
-  background: var(--white);
+  background: var(--surface);
   color: var(--muted);
   font-size: var(--fs-sm);
   line-height: 13px;
@@ -594,11 +721,11 @@ button.compact {
 }
 
 .legend-kinds .tbl {
-  background: var(--grey-100);
+  background: var(--border);
 }
 
 .legend-kinds .view {
-  background: var(--grey-100);
+  background: var(--border);
 }
 
 .legend-kinds .st {
@@ -680,7 +807,7 @@ table.cols {
 }
 
 table.cols td {
-  border-bottom: 1px solid var(--grey-100);
+  border-bottom: 1px solid var(--border);
   padding: 2px var(--space-1);
   vertical-align: top;
 }
@@ -872,7 +999,7 @@ table.cols td {
   align-self: center;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--white);
+  background: var(--surface);
   color: var(--accent);
   font-size: var(--fs-sm);
   line-height: 1;
@@ -932,7 +1059,7 @@ table.cols td {
   z-index: 5; /* its menus open over the stage */
   display: block;
   padding: var(--space-1) var(--space-2);
-  background: var(--white);
+  background: var(--surface-strip);
   border-bottom: 1px solid var(--border);
 }
 
@@ -956,7 +1083,7 @@ table.cols td {
   display: flex;
   justify-content: center;
   padding: var(--space-1) var(--space-2);
-  background: var(--white);
+  background: var(--surface-strip);
   border-top: 1px solid var(--border);
 }
 
@@ -973,16 +1100,21 @@ table.cols td {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--white);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  box-shadow: 0 1px 3px rgba(31, 35, 40, 0.2);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
 }
 
 .qw-node.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-lift);
+}
+
+/* Dragging lifts a window the same way, whether or not it is selected. */
+.react-flow__node.dragging .qw-node {
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-lift);
 }
 
 /*
@@ -1074,7 +1206,7 @@ table.cols td {
 .qw-title-input:hover,
 .qw-title-input:focus {
   border-color: var(--border);
-  background: var(--white);
+  background: var(--surface);
   outline: none;
 }
 
@@ -1146,7 +1278,7 @@ table.cols td {
 
 .qw-splitter {
   height: 6px;
-  background: var(--grey-100);
+  background: var(--border);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   cursor: row-resize;
@@ -1226,7 +1358,7 @@ table.cols td {
 }
 
 .react-flow__panel button {
-  box-shadow: 0 1px 2px rgba(31, 35, 40, 0.2);
+  box-shadow: var(--shadow-card);
 }
 
 /* Query window tabs (Results | Chart) and the chart tab */
@@ -1581,7 +1713,7 @@ table.cols td {
 /* ---- Results grid selection ------------------------------------------------ */
 
 .qw-grid {
-  --qw-sel-fill: rgba(9, 105, 218, 0.12);
+  --qw-sel-fill: var(--select-fill);
   --qw-sel-line: var(--accent);
   outline: none;
 }
@@ -1661,8 +1793,8 @@ table.cols td {
   padding: var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  background: var(--white);
-  box-shadow: 0 6px 20px rgba(31, 35, 40, 0.2);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
   font-size: var(--fs-sm);
   outline: none;
 }
@@ -1772,8 +1904,8 @@ table.cols td {
   padding: var(--space-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  background: var(--white);
-  box-shadow: 0 6px 20px rgba(31, 35, 40, 0.2);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
   font-size: var(--fs-sm);
   user-select: none;
 }
@@ -1958,7 +2090,7 @@ table.cols td {
   min-width: 10px;
   min-height: 10px;
   background: var(--ok);
-  border: 1px solid var(--white);
+  border: 1px solid var(--surface);
   cursor: crosshair;
 }
 
@@ -1985,7 +2117,7 @@ table.cols td {
 .tbl-cols {
   margin: 4px -8px -8px;
   border-top: 1px solid var(--grey-300);
-  background: rgba(255, 255, 255, 0.55);
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
   padding-bottom: var(--space-1);
 }
 
@@ -2049,7 +2181,7 @@ table.cols td {
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--border);
-  background: var(--white);
+  background: var(--surface);
   min-height: 0;
 }
 
@@ -2091,7 +2223,7 @@ table.cols td {
 .sg-table td {
   text-align: left;
   padding: 2px var(--space-2) 2px 0;
-  border-bottom: 1px solid var(--grey-100);
+  border-bottom: 1px solid var(--border);
   position: relative;
 }
 
@@ -2149,7 +2281,7 @@ button.link {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(27, 31, 36, 0.4);
+  background: var(--scrim);
   z-index: 50;
   display: flex;
   align-items: flex-start;
@@ -2158,13 +2290,14 @@ button.link {
 }
 
 .modal {
-  background: var(--white);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-panel);
   padding: var(--space-4) var(--space-4);
   width: min(760px, 92vw);
   max-height: 84vh;
   overflow: auto;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-pop);
 }
 
 .mine-window {
@@ -2196,11 +2329,11 @@ button.link {
   display: flex;
   gap: var(--space-1);
   align-items: center;
-  background: var(--white);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
   padding: var(--space-1);
-  box-shadow: 0 1px 3px rgba(31, 35, 40, 0.2);
+  box-shadow: var(--shadow-card);
 }
 
 .sk-editbar {
@@ -2232,7 +2365,7 @@ button.link {
   justify-content: center;
   min-width: var(--control-h);
   padding: 0 var(--space-1);
-  background: var(--white);
+  background: var(--surface);
   border-color: transparent;
 }
 
@@ -2265,10 +2398,10 @@ button.link {
   z-index: 20;
   margin-bottom: var(--space-1);
   padding: var(--space-2);
-  background: var(--white);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  box-shadow: 0 4px 12px rgba(31, 35, 40, 0.2);
+  box-shadow: var(--shadow-pop);
   min-width: 190px;
 }
 
@@ -2294,7 +2427,7 @@ button.link {
   position: absolute;
   z-index: 30;
   border: 1.5px dashed var(--accent);
-  background: rgba(9, 105, 218, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   pointer-events: none;
 }
 
@@ -2343,7 +2476,7 @@ button.link {
 
 textarea.sk-editor {
   outline: 1px solid var(--accent);
-  background: rgba(255, 255, 255, 0.85);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
   padding: var(--space-1);
   width: 100%;
   height: 100%;
@@ -2366,7 +2499,7 @@ textarea.sk-editor {
 
 .sk-node.sk-sticky {
   border: 1px solid;
-  box-shadow: 2px 3px 6px rgba(31, 35, 40, 0.2);
+  box-shadow: var(--shadow-card);
 }
 
 .sk-lock {
@@ -2454,7 +2587,7 @@ textarea.sk-editor {
   width: 10px;
   height: 10px;
   background: var(--accent);
-  border: 2px solid var(--white);
+  border: 2px solid var(--surface);
   opacity: 0;
   transition: opacity 0.1s;
 }
@@ -2483,7 +2616,7 @@ textarea.sk-editor {
 
 /* Placeholder table */
 .sk-placeholder-node {
-  background: var(--white);
+  background: var(--surface);
   border: 2px solid;
   border-radius: var(--radius);
   height: auto;
@@ -2504,21 +2637,21 @@ textarea.sk-editor {
   flex: 1;
   min-width: 0;
   font-weight: var(--fw-strong);
-  background: rgba(255, 255, 255, 0.15);
-  color: var(--white);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: color-mix(in srgb, var(--on-strong) 15%, transparent);
+  color: var(--on-strong);
+  border: 1px solid color-mix(in srgb, var(--on-strong) 40%, transparent);
   border-radius: var(--radius);
   padding: 2px var(--space-1);
 }
 
 .ph-name::placeholder {
-  color: rgba(255, 255, 255, 0.7);
+  color: color-mix(in srgb, var(--on-strong) 70%, transparent);
 }
 
 .ph-badge {
   font-size: var(--fs-sm);
-  color: var(--white);
-  background: rgba(0, 0, 0, 0.25);
+  color: var(--on-strong);
+  background: color-mix(in srgb, var(--text) 25%, transparent);
   border-radius: var(--radius-panel);
   padding: 0 var(--space-2);
 }
@@ -2558,7 +2691,7 @@ textarea.sk-editor {
 .ph-row input:hover,
 .ph-row input:focus {
   border-color: var(--border);
-  background: var(--white);
+  background: var(--surface);
 }
 
 .ph-col-name {
@@ -2627,7 +2760,7 @@ textarea.sk-editor {
   pointer-events: all;
   padding: 1px var(--space-2);
   font-size: var(--fs-sm);
-  background: var(--white);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   min-width: 24px;
@@ -2714,7 +2847,7 @@ textarea.sk-editor {
 }
 
 .sk-swatch.none {
-  background: linear-gradient(135deg, var(--white) 45%, var(--danger) 45%, var(--danger) 55%, var(--white) 55%);
+  background: linear-gradient(135deg, var(--surface) 45%, var(--danger) 45%, var(--danger) 55%, var(--surface) 55%);
 }
 
 .sk-geo {
@@ -2762,7 +2895,7 @@ textarea.sk-editor {
 
 [data-exporting] .qw-node.selected {
   border-color: var(--border);
-  box-shadow: 0 1px 3px rgba(31, 35, 40, 0.2);
+  box-shadow: var(--shadow-card);
 }
 
 /* Dragging a marquee or a shape must not select the page's text. Windows keep theirs, so grids and SQL stay copyable. */
@@ -2791,6 +2924,7 @@ textarea.sk-editor {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
+  background: var(--surface-strip);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
@@ -2825,6 +2959,7 @@ textarea.sk-editor {
 }
 
 .concept-list {
+  background: var(--surface-panel);
   border-right: 1px solid var(--border);
   overflow: auto;
   padding: var(--space-2);
@@ -2863,7 +2998,7 @@ textarea.sk-editor {
   text-align: left;
   margin-bottom: var(--space-1);
   padding: var(--space-1) var(--space-2);
-  background: var(--white);
+  background: var(--surface);
 }
 
 .concept-item.active {
@@ -3118,6 +3253,7 @@ button.as-link {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-3);
+  background: var(--surface-strip);
   border-bottom: 1px solid var(--border);
 }
 
@@ -3209,7 +3345,7 @@ button.as-link {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--space-1) var(--space-2);
-  background: var(--white);
+  background: var(--surface);
 }
 
 .ask-sql-text {
@@ -3242,7 +3378,7 @@ button.as-link {
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 2px var(--space-1) 2px var(--space-2);
-  background: var(--white);
+  background: var(--surface);
 }
 
 .ask-chip-name {
@@ -3370,10 +3506,10 @@ button.as-link {
   flex-direction: column;
   gap: var(--space-1);
   min-width: 190px;
-  background: var(--white);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  box-shadow: 0 4px 12px rgba(31, 35, 40, 0.2);
+  box-shadow: var(--shadow-pop);
 }
 
 .ld-panel {
@@ -3383,10 +3519,10 @@ button.as-link {
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-2);
-  background: var(--white);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 1px 2px rgba(31, 35, 40, 0.2);
+  box-shadow: var(--shadow-card);
 }
 
 .ld-head {
@@ -3535,7 +3671,7 @@ button.as-link {
   background: var(--warn-soft);
   border: 1px solid var(--warn-line);
   border-radius: var(--radius-panel);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-pop);
 }
 
 .agent-problem {
@@ -3585,7 +3721,7 @@ button.as-link {
 button.app-dialog-danger {
   background: var(--danger);
   border-color: var(--danger);
-  color: var(--white);
+  color: var(--on-accent);
 }
 
 /* Graph details: constraints and the key sets of a joined pair */
@@ -3619,7 +3755,7 @@ button.app-dialog-danger {
   margin-left: var(--space-2);
   padding: 0 var(--space-1);
   border-radius: var(--radius-panel);
-  background: rgba(0, 0, 0, 0.07);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   color: var(--grey-700);
   font-size: var(--fs-sm);
   font-weight: var(--fw-normal);
@@ -3643,7 +3779,7 @@ button.app-dialog-danger {
   padding: 0 var(--space-1);
   border: 1px solid var(--grey-300);
   border-radius: var(--radius-panel);
-  background: var(--white);
+  background: var(--surface);
   color: var(--purple);
   font-size: var(--fs-sm);
   line-height: 14px;
@@ -3702,9 +3838,9 @@ button.app-dialog-danger {
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--grey-300);
   border-radius: var(--radius-panel);
-  background: var(--white);
+  background: var(--surface);
   font-size: var(--fs-sm);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-card);
 }
 
 .edge-trace-label {
@@ -3713,7 +3849,7 @@ button.app-dialog-danger {
   padding: 0 var(--space-1);
   border: 1px solid var(--grey-700);
   border-radius: var(--radius-panel);
-  background: var(--white);
+  background: var(--surface);
   color: var(--grey-700);
   font-size: var(--fs-sm);
   line-height: 14px;
@@ -3802,7 +3938,7 @@ button.app-dialog-danger {
   justify-content: center;
   border-style: double;
   border-width: 4px;
-  background: var(--grey-100);
+  background: var(--border);
   font-weight: var(--fw-strong);
 }
 
@@ -3812,7 +3948,7 @@ button.app-dialog-danger {
   height: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  background: rgba(238, 242, 246, 0.45);
+  background: color-mix(in srgb, var(--grey-50) 45%, transparent);
   pointer-events: none;
 }
 
@@ -3870,8 +4006,14 @@ button.app-dialog-danger {
 }
 
 div.react-flow.react-flow {
-  --xy-controls-button-background-color-default: var(--white);
-  --xy-controls-button-background-color-hover-default: var(--grey-50);
+  --xy-background-color: var(--surface-canvas);
+  --xy-background-color-default: var(--surface-canvas);
+  --xy-minimap-background-color-default: var(--surface);
+  --xy-controls-button-color-default: var(--text);
+  --xy-controls-button-color-hover-default: var(--text);
+  --xy-attribution-background-color-default: transparent;
+  --xy-controls-button-background-color-default: var(--surface);
+  --xy-controls-button-background-color-hover-default: var(--hover);
   --xy-controls-button-border-color-default: var(--border);
   --xy-resize-background-color-default: var(--accent);
 }
@@ -3907,7 +4049,7 @@ div.react-flow.react-flow {
 .graph-empty-card {
   pointer-events: auto;
   padding: var(--space-4);
-  background: var(--white);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
 }
@@ -3951,7 +4093,7 @@ button.chip-button {
   align-items: center;
   gap: var(--space-1) var(--space-2);
   padding-top: var(--space-1);
-  border-top: 1px solid var(--grey-100);
+  border-top: 1px solid var(--border);
 }
 
 .sk-select-hint {
@@ -3988,7 +4130,7 @@ button.chip-button {
   align-items: center;
   gap: var(--space-2);
   padding-top: var(--space-3);
-  border-top: 1px solid var(--grey-100);
+  border-top: 1px solid var(--border);
 }
 
 .ask-examples {

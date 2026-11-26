@@ -46,7 +46,7 @@ describe('edge families', () => {
     for (const s of ['derived', 'accepted', 'superseded', 'rejected'] as const) expect(isInferred(info('fk', { status: s }))).toBe(false)
     expect(edgeStyle('reference', false).strokeDasharray).toBeUndefined()
     expect(edgeStyle('reference', true).strokeDasharray).toBeDefined()
-    expect(edgeStyle('flow', true, true).stroke).toBe('#bbb') // superseded wins
+    expect(edgeStyle('flow', true, true).stroke).toBe('var(--edge-superseded)') // superseded wins
     // Flow is the strongest line, meaning the lightest.
     expect(edgeStyle('flow', false).strokeWidth!).toBeGreaterThan(edgeStyle('reference', false).strokeWidth!)
     expect(edgeStyle('reference', false).strokeWidth!).toBeGreaterThan(edgeStyle('meaning', false).strokeWidth!)

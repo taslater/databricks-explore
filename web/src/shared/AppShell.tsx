@@ -51,7 +51,7 @@ export function AppShell() {
         </Panel>
         <Separator className="resize-handle" />
         <Panel id="main" minSize="30%">
-          <main className="main" aria-label="Workspace">
+          <main className="main" aria-label="Workspace" data-view={view}>
             {pickerCollapsed && (
               <button
                 className="show-picker"

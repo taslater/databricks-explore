@@ -53,7 +53,7 @@ export function EdgeEnd({ x, y, side, end, stroke, width, opacity = 1 }: { x: nu
         ) : 'foot' in m ? (
           <path key={i} d={`M0 -6 L${m.foot} 0 L0 6`} />
         ) : (
-          <circle key={i} cx={m.ring} cy={0} r={RING} fill="#fff" />
+          <circle key={i} cx={m.ring} cy={0} r={RING} fill="var(--surface)" />
         ),
       )}
     </g>

@@ -9,7 +9,7 @@ export function OrphanTick({ x, y, side, profile, faded }: { x: number; y: numbe
   return (
     <g transform={`translate(${at.x} ${at.y}) rotate(${at.rotate})`} opacity={faded ? 0.2 : 1} data-testid="orphan-tick" style={{ pointerEvents: 'all' }}>
       <title>{orphanText(profile) ?? ''}</title>
-      <line x1={TICK_AT - 2.5} y1={-TICK_HALF} x2={TICK_AT + 2.5} y2={TICK_HALF} stroke="#d1242f" strokeWidth={2.4} strokeLinecap="round" />
+      <line x1={TICK_AT - 2.5} y1={-TICK_HALF} x2={TICK_AT + 2.5} y2={TICK_HALF} stroke="var(--edge-orphan)" strokeWidth={2.4} strokeLinecap="round" />
       <line x1={TICK_AT} y1={-TICK_HALF - 3} x2={TICK_AT} y2={TICK_HALF + 3} stroke="transparent" strokeWidth={10} />
     </g>
   )

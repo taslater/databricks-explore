@@ -3,6 +3,7 @@ import {
   ConnectionMode,
   Controls,
   ReactFlow,
+  Background,
   ReactFlowProvider,
   useReactFlow,
   type NodeMouseHandler,
@@ -255,6 +256,7 @@ function GraphCanvas() {
       multiSelectionKeyCode={MULTI_SELECT_KEYS}
       minZoom={0.05}
     >
+      <Background gap={24} size={1.5} color="var(--canvas-dot)" />
       <Controls showInteractive={false} />
     </ReactFlow>
   )

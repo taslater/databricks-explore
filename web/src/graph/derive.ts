@@ -172,7 +172,7 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
     const filtered = !edgeShown(info, filters)
     const hidden = !from || !to || filtered || !!src.hidden || !!tgt.hidden
     if (!hidden) covered.add([info.kind, ...[e.source, e.target].sort()].join('|'))
-    const color = superseded ? EDGE_COLORS.superseded : (EDGE_COLORS[info.kind] ?? '#999')
+    const color = superseded ? EDGE_COLORS.superseded : (EDGE_COLORS[info.kind] ?? 'var(--edge-superseded)')
     const srcSize = sizeById.get(e.source) ?? { width: 0, height: 0 }
     const tgtSize = sizeById.get(e.target) ?? { width: 0, height: 0 }
     const handles = columnHandles(
@@ -196,7 +196,7 @@ export function deriveFlow(input: DeriveInput): { nodes: FlowNode[]; edges: Flow
   const edges: FlowEdge[] = input.edges.map((e) => {
     const info = e.data!.info
     const superseded = isSuperseded(info)
-    const color = superseded ? EDGE_COLORS.superseded : (EDGE_COLORS[info.kind] ?? '#999')
+    const color = superseded ? EDGE_COLORS.superseded : (EDGE_COLORS[info.kind] ?? 'var(--edge-superseded)')
     const src = nodeById.get(e.source)
     const tgt = nodeById.get(e.target)
     const srcSize = sizeById.get(e.source) ?? { width: 0, height: 0 }
