@@ -2,11 +2,15 @@
 // start) at two viewports and reports generic defects (irreversible transitions, toggles that cannot be undone, obscure exits,
 // occluded or overlapping controls, clipped text). No LLM, no feature knowledge. See audit/README.md.
 // It is a reporter, not a gate: the test passes whatever it finds. Output: web/audit-out/ui-findings.json, graph.json, screens/.
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test'
+import { expect, test as base, type Browser, type BrowserContext, type Page } from '@playwright/test'
 import { start } from '../e2e/helpers'
+import { SEVERITY, type Finding, type Part } from './report'
 
 const OUT = fileURLToPath(new URL('../audit-out', import.meta.url))
 const num = (name: string, dflt: number) => Number(process.env[name] ?? dflt)
@@ -26,60 +30,8 @@ const MAX_ACTIONS = num('AUDIT_ACTIONS', 45)
 const EXTRA_ACTIONS = num('AUDIT_EXTRA', 20) // return attempts after the crawl
 const TOGGLE_CHECKS = num('AUDIT_TOGGLES', 8) // toggle-not-undoable replays per crawl
 const PER_STATE_RETURN_TRIES = 10 // actions tried in B when looking for a way back
-const SEVERITY: Record<string, 'high' | 'medium' | 'low' | 'info'> = {
-  'irreversible-transition': 'high',
-  'toggle-not-undoable': 'high',
-  'occluded-control': 'high',
-  'only-obscure-exit': 'medium',
-  'offscreen-control': 'medium',
-  'overlapping-controls': 'medium',
-  'escape-does-nothing': 'low',
-  'clipped-text': 'low',
-  'small-target': 'info',
-}
-const WEIGHT = { high: 10, medium: 4, low: 1, info: 0 }
-const LOW_CONFIDENCE_FACTOR = 0.25 // a finding the rule labels low-confidence counts a quarter of its weight
-const LOW_CONFIDENCE_CAP = 15 // and all of them together never weigh more than this
 // Folders under the data dir that hold what a user creates; the caches and logs are left alone.
 const USER_DATA = ['canvases', 'canvas_history', 'diagrams', 'diagram_history', 'relationships']
-
-// ---- expected.json: by-design findings, a maintainer's decision. They stay in the report, marked expected, and do not count toward the score. ----
-type Expected = { rule: string; control: RegExp | string; root?: string; viewport?: string; reason: string; raw: unknown }
-function loadExpected(): Expected[] {
-  const file = fileURLToPath(new URL('./expected.json', import.meta.url))
-  if (!existsSync(file)) return []
-  const bad = (i: number, why: string) => new Error('audit/expected.json entry ' + i + ': ' + why)
-  const data: unknown = JSON.parse(readFileSync(file, 'utf8'))
-  if (!Array.isArray(data)) throw new Error('audit/expected.json must be an array of entries')
-  return data.map((raw, i) => {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw bad(i, 'not an object')
-    const e = raw as Record<string, unknown>
-    for (const k of Object.keys(e)) if (!['rule', 'control', 'root', 'viewport', 'reason'].includes(k)) throw bad(i, 'unknown key "' + k + '"')
-    if (typeof e.rule !== 'string' || !(e.rule in SEVERITY)) throw bad(i, 'rule must be one of ' + Object.keys(SEVERITY).join(', '))
-    if (typeof e.control !== 'string' || !e.control.trim()) throw bad(i, 'control must be a non-empty string or /regex/')
-    if (typeof e.reason !== 'string' || !e.reason.trim()) throw bad(i, 'reason is required and must not be empty')
-    for (const k of ['root', 'viewport'] as const) if (e[k] !== undefined && (typeof e[k] !== 'string' || !(e[k] as string).trim())) throw bad(i, k + ' must be a non-empty string')
-    let control: RegExp | string = e.control
-    const m = /^\/(.+)\/([a-z]*)$/.exec(e.control)
-    if (m) {
-      try {
-        control = new RegExp(m[1], m[2])
-      } catch {
-        throw bad(i, 'control is not a valid regular expression')
-      }
-    }
-    return { rule: e.rule, control, root: e.root as string | undefined, viewport: e.viewport as string | undefined, reason: e.reason, raw }
-  })
-}
-const expectedList = loadExpected()
-const nameOf = (label: string) => /"(.*)"/.exec(label)?.[1] ?? label
-/** A string control equals the control's name (or its whole label); a regex is tested against both. irreversible-transition also matches the first click of the repro, because one one-way action shows up under every state it leads to. */
-function expectedMatches(x: Expected, f: Finding): boolean {
-  const names = [f.control, nameOf(f.control)]
-  if (f.ruleId === 'irreversible-transition' && f.repro[1]) names.push(f.repro[1], nameOf(f.repro[1]))
-  const hit = names.some((n) => (typeof x.control === 'string' ? n === x.control : x.control.test(n)))
-  return hit && x.rule === f.ruleId && f.where.some((w) => (!x.root || w.root === x.root) && (!x.viewport || w.viewport === x.viewport))
-}
 
 type Act = { key: string; label: string; name: string; role: string }
 type Snap = { sig: string; struct: string; controls: Ctl[]; off: Off[]; meta: string; overlaps: Overlap[]; open: string[]; url: string }
@@ -113,19 +65,6 @@ type Ctl = {
 }
 type State = { id: string; sig: string; struct: string; path: Act[]; depth: number; actions: Act[]; explored: Set<string>; shot: string; controls: Ctl[]; off: Off[]; meta: string; open: string[] }
 type Edge = { from: string; action: string; to: string; label: string }
-type Where = { root: string; viewport: string; stateId: string }
-type Finding = {
-  ruleId: string
-  severity: string
-  control: string
-  detail: string
-  occluder?: string
-  screenshot: string
-  repro: string[]
-  confidence: 'high' | 'low' // low: the rule itself says the evidence is incomplete or heuristic
-  where: Where[]
-}
-
 /** Runs inside the page: every visible, enabled interactive control, in DOM order, with geometry, the element at its centre and clipping. */
 function collect() {
   const SEL = 'button,[role=button],a[href],[role=tab],[role=menuitem]'
@@ -306,7 +245,21 @@ const fnv = (s: string) => {
 // Free text and counters in names (row counts, timings) would make the signature unstable.
 const stable = (s: string) => s.replace(/\d+/g, '#')
 
+/** Wall time per activity of the crawl in progress (a worker runs one crawl at a time), reported in summary.timing. */
+const newTiming = () => ({ resetMs: 0, resetWipeMs: 0, replayMs: 0, actMs: 0, settleMs: 0, snapshotMs: 0, screenshotMs: 0, resets: 0, snapshots: 0, settles: 0, screenshots: 0 })
+let tm = newTiming()
+
 async function snapshot(page: Page): Promise<Snap> {
+  const t = Date.now()
+  try {
+    return await snapshotInner(page)
+  } finally {
+    tm.snapshotMs += Date.now() - t
+    tm.snapshots++
+  }
+}
+
+async function snapshotInner(page: Page): Promise<Snap> {
   const { controls, off, overlaps, overlays, open, path, behind } = await page.evaluate(collect)
   const real = controls.filter((c) => c.role !== 'label')
   const items = real.map((c) => ({ r: c.role, n: stable(c.name), p: c.pressed, e: c.expanded }))
@@ -317,8 +270,11 @@ async function snapshot(page: Page): Promise<Snap> {
 }
 
 async function settle(page: Page, ms = 300) {
+  const t = Date.now()
   await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {})
   await page.waitForTimeout(ms)
+  tm.settleMs += Date.now() - t
+  tm.settles++
 }
 
 /** The same control in another state: by testid/id, else DOM position, else class list and screen position (names change, e.g. Maximize -> Restore). */
@@ -381,14 +337,53 @@ function counterpart(a: string, b: string): boolean {
 /** A control whose label says it leaves: a user would look for it whatever its position. */
 const LABELLED_EXIT = /^(close|cancel|dismiss|done|back|undo|restore|ok)\b/i
 
-test('crawl every top-level view and report UI defects', async ({ browser }, testInfo) => {
-  rmSync(OUT, { recursive: true, force: true })
-  mkdirSync(join(OUT, 'screens'), { recursive: true })
-  const baseURL = testInfo.project.use.baseURL as string
-  const origin = new URL(baseURL).origin
-  const dataDir = process.env.AUDIT_DATA_DIR!
-  const t0 = Date.now()
+/** A demo server of its own for each worker: its own port and data folder, so crawls in different workers never share state. */
+type Server = { baseURL: string; dataDir: string }
+const freePort = () =>
+  new Promise<number>((resolve, reject) => {
+    const s = createServer()
+    s.once('error', reject)
+    s.listen(0, '127.0.0.1', () => {
+      const port = (s.address() as { port: number }).port
+      s.close(() => resolve(port))
+    })
+  })
+const test = base.extend<object, { server: Server }>({
+  server: [
+    async ({}, use) => {
+      const port = await freePort()
+      const dataDir = mkdtempSync(join(tmpdir(), 'explore-audit-'))
+      const baseURL = 'http://127.0.0.1:' + port
+      const proc = spawn('uv', ['run', 'databricks-explore', '--demo', '--no-browser', '--port', String(port), '--data-dir', dataDir], {
+        cwd: fileURLToPath(new URL('../..', import.meta.url)),
+        detached: true,
+        stdio: 'ignore',
+      })
+      try {
+        const deadline = Date.now() + 120_000
+        for (;;) {
+          if (proc.exitCode !== null) throw new Error('the demo server exited with code ' + proc.exitCode)
+          if (await fetch(baseURL + '/api/profiles').then((r) => r.ok, () => false)) break
+          if (Date.now() > deadline) throw new Error('the demo server did not start within 120 s')
+          await new Promise((r) => setTimeout(r, 100))
+        }
+        await use({ baseURL, dataDir })
+      } finally {
+        try {
+          process.kill(-proc.pid!, 'SIGTERM')
+        } catch {
+          /* already gone */
+        }
+        rmSync(dataDir, { recursive: true, force: true })
+      }
+    },
+    { scope: 'worker', timeout: 150_000 },
+  ],
+})
 
+async function crawl(browser: Browser, baseURL: string, dataDir: string, root: string, vp: { width: number; height: number }, order: number) {
+  const origin = new URL(baseURL).origin
+  const t0 = Date.now()
   const findings = new Map<string, Finding>()
   const crawls: Record<string, unknown>[] = []
   const graphs: Record<string, unknown>[] = []
@@ -397,6 +392,7 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
     const vpName = vp.width + 'x' + vp.height
     const prefix = root.toLowerCase().replace(/[^a-z]+/g, '-') + '-' + vp.width
     const tStart = Date.now()
+    tm = newTiming()
     let ctx: BrowserContext | undefined
     let page!: Page
     let leftApp = false
@@ -405,6 +401,16 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
     // Everything a click can persist must be wiped: canvases, saved diagrams and the relationship/concept database. Missing one makes
     // every later reset start from a different state (Concepts: one saved concept made the start state differ for the rest of the crawl).
     async function reset(): Promise<Snap> {
+      const tR = Date.now()
+      try {
+        return await resetInner()
+      } finally {
+        tm.resetMs += Date.now() - tR
+        tm.resets++
+      }
+    }
+    async function resetInner(): Promise<Snap> {
+      const tW = Date.now()
       await ctx?.close().catch(() => {})
       await new Promise((r) => setTimeout(r, 300)) // a request the closed page left in flight (a saved concept) must land before the wipe, not after it
       for (const d of USER_DATA) {
@@ -414,6 +420,7 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
           /* folder not there yet */
         }
       }
+      tm.resetWipeMs += Date.now() - tW
       ctx = await browser.newContext({ baseURL, viewport: vp })
       page = await ctx.newPage()
       leftApp = false
@@ -515,7 +522,10 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
       if (states.size >= cap) return null
       const id = 's' + states.size
       const shot = 'screens/' + prefix + '-' + id + '.png'
+      const tS = Date.now()
       await page.screenshot({ path: join(OUT, shot) }).catch(() => {})
+      tm.screenshotMs += Date.now() - tS
+      tm.screenshots++
       const state: State = { id, sig: snap.sig, struct: snap.struct, path, depth: path.length, actions: actionsOf(snap), explored: new Set(), shot, controls: snap.controls, off: snap.off, meta: snap.meta, open: snap.open }
       states.set(id, state)
       bySig.set(snap.sig, id)
@@ -537,11 +547,13 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
             if (resetDiffs.length < 5 && startSnap) resetDiffs.push(brief(diffStates(startSnap, s, false)) || 'same controls, different signature')
             ok = false
           } else {
+            const tP = Date.now()
             for (const a of state.path)
               if (!(await perform(a))) {
                 ok = false
                 break
               }
+            tm.replayMs += Date.now() - tP
             if (ok && (await snapshot(page)).sig !== state.sig) replayMismatches++
           }
         } catch (e) {
@@ -562,7 +574,10 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
       actionCount++
       if (actionCount % 20 === 0) console.log('audit progress [' + root + ' ' + vpName + ']: ' + actionCount + ' actions, ' + states.size + ' states, ' + Math.round((Date.now() - t0) / 1000) + 's')
       if (!(await goTo(state))) return void state.explored.delete(a.key) // not tried: it must not count as tried, or an edge would look checked
-      if (!(await perform(a))) return void (cur = null)
+      const tA = Date.now()
+      const performed = await perform(a)
+      tm.actMs += Date.now() - tA
+      if (!performed) return void (cur = null)
       if (leftApp) return void (cur = null)
       const snap = await snapshot(page)
       cur = snap.sig === state.sig ? state.id : null
@@ -739,7 +754,7 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
     }
 
     const seconds = Math.round((Date.now() - tStart) / 1000)
-    crawls.push({ root, viewport: vpName, states: states.size, edges: edges.length, actions: actionCount, crawledActions: crawled, resetFailures, replayMismatches, resetDiffs, unverifiedReturns: unverified.length, unverified, seconds })
+    crawls.push({ root, viewport: vpName, states: states.size, edges: edges.length, actions: actionCount, crawledActions: crawled, resetFailures, replayMismatches, resetDiffs, unverifiedReturns: unverified.length, unverified, seconds, timing: { ...tm, totalMs: Date.now() - tStart } })
     graphs.push({
       root, viewport: vpName,
       states: [...states.values()].map((s) => ({ id: prefix + '-' + s.id, sig: s.sig, depth: s.depth, path: s.path.map((p) => p.label), screenshot: s.shot, actions: s.actions.length, explored: s.explored.size, controls: describeControls(s) })),
@@ -749,63 +764,19 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
     console.log('audit crawl ' + root + ' ' + vpName + ': ' + states.size + ' states, ' + edges.length + ' edges, ' + actionCount + ' actions, ' + unverified.length + ' unverified, ' + seconds + 's')
   }
 
-  const onlyRoots = (process.env.AUDIT_ROOTS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
-  const onlyWidths = (process.env.AUDIT_VIEWPORTS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
-  for (const vp of VIEWPORTS) for (const root of ROOTS) if ((!onlyRoots.length || onlyRoots.includes(root.toLowerCase())) && (!onlyWidths.length || onlyWidths.includes(String(vp.width)))) await runCrawl(root, vp)
+  await runCrawl(root, vp)
+  const part: Part = { order, findings: [...findings.entries()], crawl: crawls[0], graph: graphs[0] }
+  mkdirSync(join(OUT, 'parts'), { recursive: true })
+  writeFileSync(join(OUT, 'parts', root.toLowerCase().replace(/[^a-z]+/g, '-') + '-' + vp.width + '.json'), JSON.stringify(part))
+}
 
-  // ---- report ----
-  const list = [...findings.values()].map((f) => ({ ...f, seenIn: f.where.length, expected: false as boolean, expectedReason: undefined as string | undefined }))
-  const used = new Set<number>()
-  for (const f of list) {
-    const i = expectedList.findIndex((x) => expectedMatches(x, f))
-    if (i < 0) continue
-    f.expected = true
-    f.expectedReason = expectedList[i].reason
-    used.add(i)
-  }
-  const staleExpected = expectedList.filter((_, i) => !used.has(i)).map((x) => x.raw)
-  const order = { high: 0, medium: 1, low: 2, info: 3 } as Record<string, number>
-  list.sort((a, b) => order[a.severity] - order[b.severity] || b.seenIn - a.seenIn)
-  const counted = list.filter((f) => !f.expected)
-  const byRule: Record<string, number> = {}
-  const expectedByRule: Record<string, number> = {}
-  for (const f of list) {
-    const m = f.expected ? expectedByRule : byRule
-    m[f.ruleId] = (m[f.ruleId] ?? 0) + 1
-  }
-  // Root causes: occluded and overlapping findings grouped by what sits on top, biggest first.
-  const groups = new Map<string, { occluder: string; count: number; byRule: Record<string, number>; roots: Set<string>; examples: string[]; repro: string[]; screenshot: string; severity: string }>()
-  for (const f of counted) {
-    if (!f.occluder) continue
-    const g = groups.get(f.occluder) ?? { occluder: f.occluder, count: 0, byRule: {}, roots: new Set<string>(), examples: [], repro: f.repro, screenshot: f.screenshot, severity: f.severity }
-    g.count++
-    g.byRule[f.ruleId] = (g.byRule[f.ruleId] ?? 0) + 1
-    if (order[f.severity] < order[g.severity]) g.severity = f.severity
-    f.where.forEach((w) => g.roots.add(w.root))
-    if (g.examples.length < 5 && !g.examples.includes(f.control)) g.examples.push(f.control)
-    groups.set(f.occluder, g)
-  }
-  const rootCauses = [...groups.values()].sort((a, b) => b.count - a.count).map(({ severity, ...g }) => ({ ...g, roots: [...g.roots] }))
-  // Score: each distinct root cause counts once (a group of findings under one occluder is one cause), weighted by severity.
-  // Findings the rule labels low-confidence count a quarter, and together at most LOW_CONFIDENCE_CAP, so a pile of uncertain ones cannot pin the score.
-  let total = 0
-  let lowRaw = 0
-  for (const f of counted)
-    if (!f.occluder) {
-      const w = WEIGHT[f.severity as keyof typeof WEIGHT]
-      if (f.confidence === 'low') lowRaw += w * LOW_CONFIDENCE_FACTOR
-      else total += w
-    }
-  for (const g of groups.values()) total += WEIGHT[g.severity as keyof typeof WEIGHT]
-  const lowCounted = Math.min(lowRaw, LOW_CONFIDENCE_CAP)
-  total += lowCounted
-  const score = Math.round(100 * Math.exp(-total / 50))
-  const summary = {
-    crawls: crawls.length, score, weightedCauses: total, lowConfidenceFindings: counted.filter((f) => f.confidence === 'low').length, lowConfidenceWeight: lowCounted, findingsByRule: byRule, expectedByRule, staleExpected, rootCauses, perCrawl: crawls,
-    states: crawls.reduce((n, c) => n + (c.states as number), 0), actions: crawls.reduce((n, c) => n + (c.actions as number), 0),
-    unverifiedReturns: crawls.reduce((n, c) => n + (c.unverifiedReturns as number), 0), seconds: Math.round((Date.now() - t0) / 1000),
-  }
-  writeFileSync(join(OUT, 'ui-findings.json'), JSON.stringify({ summary, findings: list }, null, 2))
-  writeFileSync(join(OUT, 'graph.json'), JSON.stringify(graphs, null, 2))
-  console.log('audit: ' + summary.crawls + ' crawls, ' + list.length + ' findings (' + JSON.stringify(byRule) + ', expected ' + JSON.stringify(expectedByRule) + ', stale ' + staleExpected.length + '), score ' + score + ', ' + summary.seconds + 's')
-})
+const onlyRoots = (process.env.AUDIT_ROOTS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+const onlyWidths = (process.env.AUDIT_VIEWPORTS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+VIEWPORTS.forEach((vp, vi) =>
+  ROOTS.forEach((root, ri) => {
+    if ((onlyRoots.length && !onlyRoots.includes(root.toLowerCase())) || (onlyWidths.length && !onlyWidths.includes(String(vp.width)))) return
+    test('crawl ' + root + ' at ' + vp.width + 'x' + vp.height, async ({ browser, server }) => {
+      await crawl(browser, server.baseURL, server.dataDir, root, vp, vi * ROOTS.length + ri)
+    })
+  }),
+)
