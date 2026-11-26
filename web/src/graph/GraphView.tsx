@@ -33,6 +33,7 @@ import { withTransforms } from './transformText'
 import { EDGE_COLORS } from './format'
 import { removeFromGraph, REMOVE_KEYS } from './removal'
 import { useGraphStore } from './graphStore'
+import { GraphEmpty } from './GraphEmpty'
 import { GraphToolbar } from './GraphToolbar'
 import { MineDialog } from './MineDialog'
 import { MiningPanel } from './MiningPanel'
@@ -89,6 +90,7 @@ export function GraphView() {
           <GraphCanvas />
         </ReactFlowProvider>
         <TraceBar />
+        <GraphEmpty />
       </div>
       {drawer && <MiningPanel drawer={drawer} />}
       {mineDialog && <MineDialog />}

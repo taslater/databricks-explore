@@ -4,6 +4,13 @@ import { TurnView } from './TurnView'
 import { ask, cancel, newConversation } from './askActions'
 import { isActive, useAskStore } from './askStore'
 
+/** Starting points shown before the first question. They only fill the box; the person sends them. */
+const EXAMPLES = [
+  'Which tables were changed most recently?',
+  'How are the main tables related to each other?',
+  'Which tables look like they hold customer information?',
+]
+
 /** The Ask tab: questions in plain language to Genie One, answered turn by turn in one conversation. */
 export function AskView() {
   const turns = useAskStore((s) => s.turns)
@@ -68,6 +75,14 @@ export function AskView() {
         {connected && !warehouseId && (
           <p className="hint">No SQL warehouse is selected. Genie runs its queries on the selected warehouse, so pick one in the picker.</p>
         )}
+        <div className="ask-examples" role="group" aria-label="Example questions">
+          <span className="hint">Try</span>
+          {EXAMPLES.map((q) => (
+            <button key={q} className="chip-button" disabled={!connected || running} onClick={() => setText(q)}>
+              {q}
+            </button>
+          ))}
+        </div>
         <div className="ask-composer-row">
           <textarea
             value={text}
@@ -79,9 +94,18 @@ export function AskView() {
             disabled={!connected}
           />
           {running ? (
-            <button onClick={() => void cancel()}>Cancel</button>
+            <button
+              onClick={() => {
+                // Cancel undoes the send: the question goes back into the box, so it can be edited or sent again.
+                const question = turns.find(isActive)?.question
+                void cancel()
+                if (question && !text.trim()) setText(question)
+              }}
+            >
+              Cancel
+            </button>
           ) : (
-            <button onClick={submit} disabled={!text.trim() || !connected}>
+            <button className={text.trim() ? 'primary' : undefined} onClick={submit} disabled={!text.trim() || !connected}>
               Ask
             </button>
           )}

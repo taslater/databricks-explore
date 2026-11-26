@@ -97,3 +97,14 @@ export function shortType(t: string | null | undefined): string {
   for (const [from, to] of SHORT_TYPE_REPLACEMENTS) s = s.replace(from, to)
   return s
 }
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** "26 Nov 16:38" (local time, with no-break spaces so it never wraps mid-date) for a stored timestamp; the raw text when it is not a date. */
+export function shortStamp(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const pad = (v: number) => String(v).padStart(2, '0')
+  return `${d.getDate()}\xa0${MONTHS[d.getMonth()]}\xa0${pad(d.getHours())}:${pad(d.getMinutes())}`
+}

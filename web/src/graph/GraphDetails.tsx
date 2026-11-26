@@ -75,50 +75,55 @@ export function GraphDetails() {
       <p className="hint">Click a node or edge for details. Shift-click to select several. Double-click a node to expand it. Drag to arrange. Delete removes the selected tables.</p>
 
       <div className="btns">
-        <button
-          onClick={() => actions.refreshSelected()}
-          disabled={!selectedNode}
-          title="Re-read this node's relationships from Databricks"
-        >
-          Refresh selected
-        </button>
-        <button
-          onClick={() => void actions.sendTables(pickedTables)}
-          disabled={pickedTables.length === 0}
-          title={
-            several
-              ? 'Add the selected tables to the canvas as cards, laid out left to right by dependency, with connectors for the known relationships among them'
-              : 'Add a table card for this object to the canvas'
-          }
-        >
-          {several ? `Send ${pickedTables.length} tables to canvas` : 'Send to canvas'}
-        </button>
-        <button
-          onClick={() => void actions.sendPath(pickedTables[0], 'downstream')}
-          disabled={pickedTables.length !== 1}
-          title="Send this table and everything built from it that the graph shows (lineage and view dependencies), with connectors. Select one table."
-        >
-          Send downstream path
-        </button>
-        <button
-          onClick={() => void actions.sendPath(pickedTables[0], 'upstream')}
-          disabled={pickedTables.length !== 1}
-          title="Send this table and everything it is built from that the graph shows (lineage and view dependencies), with connectors. Select one table."
-        >
-          Send upstream path
-        </button>
-        <button
-          onClick={() => void actions.queryTables(pickedTables)}
-          disabled={pickedTables.length === 0}
-          title="Write a SELECT that joins the selected tables along known relationships, and open it on the canvas"
-        >
-          Query {pickedTables.length > 1 ? 'these tables' : 'this table'}
-        </button>
+        {/* These act on the picked tables, so they appear with a selection; a hint holds their place until then. */}
+        {pickedTables.length > 0 || selectedNode ? (
+          <span className="when-selected">
+            <button
+              onClick={() => actions.refreshSelected()}
+              disabled={!selectedNode}
+              title="Re-read this node's relationships from Databricks"
+            >
+              Refresh selected
+            </button>
+            <button
+              onClick={() => void actions.sendTables(pickedTables)}
+              title={
+                several
+                  ? 'Add the selected tables to the canvas as cards, laid out left to right by dependency, with connectors for the known relationships among them'
+                  : 'Add a table card for this object to the canvas'
+              }
+            >
+              {several ? `Send ${pickedTables.length} tables to canvas` : 'Send to canvas'}
+            </button>
+            <button
+              onClick={() => void actions.sendPath(pickedTables[0], 'downstream')}
+              disabled={pickedTables.length !== 1}
+              title="Send this table and everything built from it that the graph shows (lineage and view dependencies), with connectors. Select one table."
+            >
+              Send downstream path
+            </button>
+            <button
+              onClick={() => void actions.sendPath(pickedTables[0], 'upstream')}
+              disabled={pickedTables.length !== 1}
+              title="Send this table and everything it is built from that the graph shows (lineage and view dependencies), with connectors. Select one table."
+            >
+              Send upstream path
+            </button>
+            <button
+              onClick={() => void actions.queryTables(pickedTables)}
+              title="Write a SELECT that joins the selected tables along known relationships, and open it on the canvas"
+            >
+              Query {pickedTables.length > 1 ? 'these tables' : 'this table'}
+            </button>
+            <RemoveButton />
+          </span>
+        ) : (
+          <span className="hint">Select tables to send them to the canvas, query them or take them off the graph.</span>
+        )}
         <button onClick={() => useGraphStore.getState().requestLayout()} disabled={!hasNodes}>
           Reset layout
         </button>
-        <RemoveButton />
-        <button onClick={() => useGraphStore.getState().clear()} title="Take every table off the graph and start again">
+        <button className="danger" onClick={() => useGraphStore.getState().clear()} title="Take every table off the graph and start again">
           Clear
         </button>
       </div>

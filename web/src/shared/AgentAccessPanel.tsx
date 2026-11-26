@@ -55,11 +55,13 @@ export function AgentAccessPanel({ onClose }: { onClose: () => void }) {
               {revealed ? data.command : maskToken(data.command, data.token)}
             </pre>
             <div className="agent-actions">
-              <button onClick={() => void copy()}>Copy command</button>
+              <button className="primary" onClick={() => void copy()}>
+                Copy command
+              </button>
               <label>
                 <input type="checkbox" checked={revealed} onChange={(e) => setRevealed(e.target.checked)} /> Show token
               </label>
-              <button onClick={() => setConfirmingToken(true)} disabled={rotate.isPending}>
+              <button className="danger" onClick={() => setConfirmingToken(true)} disabled={rotate.isPending}>
                 New token
               </button>
               <span className="spacer" />

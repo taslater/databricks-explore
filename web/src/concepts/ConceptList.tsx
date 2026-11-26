@@ -70,7 +70,7 @@ export function ConceptList({
           </li>
         ))}
       </ul>
-      {list && list.concepts.length === 0 && <p className="hint">{filtered ? 'No concepts match.' : 'No concepts yet.'}</p>}
+      {list && list.concepts.length === 0 && filtered && <p className="hint">No concepts match.</p>}
     </aside>
   )
 }

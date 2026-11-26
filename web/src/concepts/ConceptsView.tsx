@@ -57,7 +57,9 @@ export function ConceptsView() {
     <div className="concepts-view">
       <div className={`concepts-toolbar${pickerCollapsed ? ' with-picker-toggle' : ''}`}>
         <strong>Concepts</strong>
-        <button onClick={() => select('new')}>+ New concept</button>
+        <button className="primary" onClick={() => select('new')}>
+          + New concept
+        </button>
         <button
           onClick={() => setSuggestOpen(true)}
           title="Draft concepts from Unity Catalog tags. Shows the SQL first."
@@ -102,11 +104,15 @@ export function ConceptsView() {
           <ConceptEditor key={selected} id={selected} names={new Map((list.data?.concepts ?? []).map((c) => [c.id, c.name]))} domains={list.data?.domains ?? []} />
         ) : (
           <div className="concept-editor concept-placeholder">
-            <p className="hint">
-              {list.data && list.data.concepts.length === 0 && !filters.q && !filters.domain && !filters.status
-                ? 'No concepts yet. Add one, or draft some from Unity Catalog tags.'
-                : 'Pick a concept to edit it, or add a new one.'}
-            </p>
+            {list.data && list.data.concepts.length === 0 && !filters.q && !filters.domain && !filters.status ? (
+              <div className="empty-state">
+                <h3>No concepts yet</h3>
+                <p>A concept is a business term, such as "active customer", linked to the tables and columns that define it.</p>
+                <button onClick={() => select('new')}>Write the first concept</button>
+              </div>
+            ) : (
+              <p className="hint">Pick a concept to edit it, or add a new one.</p>
+            )}
           </div>
         )}
       </div>

@@ -102,12 +102,18 @@ export function EditBar({ fileStem, children }: { fileStem: string; children?: R
       <button disabled={!canRedo} onClick={redo} title="Redo (Shift+Cmd/Ctrl+Z)" aria-label="Redo">
         <ArrangeIcon name="redo" />
       </button>
-      <button onClick={duplicate} disabled={!hasSelection} title="Duplicate (Cmd/Ctrl+D)">
-        Duplicate
-      </button>
-      <button onClick={remove} disabled={!hasSelection} title="Delete (Delete or Backspace)">
-        Delete
-      </button>
+      {hasSelection ? (
+        <span className="when-selected">
+          <button onClick={duplicate} title="Duplicate (Cmd/Ctrl+D)">
+            Duplicate
+          </button>
+          <button className="danger" onClick={remove} title="Delete (Delete or Backspace)">
+            Delete
+          </button>
+        </span>
+      ) : (
+        <span className="hint sk-select-hint">Select to duplicate or delete</span>
+      )}
       <label className="sk-snap" title="Snap to the grid (G)">
         <input type="checkbox" checked={snap} onChange={(e) => setSnap(e.target.checked)} /> Snap
       </label>

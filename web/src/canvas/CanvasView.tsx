@@ -365,18 +365,7 @@ function CanvasInner() {
     <div className={`canvas-root tool-${tool}${isPlacingTool(tool) ? ' placing' : ''}`}>
       {/* The buttons and the canvas toolbar sit in a strip above the canvas, not over it. */}
       <div className={`canvas-bar${pickerCollapsed ? ' with-picker-toggle' : ''}`}>
-        <div className="canvas-row">
-          <button onClick={addAtCentre} title="Add a query window (Q)">
-            + Query window
-          </button>
-          <button onClick={addNoteAtCentre} title="Add a Markdown note (N)">
-            + Note
-          </button>
-          <button onClick={toggleMinimap} aria-pressed={showMinimap} title="Show or hide the minimap">
-            Minimap
-          </button>
-        </div>
-        <CanvasToolbar />
+        <CanvasToolbar onAddQuery={addAtCentre} onAddNote={addNoteAtCentre} showMinimap={showMinimap} onToggleMinimap={toggleMinimap} />
       </div>
       <div
         className="canvas-stage"
@@ -424,7 +413,7 @@ function CanvasInner() {
           <Background gap={GRID} />
           {!maximized && <Controls orientation="horizontal" showInteractive={false} className="canvas-controls" />}
           {showMinimap && !maximized && <MiniMap pannable zoomable />}
-          <Panel position="center-left">
+          <Panel position="top-left" className="sk-palette-panel">
             <Palette />
           </Panel>
         </ReactFlow>

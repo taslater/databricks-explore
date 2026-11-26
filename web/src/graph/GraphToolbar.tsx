@@ -168,86 +168,110 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
 
   return (
     <div className={`graph-toolbar${showPickerToggle ? ' with-picker-toggle' : ''}`}>
-      <select
-        value={selected}
-        onChange={(e) => setSelected(e.target.value)}
-        aria-label="Saved diagrams"
-        disabled={!diagrams.data}
-      >
-        <option value="">— saved diagrams —</option>
-        {diagrams.data?.map((name) => (
-          <option key={name} value={name}>
-            {name}
-          </option>
-        ))}
-      </select>
-      <button onClick={load} disabled={!selected} style={NOWRAP}>
-        Load
-      </button>
-      <button onClick={() => setRenaming(true)} disabled={!selected} style={NOWRAP}>
-        Rename
-      </button>
-      <button onClick={() => setDeleting(true)} disabled={!selected} style={NOWRAP}>
-        Delete
-      </button>
-      <button onClick={() => setNaming(true)} disabled={saving} style={NOWRAP}>
-        Save diagram
-      </button>
-      {changed && (
-        <span role="alert" className="graph-status error" style={NOWRAP}>
-          {openDiagram?.name} was changed{changed.by ? ` by ${changed.by}` : ''}.{' '}
-          <button onClick={() => void reloadChanged()}>Reload</button> <button onClick={keepMine}>Keep mine</button>
+      <div className="tb-row">
+        <div className="tb-group">
+          <select
+            value={selected}
+            onChange={(e) => setSelected(e.target.value)}
+            aria-label="Saved diagrams"
+            disabled={!diagrams.data}
+          >
+            <option value="">— saved diagrams —</option>
+            {diagrams.data?.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          {/* These act on the picked diagram, so they appear with one; a hint holds their place until then. */}
+          {selected ? (
+            <span className="when-selected">
+              <button onClick={load} style={NOWRAP}>
+                Load
+              </button>
+              <button onClick={() => setRenaming(true)} style={NOWRAP}>
+                Rename
+              </button>
+              <button className="danger" onClick={() => setDeleting(true)} style={NOWRAP}>
+                Delete
+              </button>
+            </span>
+          ) : (
+            <span className="hint tb-hint" style={NOWRAP}>
+              Pick one to load, rename or delete
+            </span>
+          )}
+        </div>
+        <button className="primary" onClick={() => setNaming(true)} disabled={saving} style={NOWRAP}>
+          Save diagram
+        </button>
+        {changed && (
+          <span role="alert" className="graph-status error" style={NOWRAP}>
+            {openDiagram?.name} was changed{changed.by ? ` by ${changed.by}` : ''}.{' '}
+            <button onClick={() => void reloadChanged()}>Reload</button> <button onClick={keepMine}>Keep mine</button>
+          </span>
+        )}
+        {diagrams.isError && <span className="error">{diagrams.error.message}</span>}
+        <span className="toolbar-sep" />
+        <LensSwitch />
+        <span className="spacer" />
+        <span
+          style={{ flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          className={`graph-status${status.error ? ' error' : ''}`}
+          title={status.text}
+          role="status"
+        >
+          {status.text || (connected ? '' : 'not connected')}
         </span>
-      )}
-      {diagrams.isError && <span className="error">{diagrams.error.message}</span>}
-      <span className="toolbar-sep" />
-      <LensSwitch />
-      <button
-        style={NOWRAP}
-        onClick={() => useGraphStore.getState().setMineDialog(true)}
-        disabled={!connected}
-        title="Read query history for joins between tables. Shows the SQL first."
-      >
-        Mine joins…
-      </button>
-      <button style={NOWRAP} onClick={() => toggleDrawer('suggestions')} aria-pressed={drawer === 'suggestions'} disabled={!connected}>
-        Suggestions{proposed ? ` (${proposed})` : ''}
-      </button>
-      <button style={NOWRAP} onClick={() => toggleDrawer('usage')} aria-pressed={drawer === 'usage'} disabled={!connected}>
-        Usage
-      </button>
-      <button
-        style={NOWRAP}
-        onClick={() => void actions.setAllColumns(!allColumns)}
-        disabled={!hasNodes}
-        title="Show or hide the columns of every table on the graph"
-      >
-        {allColumns ? 'Hide columns' : 'Show columns'}
-      </button>
-      <button
-        style={NOWRAP}
-        onClick={() => useGraphStore.getState().setShowConcepts(!showConcepts)}
-        aria-pressed={showConcepts}
-        disabled={!connected}
-        title="Draw the glossary concepts linked to the tables on the graph"
-      >
-        Concepts
-      </button>
-      <TableStatsButton />
-      <ProfileButton />
-      <CertificationControl />
-      <ColorByControl />
-      <GroupControl />
-      <GraphExportButton />
-      <span className="spacer" />
-      <span
-        style={{ flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-        className={`graph-status${status.error ? ' error' : ''}`}
-        title={status.text}
-        role="status"
-      >
-        {status.text || (connected ? '' : 'not connected')}
-      </span>
+      </div>
+      <div className="tb-row">
+        <div className="tb-group">
+          <button
+            style={NOWRAP}
+            onClick={() => useGraphStore.getState().setMineDialog(true)}
+            disabled={!connected}
+            title="Read query history for joins between tables. Shows the SQL first."
+          >
+            Mine joins…
+          </button>
+          <button style={NOWRAP} onClick={() => toggleDrawer('suggestions')} aria-pressed={drawer === 'suggestions'} disabled={!connected}>
+            Suggestions{proposed ? ` (${proposed})` : ''}
+          </button>
+          <button style={NOWRAP} onClick={() => toggleDrawer('usage')} aria-pressed={drawer === 'usage'} disabled={!connected}>
+            Usage
+          </button>
+        </div>
+        <span className="toolbar-sep" />
+        <div className="tb-group">
+          <button
+            style={NOWRAP}
+            onClick={() => void actions.setAllColumns(!allColumns)}
+            disabled={!hasNodes}
+            title="Show or hide the columns of every table on the graph"
+          >
+            {allColumns ? 'Hide columns' : 'Show columns'}
+          </button>
+          <button
+            style={NOWRAP}
+            onClick={() => useGraphStore.getState().setShowConcepts(!showConcepts)}
+            aria-pressed={showConcepts}
+            disabled={!connected}
+            title="Draw the glossary concepts linked to the tables on the graph"
+          >
+            Concepts
+          </button>
+          <ColorByControl />
+          <GroupControl />
+        </div>
+        <span className="toolbar-sep" />
+        <div className="tb-group">
+          <TableStatsButton />
+          <ProfileButton />
+          <CertificationControl />
+        </div>
+        <span className="toolbar-sep" />
+        <GraphExportButton />
+      </div>
       {naming && (
         <NameDialog
           title="Save diagram"
