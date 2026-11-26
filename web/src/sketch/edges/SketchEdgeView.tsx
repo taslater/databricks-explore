@@ -7,7 +7,7 @@ import {
   type Edge,
   type EdgeProps,
 } from '@xyflow/react'
-import { DEFAULT_EDGE_COLOR } from '../model'
+import { DEFAULT_EDGE_COLOR, inkOf } from '../model'
 import { useSketchStore } from '../sketchStore'
 import { InlineText } from '../nodes/InlineText'
 import type { Point, SketchEdge } from '../types'
@@ -38,7 +38,7 @@ export function SketchEdgeView(props: EdgeProps<SketchFlowEdge>) {
 
   const labelX = data?.labelAt?.x ?? midX
   const labelY = data?.labelAt?.y ?? midY
-  const color = edge?.color ?? DEFAULT_EDGE_COLOR
+  const color = inkOf(edge?.color ?? DEFAULT_EDGE_COLOR)
   const label = edge?.label ?? ''
 
   return (

@@ -7,7 +7,7 @@ import { SketchEdgeView, type SketchFlowEdge } from './edges/SketchEdgeView'
 import { FrameNode } from './nodes/FrameNode'
 import { PlaceholderNode } from './nodes/PlaceholderNode'
 import { ShapeNode } from './nodes/ShapeNode'
-import { DEFAULT_EDGE_COLOR, effectiveZ } from './model'
+import { DEFAULT_EDGE_COLOR, effectiveZ, inkOf } from './model'
 import { useSketchStore } from './sketchStore'
 import type { Point, SketchEdge, SketchNode, Tool } from './types'
 
@@ -75,7 +75,7 @@ export function toSketchFlowNode(n: SketchNode, selected: boolean, tool: Tool): 
 
 /** One connector as a React Flow edge. */
 export function toSketchFlowEdge(e: SketchEdge, selected: boolean, labelAt?: Point): SketchFlowEdge {
-  const color = e.color ?? DEFAULT_EDGE_COLOR
+  const color = inkOf(e.color ?? DEFAULT_EDGE_COLOR)
   return {
     id: e.id,
     type: 'sketch',
