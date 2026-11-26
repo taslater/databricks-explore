@@ -47,6 +47,7 @@ import { TableStatsDialog } from './TableStatsDialog'
 import { TableNode } from './TableNode'
 import type { ConceptFlowNode, FlowEdge, FlowNode } from './types'
 import { useUiStore } from '../store/uiStore'
+import { useTheme } from '../theme'
 import { TABLE_DRAG_MIME } from '../shared/tableDrag'
 
 // Defined at module scope so React Flow does not rebuild its node and edge types on every render.
@@ -103,6 +104,7 @@ export function GraphView() {
 }
 
 function GraphCanvas() {
+  const { theme } = useTheme()
   const rf = useReactFlow()
   // The view unmounts when another tab shows. Keep its pan and zoom across that, so coming back looks the same.
   const [initialViewport] = useState(() => useGraphStore.getState().viewport)
@@ -232,6 +234,7 @@ function GraphCanvas() {
 
   return (
     <ReactFlow<FlowNode | ConceptFlowNode | GroupBoxFlowNode, FlowEdge>
+      colorMode={theme}
       nodes={drawnNodes}
       edges={drawnEdges}
       nodeTypes={NODE_TYPES}

@@ -15,6 +15,7 @@ import '@xyflow/react/dist/style.css'
 import type { CanvasWindow } from '../api/types'
 import { useCanvasStore, DEFAULT_NOTE_SIZE, DEFAULT_QUERY_SIZE, type CanvasSize } from '../store/canvasStore'
 import { useUiStore } from '../store/uiStore'
+import { useTheme } from '../theme'
 import { TABLE_DRAG_MIME } from '../shared/Picker'
 import { anchorEdges } from '../sketch/anchors'
 import { sketchEdgeTypes, sketchNodeTypes, toSketchFlowEdge, toSketchFlowNode } from '../sketch/flow'
@@ -130,6 +131,7 @@ export function CanvasView() {
 }
 
 function CanvasInner() {
+  const { theme } = useTheme()
   const windows = useCanvasStore((s) => s.windows)
   const viewport = useCanvasStore((s) => s.viewport)
   const canvasName = useCanvasStore((s) => s.canvasName)
@@ -376,6 +378,7 @@ function CanvasInner() {
         onPointerDownCapture={interactions.onPointerDownCapture}
       >
         <ReactFlow
+          colorMode={theme}
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
