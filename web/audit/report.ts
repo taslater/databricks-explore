@@ -14,6 +14,7 @@ export const SEVERITY: Record<string, 'high' | 'medium' | 'low' | 'info'> = {
   'escape-does-nothing': 'low',
   'clipped-text': 'low',
   'small-target': 'info',
+  'region-separation': 'medium',
   contrast: 'high', // medium for text that is not on a control; the finding carries its own severity
   ...STYLE_SEVERITY,
 }

@@ -3,8 +3,8 @@
 A deterministic crawler that finds generic UI defects in the demo-mode app. No LLM, no feature knowledge: it clicks controls
 as a real user would (mouse at the control's centre), replays each path from a clean browser, and compares states.
 
-Run: `cd web && npm run audit` (builds the UI first; about 2.5 minutes on 8 cores, down from about 23 serially). Output in `web/audit-out/`:
-`ui-findings.json`, `graph.json` (states and edges per crawl), `screens/` (one screenshot per state).
+Run: `cd web && npm run audit` (builds the UI first; about 3.5 minutes on 8 cores with both themes, down from about 23 serially). Output in `web/audit-out/`:
+`ui-findings.json`, `graph.json` (states and edges per crawl), `screens/` (one screenshot per state) and `views/<root>-<viewport>-<theme>.png` (the start state of each root in each viewport and theme: a gallery to look at).
 It is a reporter, not a gate: the test passes whatever it finds.
 
 ## How it runs
@@ -13,6 +13,7 @@ One Playwright test per (root, viewport), spread over `AUDIT_WORKERS` workers (d
 ## What it crawls
 Each top-level view (Canvas, Graph, Concepts, Ask, and the Agent access dialog) is its own start state with its own budget
 (depth 3, up to 40 states, 45 crawl actions, 20 return attempts and 8 toggle replays), at 1500x900 and again at 1280x720.
+**Theme is a crawl dimension**: every root is crawled in light and dark mode (Playwright `colorScheme`; the app follows it by default). Light runs at both viewports; dark runs at 1500x900 only, because the 1280x720 crawl finds layout problems that do not depend on the theme and a dark copy of it would add about 40% to the run time (`AUDIT_DARK_ALL=1` adds it, `AUDIT_THEMES=light` or `dark` narrows). With the dark 1500x900 crawls a full run is about 3.5 minutes on 8 cores. Every finding's `where` entries carry the theme; `summary.byTheme` gives the score, style score and findings per rule for each theme. Style lint measures light only (the dark values are the same tokens, and pooling both would double the distinct colours).
 The top-level tabs are roots, so they are not clicked inside a crawl. Override the budget with `AUDIT_ACTIONS`, `AUDIT_STATES`,
 `AUDIT_DEPTH`, `AUDIT_EXTRA`, `AUDIT_TOGGLES`. Findings are deduplicated across roots and viewports; `where` lists each place one appeared.
 
@@ -26,6 +27,7 @@ The top-level tabs are roots, so they are not clicked inside a crawl. Override t
 | overlapping-controls | medium | two controls' boxes intersect (neither contains the other) |
 | offscreen-control | medium | a control is partly outside the viewport |
 | escape-does-nothing | low (confidence low) | B has a dialog, menu, listbox, popover or aria-haspopup control with aria-expanded=true that A lacked, and Escape changes nothing (plain pressed toggles and expanders are not expected to close on Escape) |
+| region-separation | medium | adjacent or nested major regions that cannot be told apart. Regions are found generically: landmarks (header, nav, aside, main, [role=region], [role=dialog], banner, navigation, complementary), React Flow's canvas pane and nodes, and elements with `data-region` (add that attribute in the app only where no landmark fits). Two regions are adjacent when neither contains the other, their gap is at most 8px (a resize handle) and they share an edge of 24px or more; a region is also compared with the region it sits in (not when it fills 85% of it). Each pair passes if the backgrounds differ by at least CIEDE2000 2, or the facing edges have a border of 1px or more in a colour that differs from both backgrounds, or either has a box-shadow. A React Flow node is a bare wrapper, so the box inside it that fills it is measured. The finding names both regions and the two backgrounds and deltaE. `regions.ts` |
 | clipped-text | low | text is wider than its box with no ellipsis |
 | contrast | high on a control, medium on other text | text below WCAG contrast (4.5:1; 3:1 for text of 24px+ or 18.66px+ bold) against its effective background: the ancestors' backgrounds alpha-blended until one is opaque, white if none is. An element with a background-image on its own or an ancestor is skipped (unknown). Disabled controls, inert and aria-hidden content are skipped, as WCAG exempts them. The finding names the selector, the colour pair and the ratio. `contrast.ts`; states hover, focus and active are not crawled, so check those by hand |
 | small-target | info | under 24x24 px; does not count toward the score |

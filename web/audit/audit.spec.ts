@@ -13,6 +13,7 @@ import { start } from '../e2e/helpers'
 import { SEVERITY, type Finding, type Part } from './report'
 import { StyleAcc } from './style'
 import { contrastIssues } from './contrast'
+import { regionIssues } from './regions'
 
 const OUT = fileURLToPath(new URL('../audit-out', import.meta.url))
 const num = (name: string, dflt: number) => Number(process.env[name] ?? dflt)
@@ -588,6 +589,7 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       }
       for (const c of await contrastIssues(page))
         report('contrast', c.sel + ' "' + c.text + '"', 'text ' + c.fg + ' on ' + c.bg + ' is ' + c.ratio + ':1, needs ' + c.need + ':1' + (c.large ? ' (large text)' : ''), c.fg + c.bg, { id, shot, path }, undefined, 'high', c.control ? 'high' : 'medium')
+      for (const g of await regionIssues(page)) report('region-separation', g.a + ' | ' + g.b, g.detail, g.kind, { id, shot, path })
       if (state.depth < MAX_DEPTH) queue.push(id)
       return id
     }
