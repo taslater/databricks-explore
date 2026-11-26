@@ -1,6 +1,6 @@
 // The Canvas keeps its floating controls clear of the windows: a maximized window can be restored, and nothing covers a button.
 import { expect, test, type Locator } from '@playwright/test'
-import { start } from './helpers'
+import { reveal, start } from './helpers'
 
 /** True when the element at the centre of the locator is the locator's own element (or inside it), so a click would land on it. */
 async function clickable(target: Locator): Promise<boolean> {
@@ -68,6 +68,8 @@ test('at a narrow width with Properties open, nothing covers the buttons or the 
   await page.getByRole('button', { name: 'Hide picker' }).click()
   await page.getByRole('button', { name: 'Properties' }).click()
   for (const name of ['+ Query window', '+ Note', 'Minimap', 'Save']) {
+    // At this width the strip may have moved the later ones into More.
+    await reveal(page, page.getByRole('button', { name, exact: true }), 'More')
     expect(await clickable(page.getByRole('button', { name, exact: true })), name).toBe(true)
   }
   await page.getByRole('button', { name: '+ Query window' }).click()

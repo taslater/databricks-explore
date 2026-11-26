@@ -73,3 +73,11 @@ export const lens = (page: Page, name: 'Flow' | 'Model' | 'All') => page.getByRo
 
 /** The small count of neighbors not on the graph, at a node's left (up) or right (down). */
 export const more = (page: Page, shortName: string, dir: 'up' | 'down') => node(page, shortName).locator(`.tbl-more-count.is-${dir}`)
+
+/** The Graph toolbar moves controls into Tools (and the Canvas strip into More) when they would not fit on its rows; this opens that menu when the button is not in the bar. */
+export async function reveal(page: Page, button: Locator, menu: 'Tools' | 'More') {
+  await page.waitForTimeout(300) // the toolbar settles its layout after the last change
+  if (await button.isVisible()) return
+  const opener = page.getByRole('button', { name: new RegExp(`^${menu}`) })
+  if ((await opener.getAttribute('aria-expanded')) !== 'true') await opener.click()
+}

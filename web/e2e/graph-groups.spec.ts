@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { lens, more, node, openFact, positions, settled, start, tables } from './helpers'
+import { lens, more, node, openFact, positions, reveal, settled, start, tables } from './helpers'
 
 test('schema groups collapse to one node each and open again', async ({ page }) => {
   await start(page)
@@ -37,6 +37,7 @@ test('a chain of views that only pass data on is one edge marked "via 2 views"',
   await expect(node(page, 'silver.orders')).toBeVisible()
 
   const chains = page.getByRole('button', { name: 'Chains', exact: true })
+  await reveal(page, chains, 'Tools')
   await chains.click() // off: draw the views
   await expect(node(page, 'silver.v_orders_current')).toBeVisible()
   await expect(node(page, 'silver.v_orders')).toBeVisible()
