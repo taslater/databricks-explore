@@ -152,7 +152,8 @@ function collectStyle(): Raw {
       const diffs: string[] = []
       if (Math.max(...hs) - Math.min(...hs) >= 1) diffs.push('height ' + [...new Set(hs.map(f1))].join('/') + 'px')
       if (Math.max(...fs) - Math.min(...fs) >= 0.5) diffs.push('font-size ' + [...new Set(fs.map(f1))].join('/') + 'px')
-      if (new Set(rs).size > 1) diffs.push('radius ' + [...new Set(rs)].join('/'))
+      const joined = [...best].sort((a, b) => a.l - b.l).every((b, i, l) => i === 0 || Math.abs(b.l - l[i - 1].r) <= 1) // a joined group (segmented control) has square inner corners on purpose
+      if (new Set(rs).size > 1 && !joined) diffs.push('radius ' + [...new Set(rs)].join('/'))
       if (diffs.length)
         rows.push({ control: pc, kind, diffs, items: best.slice(0, 6).map((b) => one(b.e) + label(b.e) + ' ' + f1(b.h) + 'px ' + b.cs.fontSize + ' r' + b.cs.borderTopLeftRadius), sig: best.map((b) => f1(b.h) + b.cs.fontSize + b.cs.borderTopLeftRadius).join(',') })
     }
