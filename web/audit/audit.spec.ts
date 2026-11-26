@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, test as base, type Browser, type BrowserContext, type Page, type Request } from '@playwright/test'
 import { start } from '../e2e/helpers'
 import { SEVERITY, type Finding, type Part } from './report'
+import { StyleAcc } from './style'
 
 const OUT = fileURLToPath(new URL('../audit-out', import.meta.url))
 const num = (name: string, dflt: number) => Number(process.env[name] ?? dflt)
@@ -246,7 +247,7 @@ const fnv = (s: string) => {
 const stable = (s: string) => s.replace(/\d+/g, '#')
 
 /** Wall time per activity of the crawl in progress (a worker runs one crawl at a time), reported in summary.timing. */
-const newTiming = () => ({ resetMs: 0, resetWipeMs: 0, replayMs: 0, actMs: 0, settleMs: 0, snapshotMs: 0, screenshotMs: 0, resets: 0, snapshots: 0, settles: 0, screenshots: 0 })
+const newTiming = () => ({ resetMs: 0, resetWipeMs: 0, replayMs: 0, actMs: 0, settleMs: 0, snapshotMs: 0, screenshotMs: 0, styleMs: 0, styles: 0, resets: 0, snapshots: 0, settles: 0, screenshots: 0 })
 let tm = newTiming()
 
 async function snapshot(page: Page): Promise<Snap> {
@@ -410,6 +411,7 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
   const t0 = Date.now()
   const findings = new Map<string, Finding>()
   const crawls: Record<string, unknown>[] = []
+  const styleAcc = new StyleAcc()
   const graphs: Record<string, unknown>[] = []
 
   async function runCrawl(root: string, vp: { width: number; height: number }) {
@@ -573,6 +575,8 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       states.set(id, state)
       bySig.set(snap.sig, id)
       addFindings(state, snap)
+      tm.styleMs += await styleAcc.visit(page, { id: prefix + '-' + id, shot, repro: reproOf(path), root, viewport: vpName })
+      tm.styles++
       if (state.depth < MAX_DEPTH) queue.push(id)
       return id
     }
@@ -826,7 +830,7 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
   }
 
   await runCrawl(root, vp)
-  const part: Part = { order, findings: [...findings.entries()], crawl: crawls[0], graph: graphs[0] }
+  const part: Part = { order, findings: [...findings.entries()], crawl: crawls[0], graph: graphs[0], style: styleAcc.part() }
   mkdirSync(join(OUT, 'parts'), { recursive: true })
   writeFileSync(join(OUT, 'parts', root.toLowerCase().replace(/[^a-z]+/g, '-') + '-' + vp.width + '.json'), JSON.stringify(part))
 }

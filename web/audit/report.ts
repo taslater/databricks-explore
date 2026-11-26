@@ -2,6 +2,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { mergeStyle, STYLE_SEVERITY, type StylePart } from './style'
 
 export const SEVERITY: Record<string, 'high' | 'medium' | 'low' | 'info'> = {
   'irreversible-transition': 'high',
@@ -13,6 +14,7 @@ export const SEVERITY: Record<string, 'high' | 'medium' | 'low' | 'info'> = {
   'escape-does-nothing': 'low',
   'clipped-text': 'low',
   'small-target': 'info',
+  ...STYLE_SEVERITY,
 }
 export const WEIGHT = { high: 10, medium: 4, low: 1, info: 0 }
 export const LOW_CONFIDENCE_FACTOR = 0.25 // a finding the rule labels low-confidence counts a quarter of its weight
@@ -28,6 +30,7 @@ export type Finding = {
   screenshot: string
   repro: string[]
   confidence: 'high' | 'low' // low: the rule itself says the evidence is incomplete or heuristic
+  category?: 'style' // style-lint findings: reported, scored separately (style.summary.score), never part of the functional score
   where: Where[]
 }
 
@@ -70,7 +73,7 @@ export function expectedMatches(x: Expected, f: Finding): boolean {
 
 
 /** What one crawl leaves for the merge: its findings in discovery order, its summary row and its graph. */
-export type Part = { order: number; findings: [string, Finding][]; crawl: Record<string, unknown>; graph: Record<string, unknown> }
+export type Part = { order: number; findings: [string, Finding][]; crawl: Record<string, unknown>; graph: Record<string, unknown>; style?: StylePart }
 
 /** Merges the parts of all crawls, in crawl order, into ui-findings.json and graph.json. Same dedupe, same scoring as one serial run. */
 export function mergeParts(OUT: string, wallSeconds: number, workers: number) {
@@ -90,7 +93,8 @@ export function mergeParts(OUT: string, wallSeconds: number, workers: number) {
       else for (const w of f.where) if (!have.where.some((x) => x.root === w.root && x.viewport === w.viewport)) have.where.push(w)
     }
   }
-  const list = [...findings.values()].map((f) => ({ ...f, seenIn: f.where.length, expected: false as boolean, expectedReason: undefined as string | undefined }))
+  const style = mergeStyle(parts.flatMap((p) => (p.style ? [p.style] : [])))
+  const list = [...findings.values(), ...style.findings].map((f) => ({ ...f, seenIn: f.where.length, expected: false as boolean, expectedReason: undefined as string | undefined }))
   const used = new Set<number>()
   for (const f of list) {
     const i = expectedList.findIndex((x) => expectedMatches(x, f))
@@ -102,10 +106,11 @@ export function mergeParts(OUT: string, wallSeconds: number, workers: number) {
   const staleExpected = expectedList.filter((_, i) => !used.has(i)).map((x) => x.raw)
   const order = { high: 0, medium: 1, low: 2, info: 3 } as Record<string, number>
   list.sort((a, b) => order[a.severity] - order[b.severity] || b.seenIn - a.seenIn)
-  const counted = list.filter((f) => !f.expected)
+  const counted = list.filter((f) => !f.expected && f.category !== 'style')
   const byRule: Record<string, number> = {}
   const expectedByRule: Record<string, number> = {}
   for (const f of list) {
+    if (f.category === 'style') continue
     const m = f.expected ? expectedByRule : byRule
     m[f.ruleId] = (m[f.ruleId] ?? 0) + 1
   }
@@ -137,7 +142,7 @@ export function mergeParts(OUT: string, wallSeconds: number, workers: number) {
   total += lowCounted
   const score = Math.round(100 * Math.exp(-total / 50))
   const summary = {
-    crawls: crawls.length, score, weightedCauses: total, lowConfidenceFindings: counted.filter((f) => f.confidence === 'low').length, lowConfidenceWeight: lowCounted, findingsByRule: byRule, expectedByRule, staleExpected, rootCauses, perCrawl: crawls,
+    crawls: crawls.length, score, styleScore: style.section.summary.score, weightedCauses: total, lowConfidenceFindings: counted.filter((f) => f.confidence === 'low').length, lowConfidenceWeight: lowCounted, findingsByRule: byRule, expectedByRule, staleExpected, rootCauses, perCrawl: crawls,
     states: crawls.reduce((n, c) => n + (c.states as number), 0), actions: crawls.reduce((n, c) => n + (c.actions as number), 0),
     timing: (() => {
       const sum: Record<string, number> = {}
@@ -146,8 +151,8 @@ export function mergeParts(OUT: string, wallSeconds: number, workers: number) {
     })(),
     unverifiedReturns: crawls.reduce((n, c) => n + (c.unverifiedReturns as number), 0), seconds: wallSeconds, workers,
   }
-  writeFileSync(join(OUT, 'ui-findings.json'), JSON.stringify({ summary, findings: list }, null, 2))
+  writeFileSync(join(OUT, 'ui-findings.json'), JSON.stringify({ summary, style: style.section, findings: list }, null, 2))
   writeFileSync(join(OUT, 'graph.json'), JSON.stringify(graphs, null, 2))
-  console.log('audit: ' + summary.crawls + ' crawls, ' + list.length + ' findings (' + JSON.stringify(byRule) + ', expected ' + JSON.stringify(expectedByRule) + ', stale ' + staleExpected.length + '), score ' + score + ', ' + summary.seconds + 's')
+  console.log('audit: ' + summary.crawls + ' crawls, ' + list.length + ' findings (' + JSON.stringify(byRule) + ', expected ' + JSON.stringify(expectedByRule) + ', stale ' + staleExpected.length + '), score ' + score + ', style score ' + style.section.summary.score + ', ' + summary.seconds + 's')
   return summary
 }

@@ -29,6 +29,8 @@ The top-level tabs are roots, so they are not clicked inside a crawl. Override t
 | clipped-text | low | text is wider than its box with no ellipsis |
 | small-target | info | under 24x24 px; does not count toward the score |
 
+Style lint rules (below) are separate: they never count toward this score.
+
 ## Comparing states
 States in the crawl graph are keyed by a strict signature (every control with its name and pressed/expanded state). Whenever a state is compared with A (is B back at A, is a toggle undone, is a transition irreversible) the comparison is **loose**: states are the same if they differ only in selection, meaning aria-selected, a "selected" class on the control or an ancestor, resize handles, and controls that are enabled in one state and disabled in the other (clicking inside a window selects it, which enables Duplicate and Delete and shows handles). A control that is part of the selection may appear or vanish without counting. Findings say what differed (`only before: ...`, `only after: ...`); an only-obscure-exit lists what a loose match overlooked. `graph.json` keeps each state's full control list (`controls`, with `[disabled]` and `[selection]` marks) so a difference can be checked by hand.
 
@@ -52,3 +54,19 @@ Adding an entry is the maintainer's decision, not a fixing agent's. An agent tha
 1. Read `summary.rootCauses`: occluded and overlapping findings grouped by the element on top (class list, testid, nearest labelled ancestor), biggest first. Fix the top cause first; one CSS change usually clears many findings. Each has `examples`, a `repro` and a `screenshot`.
 2. Then `findings` (sorted by severity, then by how many roots/viewports saw it). `repro` is the click path from the root's start state; `screenshot` is relative to `web/audit-out/`.
 3. Fix in app code, rerun, and compare `findingsByRule`. Treat a finding as a crawler artefact if `repro` does not reproduce by hand.
+
+## Style lint (consistency, not defects)
+Amateur-looking UIs are mostly inconsistent ones, so this measures inconsistency and names the design tokens that would remove it. `style.ts`; the crawler only calls `StyleAcc.visit` at the first visit to each state (about 5-10% of the run time, `summary.timing.styleMs`). Deterministic, no LLM.
+
+Collected per visible element (in a box inside the viewport, not display:none, visibility:hidden or opacity 0; clipping by scroll containers is not checked): font-size, font-weight and line-height and colour of elements with their own text; background colour; border colour; border radius; each non-zero padding side; flex/grid gap; the measured gap between adjacent siblings (whole px, 1-64, skipped where the parent declares a gap or spreads its children); button and input heights; boxes.
+
+`ui-findings.json` gets a top-level `style` section: `summary` (score, distinct font sizes / colours / radii / spacings, per-state averages), `tokens` (per property: every distinct value with `uses` (element occurrences, summed over every first visit of a state, so shell elements count once per state), `states` and example selectors), pooled `colours` and `spacings`, `offScale` offenders and `perState` (distinct font sizes, colours, spacings and radii, and visible disabled controls as a clutter signal). Style findings are also in `findings` with `category: "style"`.
+
+| rule | severity | meaning |
+| --- | --- | --- |
+| style-near-duplicate | low | two values that should be one: font sizes or radii within 1px, spacings (padding, gap, sibling gap, over 2px) within 1px, colours within CIEDE2000 < 3 (and alpha within 0.05). Names both with uses and examples and suggests merging into the more common. Top 40 by combined use |
+| style-off-scale | low | declared padding or gap not on the 4px grid (0, 1 and 2px allowed). One finding per value, the 10 most used; `offScale` lists 25 |
+| style-row-inconsistent | low | sibling buttons (or inputs/selects) on one row of the same container with different heights (1px or more), font sizes (0.5px or more) or radii. One per container |
+| style-near-miss-align | low | siblings, or same-looking grandchildren of different children (cousins), whose left, right or centre-x (or top or centre-y) edges differ by 0.5-3px while no edge on that axis matches. One per container |
+
+Style findings are deduplicated like the others and can be silenced in `expected.json` (the maintainer's call). The **style score** is separate: T is the sum of style finding weights (low 1, info 0) and `score = round(100 * exp(-T / 50))`, in `style.summary.score` and `summary.styleScore`. The functional `summary.score`, `findingsByRule` and `rootCauses` ignore style findings. Fix order: merge near-duplicates and off-scale values into tokens first (one token change clears many findings), then rows, then alignment.
