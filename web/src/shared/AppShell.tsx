@@ -51,7 +51,7 @@ export function AppShell() {
         </Panel>
         <Separator className="resize-handle" />
         <Panel id="main" minSize="30%">
-          <div className="main">
+          <main className="main" aria-label="Workspace">
             {pickerCollapsed && (
               <button
                 className="show-picker"
@@ -71,7 +71,7 @@ export function AppShell() {
             ) : (
               <CanvasView />
             )}
-          </div>
+          </main>
         </Panel>
         <Separator className="resize-handle" />
         <Panel id="details" panelRef={detailsRef} defaultSize="22%" minSize="10%" collapsible collapsedSize="0%">
