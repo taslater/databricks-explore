@@ -3,7 +3,7 @@
 import { cpus } from 'node:os'
 import { defineConfig, devices } from '@playwright/test'
 
-const workers = (process.env.AUDIT_WORKERS ??= String(Math.max(1, Math.min(10, cpus().length - 3))))
+const workers = (process.env.AUDIT_WORKERS ??= String(Math.max(1, Math.min(10, cpus().length))))
 
 export default defineConfig({
   testDir: '.',

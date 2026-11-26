@@ -3,9 +3,12 @@
 A deterministic crawler that finds generic UI defects in the demo-mode app. No LLM, no feature knowledge: it clicks controls
 as a real user would (mouse at the control's centre), replays each path from a clean browser, and compares states.
 
-Run: `cd web && npm run audit` (builds the UI first; about 25 minutes). Output in `web/audit-out/`:
+Run: `cd web && npm run audit` (builds the UI first; about 2.5 minutes on 8 cores, down from about 23 serially). Output in `web/audit-out/`:
 `ui-findings.json`, `graph.json` (states and edges per crawl), `screens/` (one screenshot per state).
 It is a reporter, not a gate: the test passes whatever it finds.
+
+## How it runs
+One Playwright test per (root, viewport), spread over `AUDIT_WORKERS` workers (default: the CPU count, at most 10). Each worker starts its own demo server (own port and data folder) from a worker-scoped fixture; each crawl writes `audit-out/parts/<crawl>.json`, and the global teardown merges the parts, in crawl order, into `ui-findings.json` and `graph.json` with the same dedupe and scoring as a serial run. A crawl keeps one browser context and opens a new page (storage of the origin cleared) per reset. A page has settled when none of its requests is pending and the DOM has not mutated for 150 ms (3 s cap). `summary.timing` (and `perCrawl[].timing`) shows where the time went: reset, replay, act, settle (overlaps the others), snapshot, screenshot.
 
 ## What it crawls
 Each top-level view (Canvas, Graph, Concepts, Ask, and the Agent access dialog) is its own start state with its own budget
