@@ -237,7 +237,10 @@ export function CanvasToolbar({ onAddQuery, onAddNote, showMinimap, onToggleMini
             Save as
           </button>
           <button
-            onClick={() => setDoctorOpen(!doctorOpen)}
+            onClick={() => {
+              setMoreOpen(false)
+              setDoctorOpen(!doctorOpen)
+            }}
             aria-pressed={doctorOpen}
             title="Check the layout for overlaps, near-misses and connectors through nodes"
           >

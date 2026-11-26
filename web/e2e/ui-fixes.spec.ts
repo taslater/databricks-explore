@@ -62,6 +62,7 @@ test('Escape closes Agent access, Mine joins and Suggest from tags, and focus re
   await expect(agent).toBeFocused()
 
   await page.getByRole('tab', { name: 'Graph' }).click()
+  await page.getByRole('button', { name: /^Tools/ }).click()
   const mine = page.getByRole('button', { name: 'Mine joins…' })
   await mine.focus()
   await page.keyboard.press('Enter')
@@ -85,6 +86,7 @@ test('the Layout doctor does not cover the windows at 1280x720', async ({ page }
   await start(page)
   await page.getByRole('tab', { name: 'Canvas' }).click()
   await page.getByRole('button', { name: '+ Query window' }).click()
+  await page.getByRole('button', { name: 'More' }).click()
   await page.getByRole('button', { name: 'Doctor' }).click()
   const panel = page.getByRole('region', { name: 'Layout doctor' })
   await expect(panel).toBeVisible()

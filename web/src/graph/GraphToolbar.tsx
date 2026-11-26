@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import * as api from '../api/client'
 import { useDiagrams } from '../api/hooks'
 import { CertificationControl } from '../concepts/CertificationControl'
@@ -51,6 +51,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
   const connected = useUiStore((s) => s.connectedProfile)
   const [selected, setSelected] = useState('')
   const [naming, setNaming] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
   const actions = useGraphActions()
   const drawer = useGraphStore((s) => s.drawer)
   const showConcepts = useGraphStore((s) => s.showConcepts)
@@ -58,6 +59,14 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
   const allColumns = useGraphStore((s) => s.columnsOn)
   const hasNodes = useGraphStore((s) => s.nodes.length > 0)
   const proposed = useSuggestions('proposed').data?.counts.proposed
+  useEffect(() => {
+    if (!toolsOpen) return
+    const close = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !document.querySelector('[role="dialog"]')) setToolsOpen(false)
+    }
+    window.addEventListener('keydown', close)
+    return () => window.removeEventListener('keydown', close)
+  }, [toolsOpen])
   useMiningWatcher()
   useDiagramSync()
   const toggleDrawer = (d: 'suggestions' | 'usage') => useGraphStore.getState().setDrawer(drawer === d ? null : d)
@@ -228,23 +237,6 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
         <div className="tb-group">
           <button
             style={NOWRAP}
-            onClick={() => useGraphStore.getState().setMineDialog(true)}
-            disabled={!connected}
-            title="Read query history for joins between tables. Shows the SQL first."
-          >
-            Mine joins…
-          </button>
-          <button style={NOWRAP} onClick={() => toggleDrawer('suggestions')} aria-pressed={drawer === 'suggestions'} disabled={!connected}>
-            Suggestions{proposed ? ` (${proposed})` : ''}
-          </button>
-          <button style={NOWRAP} onClick={() => toggleDrawer('usage')} aria-pressed={drawer === 'usage'} disabled={!connected}>
-            Usage
-          </button>
-        </div>
-        <span className="toolbar-sep" />
-        <div className="tb-group">
-          <button
-            style={NOWRAP}
             onClick={() => void actions.setAllColumns(!allColumns)}
             disabled={!hasNodes}
             title="Show or hide the columns of every table on the graph"
@@ -260,18 +252,50 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
           >
             Concepts
           </button>
-          <ColorByControl />
-          <GroupControl />
         </div>
         <span className="toolbar-sep" />
-        <div className="tb-group">
-          <TableStatsButton />
-          <ProfileButton />
-          <CertificationControl />
-        </div>
+        <ColorByControl />
         <span className="toolbar-sep" />
-        <GraphExportButton />
+        <GroupControl />
+        <span className="spacer" />
+        <button
+          style={NOWRAP}
+          onClick={() => setToolsOpen((o) => !o)}
+          aria-expanded={toolsOpen}
+          title="Mine joins, suggestions, usage, table size and history, relationship profiles, certification and export"
+        >
+          Tools{proposed ? ` (${proposed})` : ''} &#9662;
+        </button>
       </div>
+      {/* Opens inside the toolbar, like the Canvas More panel, so the graph below gives way and nothing is covered. */}
+      {toolsOpen && (
+        <div className="tb-row tb-tools" role="group" aria-label="Graph tools">
+          <div className="tb-group">
+            <button
+              style={NOWRAP}
+              onClick={() => useGraphStore.getState().setMineDialog(true)}
+              disabled={!connected}
+              title="Read query history for joins between tables. Shows the SQL first."
+            >
+              Mine joins…
+            </button>
+            <button style={NOWRAP} onClick={() => toggleDrawer('suggestions')} aria-pressed={drawer === 'suggestions'} disabled={!connected}>
+              Suggestions{proposed ? ` (${proposed})` : ''}
+            </button>
+            <button style={NOWRAP} onClick={() => toggleDrawer('usage')} aria-pressed={drawer === 'usage'} disabled={!connected}>
+              Usage
+            </button>
+          </div>
+          <span className="toolbar-sep" />
+          <div className="tb-group">
+            <TableStatsButton />
+            <ProfileButton />
+            <CertificationControl />
+          </div>
+          <span className="toolbar-sep" />
+          <GraphExportButton />
+        </div>
+      )}
       {naming && (
         <NameDialog
           title="Save diagram"

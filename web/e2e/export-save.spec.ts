@@ -22,6 +22,7 @@ test('export gives Mermaid text and a PNG of the graph', async ({ page }) => {
   await expect(tables(page)).toHaveCount(5)
   await expect(page.getByTestId('edge-glyph-aggregate')).toBeVisible() // the transform label the text carries
 
+  await page.getByRole('button', { name: /^Tools/ }).click()
   await page.getByRole('button', { name: 'Export…' }).click()
   const dialog = page.getByRole('dialog', { name: 'Export the graph' })
   await expect(dialog).toContainText('Legend:')
