@@ -20,7 +20,7 @@ export type Tok = { n: number; states: number; ex: string[]; s: string } // uses
 export type Tokens = Record<string, Record<string, Tok>>
 export type Local = { rule: string; key: string; control: string; detail: string; s: string }
 export type StateSummary = { elements: number; fontSizes: number; colours: number; spacings: number; radii: number; disabledControls: number }
-export type Ref = { id: string; shot: string; repro: string[]; root: string; viewport: string }
+export type Ref = { id: string; shot: string; repro: string[]; root: string; viewport: string; theme: string }
 export type StylePart = { tokens: Tokens; local: Local[]; states: Record<string, StateSummary>; refs: Record<string, Ref> }
 type Raw = {
   tokens: Record<string, Record<string, { n: number; ex: string[] }>>
@@ -425,7 +425,7 @@ export function mergeStyle(parts: StylePart[]) {
     if (findings.has(k)) return
     const st = s.map((id) => refs[id]).filter(Boolean)
     const first = st[0]
-    const where = [...new Map(st.map((r) => [r.root + r.viewport, { root: r.root, viewport: r.viewport, stateId: r.id }])).values()]
+    const where = [...new Map(st.map((r) => [r.root + r.viewport + r.theme, { root: r.root, viewport: r.viewport, theme: r.theme, stateId: r.id }])).values()]
     findings.set(k, { ruleId: rule, severity: STYLE_SEVERITY[rule], control, detail, screenshot: first?.shot ?? '', repro: first?.repro ?? [], confidence: 'high', where, category: 'style', ...extra })
   }
   const desc = (p: Pooled) => p.value + ' (' + p.n + ' uses in ' + p.states + ' states; e.g. ' + p.ex.slice(0, 2).join(', ') + ')'
