@@ -434,6 +434,7 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       }
     }
     async function resetInner(): Promise<Snap> {
+      done = null
       const tW = Date.now()
       // A request the old page left in flight (a saved concept) must land before the wipe, not after it: wait for the page's own requests, then close it.
       if (page) {
@@ -478,6 +479,7 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}' })
       await page.mouse.move(2, 2)
       await settle(page, 600)
+      done = []
       return snapshot(page)
     }
 
@@ -491,6 +493,7 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
     let startSig = ''
     let startSnap: Snap | undefined
     const resetDiffs: string[] = [] // what a failed reset looked like, to find the cause
+    let done: Act[] | null = null // the actions performed since the last reset, while the page is known to have followed them exactly
     let cur: string | null = null // the state the page is verifiably in right now, so no reset is needed to act on it again
     const unverified: { edge: string; from: string; to: string; reason: string }[] = []
     const extra = { n: 0, max: EXTRA_ACTIONS }
@@ -513,14 +516,17 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       if (a.key === 'press|Escape') {
         await page.keyboard.press('Escape')
         await settle(page)
+        done?.push(a)
         return true
       }
       const snap = await snapshot(page)
       const c = snap.controls.find((x) => x.key === a.key && x.role !== 'label')
-      if (!c) return false
+      if (!c) return void (done = null) ?? false
       await page.mouse.click(c.cx, c.cy)
       await settle(page)
       if (leftApp || new URL(page.url()).origin !== origin) leftApp = true
+      if (leftApp) done = null
+      else done?.push(a)
       return true
     }
 
@@ -575,6 +581,23 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
     async function goTo(state: State): Promise<boolean> {
       if (cur === state.id) return true
       cur = null
+      // The page already followed a prefix of this path: perform only the rest, and fall back to a reset if the signature is not the state's.
+      if (done && !leftApp && done.length <= state.path.length && done.every((d, i) => d.key === state.path[i].key)) {
+        const tP = Date.now()
+        let ok = true
+        try {
+          for (const a of state.path.slice(done.length))
+            if (!(await perform(a))) {
+              ok = false
+              break
+            }
+          if (ok && (await snapshot(page)).sig !== state.sig) ok = false
+        } catch {
+          ok = false
+        }
+        tm.replayMs += Date.now() - tP
+        if (ok) return true
+      }
       for (let attempt = 0; attempt < 3; attempt++) {
         let ok = true
         try {
@@ -767,6 +790,7 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       const x = cL.cx
       const y = cL.cy
       await page.mouse.click(x, y)
+      done = null
       await settle(page)
       const after = await snapshot(page)
       cur = after.sig === B.sig ? B.id : null
