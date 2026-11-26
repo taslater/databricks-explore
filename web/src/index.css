@@ -11,6 +11,7 @@
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
+  --space-6: 48px;
   /* Type: 12 / 14 / 16 / 20, normal and strong weight. */
   --fs-sm: 12px;
   --fs-md: 14px;
@@ -46,6 +47,11 @@
   --radius-panel: 8px;
   --control-h: 28px;
   --control-h-sm: 24px;
+  /* React Flow reads these for its zoom controls and resize handles. */
+  --xy-controls-button-background-color-default: var(--white);
+  --xy-controls-button-background-color-hover-default: var(--grey-50);
+  --xy-controls-button-border-color-default: var(--border);
+  --xy-resize-background-color-default: var(--accent);
   --shadow: 0 2px 8px rgba(31, 35, 40, 0.2);
 }
 
@@ -60,23 +66,109 @@ body,
   margin: 0;
 }
 
+/* ---- One control system: buttons, selects, inputs, textareas and segmented controls share height, radius, border,
+   focus and disabled style. Variants: secondary (the default), .primary, .ghost, and .danger. ------------------- */
 button,
 select,
-input {
+input,
+textarea {
   font: inherit;
+  color: inherit;
+}
+
+button,
+select,
+input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'])),
+textarea {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--white);
+}
+
+button,
+select,
+input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'])) {
+  min-height: var(--control-h);
+  padding: 0 var(--space-2);
+}
+
+textarea {
+  padding: var(--space-1) var(--space-2);
 }
 
 button {
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--grey-50);
   cursor: pointer;
 }
 
-button:disabled {
+button:hover:not(:disabled) {
+  background: var(--grey-50);
+  border-color: var(--grey-300);
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'])):focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent);
+}
+
+select {
+  appearance: none;
+  padding-right: var(--space-5);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23656d76' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-2) center;
+  cursor: pointer;
+}
+
+button:disabled,
+select:disabled,
+input:disabled,
+textarea:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Variants */
+button.primary,
+button.primary:hover:not(:disabled),
+button.app-dialog-primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+button.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+button.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+button.ghost:hover:not(:disabled) {
+  background: var(--grey-100);
+  border-color: transparent;
+}
+
+/* Compact icon buttons */
+button.compact {
+  min-height: var(--control-h-sm);
+  min-width: var(--control-h-sm);
+  padding: 0 var(--space-1);
 }
 
 .shell {
@@ -124,10 +216,15 @@ button:disabled {
   border-radius: 0 var(--radius) var(--radius) 0;
 }
 
+.segmented button + button {
+  margin-left: -1px;
+}
+
 .segmented button.active {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--white);
+  position: relative;
 }
 
 .workspace {
@@ -549,7 +646,7 @@ table.cols td {
   width: 100%;
   margin: 0;
   box-sizing: border-box;
-  padding-right: 30px;
+  padding-right: 32px;
 }
 
 .pick-filter.invalid {
@@ -567,8 +664,8 @@ table.cols td {
 .pick-regex {
   position: absolute;
   top: 2px;
-  right: 3px;
-  height: 20px;
+  right: 2px;
+  height: var(--control-h-sm);
   padding: 0 var(--space-1);
   border: 1px solid transparent;
   border-radius: var(--radius);
@@ -1994,7 +2091,7 @@ button.link {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 6vh;
+  padding-top: var(--space-6);
 }
 
 .modal {
@@ -3409,12 +3506,6 @@ button.as-link {
   gap: var(--space-2);
 }
 
-button.app-dialog-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--white);
-}
-
 button.app-dialog-danger {
   background: var(--danger);
   border-color: var(--danger);
@@ -3676,4 +3767,27 @@ button.app-dialog-danger {
 
 .edge-glyph.merged {
   white-space: nowrap;
+}
+
+/* Vendor overrides: keep CodeMirror and React Flow on the same neutrals and spacing as the rest. */
+.cm-editor .cm-gutters {
+  background: var(--grey-50);
+  border-right: 1px solid var(--border);
+}
+
+.cm-editor .cm-activeLine,
+.cm-editor .cm-activeLineGutter {
+  background: var(--accent-soft);
+}
+
+.cm-editor .cm-gutterElement {
+  padding: 0 var(--space-1);
+}
+
+.cm-editor .cm-scroller .cm-line {
+  padding: 0 var(--space-1);
+}
+
+.react-flow__attribution {
+  padding: 2px var(--space-1);
 }
