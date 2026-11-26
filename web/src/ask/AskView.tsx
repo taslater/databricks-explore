@@ -42,6 +42,18 @@ export function AskView() {
     }
   }
 
+  /** The example questions: in the middle of the empty thread at first, above the box once a conversation has started. */
+  const examples = (
+    <div className="ask-examples" role="group" aria-label="Example questions">
+      <span className="hint">Try</span>
+      {EXAMPLES.map((q, i) => (
+        <button key={q} data-testid={`ask-example-${i}`} className="chip-button" disabled={!connected || running} onClick={() => setText(q)}>
+          {q}
+        </button>
+      ))}
+    </div>
+  )
+
   return (
     <div className="ask-view">
       <div className="ask-toolbar">
@@ -63,6 +75,7 @@ export function AskView() {
               the Graph and link them to concepts.
             </p>
             <p>Nothing is saved: the conversation lives in this page until you reload it.</p>
+            {examples}
           </div>
         )}
         {turns.map((t) => (
@@ -75,14 +88,7 @@ export function AskView() {
         {connected && !warehouseId && (
           <p className="hint">No SQL warehouse is selected. Genie runs its queries on the selected warehouse, so pick one in the picker.</p>
         )}
-        <div className="ask-examples" role="group" aria-label="Example questions">
-          <span className="hint">Try</span>
-          {EXAMPLES.map((q, i) => (
-            <button key={q} data-testid={`ask-example-${i}`} className="chip-button" disabled={!connected || running} onClick={() => setText(q)}>
-              {q}
-            </button>
-          ))}
-        </div>
+        {turns.length > 0 && examples}
         <div className="ask-composer-row">
           <textarea
             value={text}

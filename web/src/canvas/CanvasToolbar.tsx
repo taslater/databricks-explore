@@ -43,7 +43,7 @@ interface CanvasToolbarProps {
   onToggleMinimap: () => void
 }
 
-/** Add a window, Run all windows, Save, Minimap and the More menu (Save as, Open, New diagram, Doctor), the canvas name, the save status, and the layout Doctor and Arrange buttons. Mounted in a React Flow panel. */
+/** Add a window, Run all windows, Save, the saved-canvases select with Open, Save as, Minimap and the More menu (New diagram, Doctor), the canvas name, the save status, and the layout Doctor and Arrange buttons. Mounted in a React Flow panel. */
 export function CanvasToolbar({ onAddQuery, onAddNote, showMinimap, onToggleMinimap }: CanvasToolbarProps) {
   const canvasName = useCanvasStore((s) => s.canvasName)
   const windowCount = useCanvasStore((s) => s.windows.length)
@@ -180,45 +180,40 @@ export function CanvasToolbar({ onAddQuery, onAddNote, showMinimap, onToggleMini
         </span>
         <span className="toolbar-sep" />
         <div className="tb-group">
+          <select
+            value={pick}
+            onChange={(e) => setPick(e.target.value)}
+            // An agent can add canvases at any time, so opening the list asks the server again.
+            onMouseDown={() => void canvases.refetch()}
+            onFocus={() => void canvases.refetch()}
+            aria-label="Saved canvases"
+            title="Pick a saved canvas to open"
+            disabled={!canvases.data}
+          >
+            <option value="">— saved canvases —</option>
+            {canvases.data?.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          {pick && (
+            <button data-selection-ui onClick={onOpen}>
+              Open
+            </button>
+          )}
           <button onClick={onSave}>Save</button>
+          <button onClick={onSaveAs}>Save as</button>
           <button onClick={onToggleMinimap} aria-pressed={showMinimap} title="Show or hide the minimap">
             Minimap
           </button>
-          <button onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen} title="Save as, open, new diagram and the layout Doctor">
+          <button onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen} title="New diagram and the layout Doctor">
             More &#9662;
           </button>
         </div>
       </div>
       {moreOpen && (
         <div className="canvas-more" role="group" aria-label="More canvas actions">
-          <div className="tb-group">
-            <select
-              value={pick}
-              onChange={(e) => setPick(e.target.value)}
-              // An agent can add canvases at any time, so opening the list asks the server again.
-              onMouseDown={() => void canvases.refetch()}
-              onFocus={() => void canvases.refetch()}
-              aria-label="Saved canvases"
-              disabled={!canvases.data}
-            >
-              <option value="">— saved canvases —</option>
-              {canvases.data?.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={() => {
-                setMoreOpen(false)
-                onOpen()
-              }}
-              disabled={!pick}
-            >
-              Open
-            </button>
-          </div>
-          <span className="toolbar-sep" />
           <button
             onClick={() => {
               setMoreOpen(false)
@@ -227,14 +222,6 @@ export function CanvasToolbar({ onAddQuery, onAddNote, showMinimap, onToggleMini
             title="Start a blank sketch. No profile or warehouse needed."
           >
             New diagram
-          </button>
-          <button
-            onClick={() => {
-              setMoreOpen(false)
-              onSaveAs()
-            }}
-          >
-            Save as
           </button>
           <button
             onClick={() => {

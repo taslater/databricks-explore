@@ -123,9 +123,11 @@ export function GraphDetails() {
         <button onClick={() => useGraphStore.getState().requestLayout()} disabled={!hasNodes}>
           Reset layout
         </button>
-        <button className="danger" onClick={() => useGraphStore.getState().clear()} title="Take every table off the graph and start again">
-          Clear
-        </button>
+        {hasNodes && (
+          <button className="danger" onClick={() => useGraphStore.getState().clear()} title="Take every table off the graph and start again">
+            Clear
+          </button>
+        )}
       </div>
 
       <div className="details-body">

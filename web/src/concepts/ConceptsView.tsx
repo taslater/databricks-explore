@@ -53,6 +53,8 @@ export function ConceptsView() {
     )
   }
 
+  const noConcepts = !!list.data && list.data.concepts.length === 0 && !filters.q && !filters.domain && !filters.status && !selected
+
   return (
     <div className="concepts-view">
       <div className={`concepts-toolbar${pickerCollapsed ? ' with-picker-toggle' : ''}`}>
@@ -98,13 +100,14 @@ export function ConceptsView() {
           </span>
         )}
       </div>
-      <div className="concepts-body">
-        <ConceptList list={list.data} loading={list.isLoading} error={list.isError ? list.error.message : null} />
+      {/* no concepts and nothing filtered out: one empty state across the page instead of an empty list beside a placeholder */}
+      <div className={`concepts-body${noConcepts ? ' concepts-body-empty' : ''}`}>
+        {!noConcepts && <ConceptList list={list.data} loading={list.isLoading} error={list.isError ? list.error.message : null} />}
         {selected ? (
           <ConceptEditor key={selected} id={selected} names={new Map((list.data?.concepts ?? []).map((c) => [c.id, c.name]))} domains={list.data?.domains ?? []} />
         ) : (
           <div className="concept-editor concept-placeholder">
-            {list.data && list.data.concepts.length === 0 && !filters.q && !filters.domain && !filters.status ? (
+            {noConcepts ? (
               <div className="empty-state">
                 <h3>No concepts yet</h3>
                 <p>A concept is a business term, such as "active customer", linked to the tables and columns that define it.</p>

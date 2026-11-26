@@ -9,7 +9,7 @@ const SIZES = [
 ]
 
 for (const size of SIZES) {
-  test(`the Canvas strip is one row and More holds the file actions at ${size.width}x${size.height}`, async ({ page }) => {
+  test(`the Canvas strip is one row, keeps Save as and the saved canvases in view, and More holds the rarer actions at ${size.width}x${size.height}`, async ({ page }) => {
     await page.setViewportSize(size)
     await start(page)
     await page.getByRole('tab', { name: 'Canvas' }).click()
@@ -17,15 +17,15 @@ for (const size of SIZES) {
     await expect(toolbar).toBeVisible()
     const box = (await toolbar.boundingBox())!
     expect(box.height).toBeLessThan(44)
-    // The secondary file actions are not in the strip until More opens.
-    await expect(page.getByRole('button', { name: 'Save as' })).toHaveCount(0)
-    await expect(page.getByLabel('Saved canvases')).toHaveCount(0)
-    await page.getByRole('button', { name: 'More' }).click()
+    // Saving and opening stay in the strip; More holds only the rarer actions.
     await expect(page.getByRole('button', { name: 'Save as' })).toBeVisible()
     await expect(page.getByLabel('Saved canvases')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Doctor' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'More' }).click()
+    await expect(page.getByRole('button', { name: 'New diagram' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Doctor' })).toBeVisible()
     await page.keyboard.press('Escape')
-    await expect(page.getByRole('button', { name: 'Save as' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Doctor' })).toHaveCount(0)
   })
 }
 
@@ -52,7 +52,11 @@ test('the Graph toolbar fits two rows at 1500x900, saved-diagram actions wait fo
   const bar = (await page.locator('.graph-toolbar').boundingBox())!
   expect(bar.height).toBeLessThan(2 * 28 + 24)
   await expect(page.getByRole('button', { name: 'Load', exact: true })).toHaveCount(0)
-  await expect(page.getByText('Pick one to load, rename or delete')).toBeVisible()
+  await expect(page.getByLabel('Saved diagrams')).toHaveAttribute('title', /load, rename or delete/)
+  // Nothing to clear yet, and a disabled control says why.
+  await expect(page.getByRole('button', { name: 'Clear', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Show columns' })).toHaveAttribute('title', /Add a table/)
+  await expect(page.getByRole('button', { name: 'Find a table' })).toHaveClass(/primary/)
   // The empty canvas has one call to action, which focuses the picker's filter.
   await expect(page.getByRole('heading', { name: 'Nothing on the graph yet' })).toBeVisible()
   await page.getByRole('button', { name: 'Find a table' }).click()
@@ -88,4 +92,25 @@ test('Concepts shows its empty state once, and Agent access has one primary acti
   await expect(dialog.locator('button.primary')).toHaveCount(1)
   const wrap = await dialog.getByTestId('agent-command').evaluate((el) => getComputedStyle(el).wordBreak)
   expect(wrap).toBe('normal')
+})
+
+test('primary buttons keep white text in every state', async ({ page }) => {
+  await start(page)
+  await page.getByRole('tab', { name: 'Canvas' }).click()
+  const btn = page.getByRole('button', { name: '+ Query window' })
+  const white = 'rgb(255, 255, 255)'
+  await expect(btn).toHaveCSS('color', white)
+  await btn.hover()
+  await expect(btn).toHaveCSS('color', white)
+  await btn.focus()
+  await expect(btn).toHaveCSS('color', white)
+  await page.mouse.move(0, 0)
+  const box = (await btn.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await expect(btn).toHaveCSS('color', white)
+  await page.mouse.up()
+  // Disabled: the Graph's Save diagram while a save is running is brief, so check the rule on a disabled copy.
+  await btn.evaluate((el) => ((el as HTMLButtonElement).disabled = true))
+  await expect(btn).toHaveCSS('color', white)
 })

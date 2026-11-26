@@ -183,17 +183,18 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
             value={selected}
             onChange={(e) => setSelected(e.target.value)}
             aria-label="Saved diagrams"
+            title="Pick a saved diagram to load, rename or delete"
             disabled={!diagrams.data}
           >
-            <option value="">— saved diagrams —</option>
+            <option value="">— pick a saved diagram —</option>
             {diagrams.data?.map((name) => (
               <option key={name} value={name}>
                 {name}
               </option>
             ))}
           </select>
-          {/* These act on the picked diagram, so they appear with one; a hint holds their place until then. */}
-          {selected ? (
+          {/* These act on the picked diagram, so they appear with one. The select's title says what picking does. */}
+          {selected && (
             <span className="selection-ui" data-selection-ui>
               <button onClick={load} style={NOWRAP}>
                 Load
@@ -204,10 +205,6 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
               <button className="danger" onClick={() => setDeleting(true)} style={NOWRAP}>
                 Delete
               </button>
-            </span>
-          ) : (
-            <span className="hint tb-hint" style={NOWRAP}>
-              Pick one to load, rename or delete
             </span>
           )}
         </div>
@@ -239,7 +236,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
             style={NOWRAP}
             onClick={() => void actions.setAllColumns(!allColumns)}
             disabled={!hasNodes}
-            title="Show or hide the columns of every table on the graph"
+            title={hasNodes ? 'Show or hide the columns of every table on the graph' : 'Add a table to the graph first'}
           >
             {allColumns ? 'Hide columns' : 'Show columns'}
           </button>
@@ -248,7 +245,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
             onClick={() => useGraphStore.getState().setShowConcepts(!showConcepts)}
             aria-pressed={showConcepts}
             disabled={!connected}
-            title="Draw the glossary concepts linked to the tables on the graph"
+            title={connected ? 'Draw the glossary concepts linked to the tables on the graph' : 'Connect to a workspace first'}
           >
             Concepts
           </button>
