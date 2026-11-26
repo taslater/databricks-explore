@@ -2,7 +2,7 @@
 // start) at two viewports and reports generic defects (irreversible transitions, toggles that cannot be undone, obscure exits,
 // occluded or overlapping controls, clipped text). No LLM, no feature knowledge. See audit/README.md.
 // It is a reporter, not a gate: the test passes whatever it finds. Output: web/audit-out/ui-findings.json, graph.json, screens/.
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test'
@@ -39,6 +39,44 @@ const SEVERITY: Record<string, 'high' | 'medium' | 'low' | 'info'> = {
 }
 const WEIGHT = { high: 10, medium: 4, low: 1, info: 0 }
 
+// ---- expected.json: by-design findings, a maintainer's decision. They stay in the report, marked expected, and do not count toward the score. ----
+type Expected = { rule: string; control: RegExp | string; root?: string; viewport?: string; reason: string; raw: unknown }
+function loadExpected(): Expected[] {
+  const file = fileURLToPath(new URL('./expected.json', import.meta.url))
+  if (!existsSync(file)) return []
+  const bad = (i: number, why: string) => new Error('audit/expected.json entry ' + i + ': ' + why)
+  const data: unknown = JSON.parse(readFileSync(file, 'utf8'))
+  if (!Array.isArray(data)) throw new Error('audit/expected.json must be an array of entries')
+  return data.map((raw, i) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw bad(i, 'not an object')
+    const e = raw as Record<string, unknown>
+    for (const k of Object.keys(e)) if (!['rule', 'control', 'root', 'viewport', 'reason'].includes(k)) throw bad(i, 'unknown key "' + k + '"')
+    if (typeof e.rule !== 'string' || !(e.rule in SEVERITY)) throw bad(i, 'rule must be one of ' + Object.keys(SEVERITY).join(', '))
+    if (typeof e.control !== 'string' || !e.control.trim()) throw bad(i, 'control must be a non-empty string or /regex/')
+    if (typeof e.reason !== 'string' || !e.reason.trim()) throw bad(i, 'reason is required and must not be empty')
+    for (const k of ['root', 'viewport'] as const) if (e[k] !== undefined && (typeof e[k] !== 'string' || !(e[k] as string).trim())) throw bad(i, k + ' must be a non-empty string')
+    let control: RegExp | string = e.control
+    const m = /^\/(.+)\/([a-z]*)$/.exec(e.control)
+    if (m) {
+      try {
+        control = new RegExp(m[1], m[2])
+      } catch {
+        throw bad(i, 'control is not a valid regular expression')
+      }
+    }
+    return { rule: e.rule, control, root: e.root as string | undefined, viewport: e.viewport as string | undefined, reason: e.reason, raw }
+  })
+}
+const expectedList = loadExpected()
+const nameOf = (label: string) => /"(.*)"/.exec(label)?.[1] ?? label
+/** A string control equals the control's name (or its whole label); a regex is tested against both. irreversible-transition also matches the first click of the repro, because one one-way action shows up under every state it leads to. */
+function expectedMatches(x: Expected, f: Finding): boolean {
+  const names = [f.control, nameOf(f.control)]
+  if (f.ruleId === 'irreversible-transition' && f.repro[1]) names.push(f.repro[1], nameOf(f.repro[1]))
+  const hit = names.some((n) => (typeof x.control === 'string' ? n === x.control : x.control.test(n)))
+  return hit && x.rule === f.ruleId && f.where.some((w) => (!x.root || w.root === x.root) && (!x.viewport || w.viewport === x.viewport))
+}
+
 type Act = { key: string; label: string; name: string; role: string }
 type Snap = { sig: string; struct: string; controls: Ctl[]; overlaps: Overlap[]; open: string[]; url: string }
 type Overlap = { a: string; b: string; ox: number; oy: number; top: string }
@@ -52,6 +90,12 @@ type Ctl = {
   y: number
   w: number
   h: number
+  vx: number // the part of the box that shows: clipped by every clipping ancestor and the viewport
+  vy: number
+  vw: number
+  vh: number
+  cx: number // centre of the visible part: where hit-testing and clicks go
+  cy: number
   tag: string
   href: string | null
   hit: string | null // null when the centre is not on the page, '' when the hit element is the control or inside it
@@ -104,6 +148,52 @@ function collect() {
     for (let n: Element | null = e; n && n !== document.body; n = n.parentElement) parts.push(n.tagName.toLowerCase() + ':' + (Array.prototype.indexOf.call(n.parentElement?.children ?? [], n) + 1))
     return parts.reverse().join('>')
   }
+  const isVis = (e: Element) => {
+    const r = e.getBoundingClientRect()
+    const s = getComputedStyle(e)
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !e.closest('[aria-hidden=true],[inert]')
+  }
+  /** The part of the box that shows, or null: clipped by overflow/clip-path/contain:paint ancestors (absolute and fixed boxes skip the ones that are not their containing block) and the viewport; null too under opacity 0. */
+  const visibleRect = (el: HTMLElement) => {
+    const r = el.getBoundingClientRect()
+    let l = Math.max(r.left, 0)
+    let t = Math.max(r.top, 0)
+    let rt = Math.min(r.right, vw)
+    let b = Math.min(r.bottom, vh)
+    for (let p = el.parentElement; p; p = p.parentElement) if (Number(getComputedStyle(p).opacity) === 0) return null
+    let mode = getComputedStyle(el).position
+    for (let p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+      if (mode === 'fixed') break
+      const ps = getComputedStyle(p)
+      const skip = mode === 'absolute' && ps.position === 'static'
+      const clips = ps.overflowX !== 'visible' || ps.overflowY !== 'visible' || ps.clipPath !== 'none' || /paint|content|strict/.test(ps.contain)
+      if (!skip && clips && ps.display !== 'contents' && ps.display !== 'inline') {
+        const pr = p.getBoundingClientRect()
+        const pl = pr.left + p.clientLeft
+        const pt = pr.top + p.clientTop
+        l = Math.max(l, pl)
+        t = Math.max(t, pt)
+        rt = Math.min(rt, ps.overflowX === 'visible' && ps.clipPath === 'none' ? rt : pl + p.clientWidth)
+        b = Math.min(b, ps.overflowY === 'visible' && ps.clipPath === 'none' ? b : pt + p.clientHeight)
+      }
+      if (!skip) mode = ps.position
+    }
+    return rt - l > 0.5 && b - t > 0.5 ? { x: l, y: t, w: rt - l, h: b - t } : null
+  }
+  // With modal dialogs open, only the topmost one is active; everything behind it is out of scope.
+  const modals = (Array.from(document.querySelectorAll('[aria-modal=true],[role=dialog]')) as HTMLElement[]).filter((e) => isVis(e) && (e.getAttribute('aria-modal') === 'true' || !!e.closest('[class*=backdrop]')))
+  if (!modals.length)
+    for (const e of Array.from(document.querySelectorAll('[class*=backdrop]')) as HTMLElement[]) {
+      const r = e.getBoundingClientRect()
+      if (isVis(e) && r.width * r.height >= 0.8 * vw * vh) modals.push(e)
+    }
+  let topModal: HTMLElement | null = modals.length ? modals[modals.length - 1] : null
+  for (const m of modals) {
+    const r = m.getBoundingClientRect()
+    const h = document.elementFromPoint(Math.min(Math.max(r.left + r.width / 2, 0), vw - 1), Math.min(Math.max(r.top + r.height / 2, 0), vh - 1))
+    if (h && m.contains(h)) topModal = m
+  }
+  const behind: string[] = []
   const counts = new Map<string, number>()
   const out: Ctl[] = []
   const els: HTMLElement[] = []
@@ -115,28 +205,29 @@ function collect() {
     if (r.width <= 0 || r.height <= 0) continue
     const cs = getComputedStyle(el)
     if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) continue
-    if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) continue
+    if (topModal && !topModal.contains(el)) {
+      // Out of scope, but it still tells states apart: the same dialog over a different page is a different state.
+      behind.push(roleOf(el) + '|' + nameOf(el) + '|' + (el.getAttribute('aria-pressed') ?? '') + '|' + (el.getAttribute('aria-expanded') ?? ''))
+      continue
+    }
+    const vr = visibleRect(el)
+    if (!vr) continue
     const role = roleOf(el)
     const name = nameOf(el)
     const base = role + '|' + name
     const n = (counts.get(base) ?? 0) + 1
     counts.set(base, n)
-    const cx = r.left + r.width / 2
-    const cy = r.top + r.height / 2
-    let hit: string | null = null
-    if (cx >= 0 && cy >= 0 && cx < vw && cy < vh) {
-      const h = document.elementFromPoint(cx, cy)
-      // Behind an open modal, the backdrop covering the page's controls is intended, not a defect.
-      const modalHit = !!h && !!document.querySelector('[role=dialog],[aria-modal=true],[class*=backdrop]') && !!h.closest('[role=dialog],[aria-modal=true],[class*=backdrop],[class*=modal]') && !el.closest('[role=dialog],[aria-modal=true],[class*=modal]')
-      hit = h && (el.contains(h) || modalHit) ? '' : h ? describe(h) : 'nothing'
-    }
+    const cx = vr.x + vr.w / 2
+    const cy = vr.y + vr.h / 2
+    const h = document.elementFromPoint(cx, cy)
+    const hit: string = h && el.contains(h) ? '' : h ? describe(h) : 'nothing'
     let clipped = false
     if (el.scrollWidth > el.clientWidth + 1 && cs.textOverflow !== 'ellipsis' && cs.overflowX !== 'visible') clipped = true
     els.push(el)
     out.push({
       role, name, key: base + '#' + n,
       pressed: el.getAttribute('aria-pressed'), expanded: el.getAttribute('aria-expanded'),
-      x: r.left, y: r.top, w: r.width, h: r.height, tag: el.tagName.toLowerCase(),
+      x: r.left, y: r.top, w: r.width, h: r.height, vx: vr.x, vy: vr.y, vw: vr.w, vh: vr.h, cx, cy, tag: el.tagName.toLowerCase(),
       href: el.tagName === 'A' ? (el as HTMLAnchorElement).href : null, hit, clipped,
       tid: el.getAttribute('data-testid') || el.id || '', dpath: dpathOf(el), cls: classes(el),
     })
@@ -147,14 +238,14 @@ function collect() {
     for (let j = i + 1; j < out.length; j++) {
       const a = out[i]
       const b = out[j]
-      const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
-      const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
+      const ox = Math.min(a.vx + a.vw, b.vx + b.vw) - Math.max(a.vx, b.vx)
+      const oy = Math.min(a.vy + a.vh, b.vy + b.vh) - Math.max(a.vy, b.vy)
       if (ox <= 2 || oy <= 2) continue
-      const contains = (p: Ctl, q: Ctl) => p.x <= q.x + 0.5 && p.y <= q.y + 0.5 && p.x + p.w >= q.x + q.w - 0.5 && p.y + p.h >= q.y + q.h - 0.5
+      const contains = (p: Ctl, q: Ctl) => p.vx <= q.vx + 0.5 && p.vy <= q.vy + 0.5 && p.vx + p.vw >= q.vx + q.vw - 0.5 && p.vy + p.vh >= q.vy + q.vh - 0.5
       if (contains(a, b) || contains(b, a)) continue
-      const mx = Math.max(a.x, b.x) + ox / 2
-      const my = Math.max(a.y, b.y) + oy / 2
-      const t = mx >= 0 && my >= 0 && mx < vw && my < vh ? document.elementFromPoint(mx, my) : null
+      const mx = Math.max(a.vx, b.vx) + ox / 2
+      const my = Math.max(a.vy, b.vy) + oy / 2
+      const t = document.elementFromPoint(mx, my)
       overlaps.push({ a: a.role + ' "' + a.name + '"', b: b.role + ' "' + b.name + '"', ox, oy, top: t ? describe(t) : 'nothing' })
     }
   // Labels clipped the same way.
@@ -162,16 +253,24 @@ function collect() {
     const r = el.getBoundingClientRect()
     const cs = getComputedStyle(el)
     if (r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && el.scrollWidth > el.clientWidth + 1 && cs.textOverflow !== 'ellipsis' && cs.overflowX !== 'visible')
-      out.push({ role: 'label', name: norm(el.textContent ?? '') || '(unnamed)', key: 'label|' + norm(el.textContent ?? ''), pressed: null, expanded: null, x: r.left, y: r.top, w: r.width, h: r.height, tag: 'label', href: null, hit: '', clipped: true, tid: '', dpath: '', cls: '' })
+      out.push({ role: 'label', name: norm(el.textContent ?? '') || '(unnamed)', key: 'label|' + norm(el.textContent ?? ''), pressed: null, expanded: null, x: r.left, y: r.top, w: r.width, h: r.height, vx: r.left, vy: r.top, vw: r.width, vh: r.height, cx: r.left + r.width / 2, cy: r.top + r.height / 2, tag: 'label', href: null, hit: '', clipped: true, tid: '', dpath: '', cls: '' })
   }
   const overlays = ['[role=dialog]', '[role=menu]', '[role=listbox]'].map((s) => (document.querySelector(s) ? 1 : 0)).join('')
+  // What Escape is expected to close: visible dialogs, menus, listboxes, open popovers, and controls that expanded a popup (aria-haspopup).
   const open: string[] = []
-  for (const s of ['dialog', 'menu', 'listbox']) if (document.querySelector('[role=' + s + ']')) open.push('role:' + s)
-  out.forEach((c, i) => {
-    if (c.expanded === 'true') open.push('exp:' + c.key)
-    if (c.pressed === 'true') open.push('prs:' + c.key)
+  for (const s of ['dialog', 'menu', 'listbox'])
+    for (const e of Array.from(document.querySelectorAll('[role=' + s + ']'))) if (isVis(e)) open.push(s + ':' + (e.getAttribute('aria-label') || e.getAttribute('data-testid') || ''))
+  for (const e of Array.from(document.querySelectorAll('[popover]')))
+    try {
+      if (e.matches(':popover-open')) open.push('popover:' + (e.getAttribute('aria-label') || e.id))
+    } catch {
+      /* :popover-open unsupported */
+    }
+  const popupControls = new Set(Array.from(document.querySelectorAll('[aria-haspopup]:not([aria-haspopup=false])')))
+  els.forEach((el, i) => {
+    if (out[i].expanded === 'true' && popupControls.has(el)) open.push('popup:' + out[i].key)
   })
-  return { controls: out, overlaps, overlays, open, path: location.pathname }
+  return { controls: out, overlaps, overlays, open, path: location.pathname, behind: behind.sort().join('\n') }
 }
 
 const fnv = (s: string) => {
@@ -183,12 +282,13 @@ const fnv = (s: string) => {
 const stable = (s: string) => s.replace(/\d+/g, '#')
 
 async function snapshot(page: Page): Promise<Snap> {
-  const { controls, overlaps, overlays, open, path } = await page.evaluate(collect)
+  const { controls, overlaps, overlays, open, path, behind } = await page.evaluate(collect)
   const real = controls.filter((c) => c.role !== 'label')
   const items = real.map((c) => ({ r: c.role, n: stable(c.name), p: c.pressed, e: c.expanded }))
   const plain = items.map((i) => i.r + '|' + i.n + '|' + (i.e ?? '')).sort()
   const full = items.map((i) => i.r + '|' + i.n + '|' + (i.p ?? '') + '|' + (i.e ?? '')).sort()
-  return { sig: fnv(path + '\n' + overlays + '\n' + full.join('\n')), struct: fnv(path + '\n' + overlays + '\n' + plain.join('\n')), controls, overlaps, open, url: path }
+  const bg = stable(behind)
+  return { sig: fnv(path + '\n' + overlays + '\n' + full.join('\n') + '\n' + bg), struct: fnv(path + '\n' + overlays + '\n' + plain.join('\n') + '\n' + bg), controls, overlaps, open, url: path }
 }
 
 async function settle(page: Page, ms = 300) {
@@ -278,7 +378,6 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
         if (DENY.test(c.name)) continue
         if (c.role === 'tab' && ROOTS.includes(c.name)) continue // the top-level views are the crawl roots
         if (c.href && new URL(c.href, origin).origin !== origin) continue
-        if (c.x + c.w / 2 < 0 || c.y + c.h / 2 < 0 || c.x + c.w / 2 >= vp.width || c.y + c.h / 2 >= vp.height) continue
         acts.push({ key: c.key, label: 'click ' + c.role + ' "' + c.name + '"' + (c.key.endsWith('#1') ? '' : ' (#' + c.key.split('#').pop() + ')'), name: c.name, role: c.role })
       }
       acts.push({ key: 'press|Escape', label: 'press Escape', name: 'Escape', role: 'key' })
@@ -295,7 +394,7 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
       const snap = await snapshot(page)
       const c = snap.controls.find((x) => x.key === a.key && x.role !== 'label')
       if (!c) return false
-      await page.mouse.click(c.x + c.w / 2, c.y + c.h / 2)
+      await page.mouse.click(c.cx, c.cy)
       await settle(page)
       if (leftApp || new URL(page.url()).origin !== origin) leftApp = true
       return true
@@ -381,7 +480,7 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
       budget.n++
       actionCount++
       if (actionCount % 20 === 0) console.log('audit progress [' + root + ' ' + vpName + ']: ' + actionCount + ' actions, ' + states.size + ' states, ' + Math.round((Date.now() - t0) / 1000) + 's')
-      if (!(await goTo(state))) return
+      if (!(await goTo(state))) return void state.explored.delete(a.key) // not tried: it must not count as tried, or an edge would look checked
       if (!(await perform(a))) return void (cur = null)
       if (leftApp) return void (cur = null)
       const snap = await snapshot(page)
@@ -439,7 +538,7 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
 
     const checked = (B: State) => B.explored.size >= Math.min(B.actions.length, PER_STATE_RETURN_TRIES)
     const seenEdge = new Set<string>()
-    const visibleInA = (A: State, c: Ctl) => A.controls.some((x) => x.role !== 'label' && Math.hypot(x.x + x.w / 2 - (c.x + c.w / 2), x.y + x.h / 2 - (c.y + c.h / 2)) <= 6)
+    const visibleInA = (A: State, c: Ctl) => A.controls.some((x) => x.role !== 'label' && Math.hypot(x.cx - c.cx, x.cy - c.cy) <= 6)
     for (const e of candidates()) {
       const A = states.get(e.from)!
       const B = states.get(e.to)!
@@ -463,8 +562,11 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
         if (e1.to === A.id) paths.push([e1])
         else for (const e2 of outgoing(e1.to)) if (e2.to === A.id) paths.push([e1, e2])
       }
-      const obvious = (p: Edge[]) => p.every((ed) => {
+      // A dialog that A lacked is left through its own buttons (Close, Cancel): those are the expected exit even though A never showed them.
+      const dialogOpened = B.open.some((t) => /^dialog:/.test(t) && !A.open.includes(t))
+      const obvious = (p: Edge[]) => p.every((ed, i) => {
         if (ed.action === 'press|Escape') return false
+        if (dialogOpened && i === 0) return true
         const c = ctlOf(ed.from, ed)
         return !!c && visibleInA(A, c)
       })
@@ -496,8 +598,8 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
       const live = await snapshot(page)
       const cL = match(cA, live.controls)
       if (!cL) continue
-      const x = cL.x + cL.w / 2
-      const y = cL.y + cL.h / 2
+      const x = cL.cx
+      const y = cL.cy
       await page.mouse.click(x, y)
       await settle(page)
       const after = await snapshot(page)
@@ -534,34 +636,49 @@ test('crawl every top-level view and report UI defects', async ({ browser }, tes
   for (const vp of VIEWPORTS) for (const root of ROOTS) await runCrawl(root, vp)
 
   // ---- report ----
-  const list = [...findings.values()].map((f) => ({ ...f, seenIn: f.where.length }))
+  const list = [...findings.values()].map((f) => ({ ...f, seenIn: f.where.length, expected: false as boolean, expectedReason: undefined as string | undefined }))
+  const used = new Set<number>()
+  for (const f of list) {
+    const i = expectedList.findIndex((x) => expectedMatches(x, f))
+    if (i < 0) continue
+    f.expected = true
+    f.expectedReason = expectedList[i].reason
+    used.add(i)
+  }
+  const staleExpected = expectedList.filter((_, i) => !used.has(i)).map((x) => x.raw)
   const order = { high: 0, medium: 1, low: 2, info: 3 } as Record<string, number>
   list.sort((a, b) => order[a.severity] - order[b.severity] || b.seenIn - a.seenIn)
+  const counted = list.filter((f) => !f.expected)
   const byRule: Record<string, number> = {}
-  let penalty = 0
+  const expectedByRule: Record<string, number> = {}
   for (const f of list) {
-    byRule[f.ruleId] = (byRule[f.ruleId] ?? 0) + 1
-    penalty += WEIGHT[f.severity as keyof typeof WEIGHT]
+    const m = f.expected ? expectedByRule : byRule
+    m[f.ruleId] = (m[f.ruleId] ?? 0) + 1
   }
-  const score = Math.max(0, 100 - penalty)
   // Root causes: occluded and overlapping findings grouped by what sits on top, biggest first.
-  const groups = new Map<string, { occluder: string; count: number; byRule: Record<string, number>; roots: Set<string>; examples: string[]; repro: string[]; screenshot: string }>()
-  for (const f of list) {
+  const groups = new Map<string, { occluder: string; count: number; byRule: Record<string, number>; roots: Set<string>; examples: string[]; repro: string[]; screenshot: string; severity: string }>()
+  for (const f of counted) {
     if (!f.occluder) continue
-    const g = groups.get(f.occluder) ?? { occluder: f.occluder, count: 0, byRule: {}, roots: new Set<string>(), examples: [], repro: f.repro, screenshot: f.screenshot }
+    const g = groups.get(f.occluder) ?? { occluder: f.occluder, count: 0, byRule: {}, roots: new Set<string>(), examples: [], repro: f.repro, screenshot: f.screenshot, severity: f.severity }
     g.count++
     g.byRule[f.ruleId] = (g.byRule[f.ruleId] ?? 0) + 1
+    if (order[f.severity] < order[g.severity]) g.severity = f.severity
     f.where.forEach((w) => g.roots.add(w.root))
     if (g.examples.length < 5 && !g.examples.includes(f.control)) g.examples.push(f.control)
     groups.set(f.occluder, g)
   }
-  const rootCauses = [...groups.values()].sort((a, b) => b.count - a.count).map((g) => ({ ...g, roots: [...g.roots] }))
+  const rootCauses = [...groups.values()].sort((a, b) => b.count - a.count).map(({ severity, ...g }) => ({ ...g, roots: [...g.roots] }))
+  // Score: each distinct root cause counts once (a group of findings under one occluder is one cause), weighted by severity.
+  let total = 0
+  for (const f of counted) if (!f.occluder) total += WEIGHT[f.severity as keyof typeof WEIGHT]
+  for (const g of groups.values()) total += WEIGHT[g.severity as keyof typeof WEIGHT]
+  const score = Math.round(100 * Math.exp(-total / 50))
   const summary = {
-    crawls: crawls.length, score, findingsByRule: byRule, rootCauses, perCrawl: crawls,
+    crawls: crawls.length, score, weightedCauses: total, findingsByRule: byRule, expectedByRule, staleExpected, rootCauses, perCrawl: crawls,
     states: crawls.reduce((n, c) => n + (c.states as number), 0), actions: crawls.reduce((n, c) => n + (c.actions as number), 0),
     unverifiedReturns: crawls.reduce((n, c) => n + (c.unverifiedReturns as number), 0), seconds: Math.round((Date.now() - t0) / 1000),
   }
   writeFileSync(join(OUT, 'ui-findings.json'), JSON.stringify({ summary, findings: list }, null, 2))
   writeFileSync(join(OUT, 'graph.json'), JSON.stringify(graphs, null, 2))
-  console.log('audit: ' + summary.crawls + ' crawls, ' + list.length + ' findings (' + JSON.stringify(byRule) + '), score ' + score + ', ' + summary.seconds + 's')
+  console.log('audit: ' + summary.crawls + ' crawls, ' + list.length + ' findings (' + JSON.stringify(byRule) + ', expected ' + JSON.stringify(expectedByRule) + ', stale ' + staleExpected.length + '), score ' + score + ', ' + summary.seconds + 's')
 })
