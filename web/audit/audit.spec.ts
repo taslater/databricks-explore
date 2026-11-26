@@ -17,7 +17,7 @@ import { regionIssues } from './regions'
 
 const OUT = fileURLToPath(new URL('../audit-out', import.meta.url))
 const num = (name: string, dflt: number) => Number(process.env[name] ?? dflt)
-const DENY = /export|download|save as|copy|png|svg|open in|databricks|github/i
+const DENY = /export|download|save as|copy|png|svg|open in|databricks|github|theme/i // theme: the toggle is the crawl's own dimension, not something to explore
 const ONE_WAY = /delete|remove|close|clear/i
 const RETURN_WORDS = /delete|remove|close|clear|hide|undo|cancel|back|restore|dismiss|reset|minimi|collapse|toggle/i
 const ROOTS = ['Canvas', 'Graph', 'Concepts', 'Ask', 'Agent access']

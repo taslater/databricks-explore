@@ -3,10 +3,15 @@
   font-size: var(--fs-md);
   color: var(--text);
   background: var(--surface-shell);
+}
+
+/* Design tokens: the one place values are defined. Use these in every rule; nothing else in the app names a colour.
+   Each colour has a light value here and a dark one in the [data-theme='dark'] block below. An element with data-theme='light' inside a
+   dark page is drawn in light (the graph and canvas exports do this for the length of a capture). */
+:root,
+[data-theme='light'] {
   color-scheme: light;
 
-  /* Design tokens: the one place values are defined. Use these in every rule; nothing else in the app names a colour.
-     Each colour has a light value here and a dark one in the :root[data-theme='dark'] block below. */
   /* Spacing: a 4px scale (1px and 2px stay literal, for hairlines). */
   --space-1: 4px;
   --space-2: 8px;
@@ -46,6 +51,8 @@
   --on-accent: #ffffff;
   /* Text on a colour the user chose (sketch placeholder headers): white in both themes. */
   --on-strong: #ffffff;
+  /* Dark ink on a fill the user chose in a sketch (sticky notes, shapes): the same in both themes, since those fills are pale. */
+  --on-paper: #1f2328;
   --danger: #cf222e;
   --danger-soft: #ffebe9;
   --warn: #7d4e00;
@@ -91,7 +98,7 @@
 }
 
 /* Dark values for every token above. The theme script in index.html and src/theme.ts set data-theme from the stored choice or the system. */
-:root[data-theme='dark'] {
+[data-theme='dark'] {
   color-scheme: dark;
   --surface-shell: #151a21;
   --surface-panel: var(--grey-50);
@@ -111,6 +118,7 @@
   --accent-strong: #79b8ff;
   --on-accent: #0b1520;
   --on-strong: #ffffff;
+  --on-paper: #1f2328;
   --danger: #ff7b72;
   --danger-soft: #3d1a1d;
   --warn: #e3b341;
