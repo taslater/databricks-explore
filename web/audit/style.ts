@@ -3,15 +3,18 @@
 import type { Page } from '@playwright/test'
 import type { Finding } from './report'
 
-export const STYLE_RULES = ['style-near-duplicate', 'style-off-scale', 'style-row-inconsistent', 'style-near-miss-align'] as const
+export const STYLE_RULES = ['style-near-duplicate', 'style-off-scale', 'style-row-inconsistent', 'style-near-miss-align', 'style-over-budget'] as const
+/** Most distinct values a consistent UI uses of each kind; every value over adds 1 to the style total. */
+export const STYLE_BUDGETS = { fontSizes: 5, radii: 4, colours: 14, spacings: 10, controlHeights: 4 }
 export const STYLE_SEVERITY: Record<string, 'low' | 'info'> = {
   'style-near-duplicate': 'low',
   'style-off-scale': 'low',
   'style-row-inconsistent': 'low',
   'style-near-miss-align': 'low',
+  'style-over-budget': 'low',
 }
 const STYLE_WEIGHT = { low: 1, info: 0 }
-const MAX_PER_RULE = { 'style-near-duplicate': 40, 'style-off-scale': 10, 'style-row-inconsistent': 40, 'style-near-miss-align': 40 }
+const MAX_PER_RULE = { 'style-near-duplicate': 40, 'style-off-scale': 10, 'style-row-inconsistent': 40, 'style-near-miss-align': 40, 'style-over-budget': 10 }
 
 export type Tok = { n: number; states: number; ex: string[]; s: string } // uses, states it was seen in, example selectors, first state
 export type Tokens = Record<string, Record<string, Tok>>
@@ -59,6 +62,27 @@ function collectStyle(): Raw {
   const px = (v: string) => parseFloat(v)
   const clear = (c: string) => c === 'rgba(0, 0, 0, 0)' || c === 'transparent'
   const all = [...document.body.getElementsByTagName('*')].slice(0, 6000)
+  // Elements inside a zoomed canvas node (a transform:scale ancestor) are measured at the zoom, not as designed: left out.
+  const zoomed = new Map<Element, boolean>()
+  const isZoomed = (e: Element | null): boolean => {
+    if (!e || e === document.body) return false
+    const known = zoomed.get(e)
+    if (known !== undefined) return known
+    let z = isZoomed(e.parentElement)
+    if (!z) {
+      const t = getComputedStyle(e).transform
+      const m = /^matrix\(([^)]+)\)$/.exec(t)
+      if (m) {
+        const [a, b, c, d] = m[1].split(',').map(Number)
+        z = Math.abs(Math.hypot(a, b) - 1) > 0.01 || Math.abs(Math.hypot(c, d) - 1) > 0.01
+      } else if (/^matrix3d/.test(t)) {
+        const [a, b, , , c, d] = t.slice(9, -1).split(',').map(Number)
+        z = Math.abs(Math.hypot(a, b) - 1) > 0.01 || Math.abs(Math.hypot(c, d) - 1) > 0.01
+      }
+    }
+    zoomed.set(e, z)
+    return z
+  }
   type Box = { e: Element; l: number; r: number; t: number; b: number; w: number; h: number; cs: CSSStyleDeclaration }
   const boxes = new Map<Element, Box>()
   const CTRL = 'button,input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea,[role=button]'
@@ -70,6 +94,7 @@ function collectStyle(): Raw {
     if (cs.display === 'none' || cs.visibility !== 'visible' || cs.opacity === '0') continue
     const r = e.getBoundingClientRect()
     if (r.width <= 0 || r.height <= 0 || r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) continue
+    if (isZoomed(e)) continue
     boxes.set(e, { e, l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height, cs })
     if (e.matches(':disabled,[aria-disabled=true]')) disabled++
     const hasText = [...e.childNodes].some((n) => n.nodeType === 3 && (n.textContent ?? '').trim() !== '')
@@ -381,7 +406,18 @@ export function mergeStyle(parts: StylePart[]) {
   }
   const colours = pool(tokens, COLOUR_PROPS)
   const spacings = pool(tokens, SPACING_PROPS)
-  const distinct = { fontSizes: inventory.fontSize.distinct, colours: colours.size, radii: inventory.radius.distinct, spacings: spacings.size }
+  const heights = pool(tokens, ['buttonHeight', 'inputHeight'])
+  const heightsRounded = new Map<string, Pooled>()
+  for (const p of heights.values()) {
+    const k = Math.round(parseFloat(p.value)) + 'px'
+    const o = heightsRounded.get(k) ?? { ...p, value: k, n: 0, states: 0, ex: [] as string[], props: new Set<string>() }
+    o.n += p.n
+    o.states += p.states
+    for (const e of p.ex) if (o.ex.length < 3 && !o.ex.includes(e)) o.ex.push(e)
+    p.props.forEach((x) => o.props.add(x))
+    heightsRounded.set(k, o)
+  }
+  const distinct = { fontSizes: inventory.fontSize.distinct, colours: colours.size, radii: inventory.radius.distinct, spacings: spacings.size, controlHeights: heightsRounded.size }
 
   const findings = new Map<string, StyleFinding>()
   const add = (rule: string, control: string, detail: string, s: string[], extra = {}) => {
@@ -440,20 +476,32 @@ export function mergeStyle(parts: StylePart[]) {
     counts[l.rule] = (counts[l.rule] ?? 0) + 1
     if (counts[l.rule] <= MAX_PER_RULE[l.rule as keyof typeof MAX_PER_RULE]) add(l.rule, l.control, l.detail, [l.s])
   }
+  // budgets: the least used values over the budget are the ones to fold away; each adds 1 to the total
+  const budgetPools: Record<keyof typeof STYLE_BUDGETS, Map<string, Pooled>> = { fontSizes: pool(tokens, ['fontSize']), radii: pool(tokens, ['radius']), colours, spacings, controlHeights: heightsRounded }
+  const budgets: Record<string, { distinct: number; budget: number; over: number }> = {}
+  let overTotal = 0
+  for (const [k, budget] of Object.entries(STYLE_BUDGETS)) {
+    const vals = [...budgetPools[k as keyof typeof STYLE_BUDGETS].values()].sort((a, b) => b.n - a.n)
+    const over = Math.max(0, vals.length - budget)
+    budgets[k] = { distinct: vals.length, budget, over }
+    overTotal += over
+    if (over) add('style-over-budget', k + ' ' + vals.length + '/' + budget, vals.length + ' distinct ' + k + ', budget ' + budget + ' (' + over + ' over, adds ' + over + ' to the style total). Least used, fold these first: ' + vals.slice(budget).reverse().slice(0, 12).map((p) => p.value + ' x' + p.n + ' e.g. ' + p.ex[0]).join('; '), [vals[vals.length - 1].s])
+  }
   // every state where a local finding's key was seen counts as where
   const list = [...findings.values()]
   const byRule: Record<string, number> = {}
   let total = 0
   for (const f of list) {
     byRule[f.ruleId] = (byRule[f.ruleId] ?? 0) + 1
-    total += STYLE_WEIGHT[f.severity as 'low' | 'info']
+    if (f.ruleId !== 'style-over-budget') total += STYLE_WEIGHT[f.severity as 'low' | 'info']
   }
+  total += overTotal
   const all: Record<string, number> = { 'style-near-duplicate': dupes.length, 'style-off-scale': off.length, ...counts }
   const stateList = Object.entries(states)
   const avg = (k: keyof StateSummary) => (stateList.length ? Math.round((stateList.reduce((n, [, s]) => n + s[k], 0) / stateList.length) * 10) / 10 : 0)
   const score = Math.round(100 * Math.exp(-total / 50))
   const section = {
-    summary: { score, weightedCauses: total, findingsByRule: byRule, candidatesByRule: all, distinct, states: stateList.length, perStateAverage: { fontSizes: avg('fontSizes'), colours: avg('colours'), spacings: avg('spacings'), radii: avg('radii'), disabledControls: avg('disabledControls') } },
+    summary: { score, weightedCauses: total, budgets, budgetOverage: overTotal, findingsByRule: byRule, candidatesByRule: all, distinct, states: stateList.length, perStateAverage: { fontSizes: avg('fontSizes'), colours: avg('colours'), spacings: avg('spacings'), radii: avg('radii'), disabledControls: avg('disabledControls') } },
     tokens: inventory,
     colours: { distinct: colours.size, values: [...colours.values()].sort((a, b) => b.n - a.n).map((p) => ({ value: p.value, uses: p.n, props: [...p.props], examples: p.ex })) },
     spacings: { distinct: spacings.size, values: [...spacings.values()].sort((a, b) => b.n - a.n).map((p) => ({ value: p.value, uses: p.n, props: [...p.props] })) },

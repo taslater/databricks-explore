@@ -14,6 +14,7 @@ export const SEVERITY: Record<string, 'high' | 'medium' | 'low' | 'info'> = {
   'escape-does-nothing': 'low',
   'clipped-text': 'low',
   'small-target': 'info',
+  contrast: 'high', // medium for text that is not on a control; the finding carries its own severity
   ...STYLE_SEVERITY,
 }
 export const WEIGHT = { high: 10, medium: 4, low: 1, info: 0 }
