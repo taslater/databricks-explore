@@ -47,7 +47,7 @@ export function ConceptsView() {
 
   if (!profile) {
     return (
-      <div className="concepts-view">
+      <div className="concepts-view" data-surface="raised">
         <p className="hint concepts-empty">Connect to a profile to use concepts. Demo mode works too.</p>
       </div>
     )
@@ -56,7 +56,7 @@ export function ConceptsView() {
   const noConcepts = !!list.data && list.data.concepts.length === 0 && !filters.q && !filters.domain && !filters.status && !selected
 
   return (
-    <div className="concepts-view">
+    <div className="concepts-view" data-surface="raised">
       <div className={`concepts-toolbar${pickerCollapsed ? ' with-picker-toggle' : ''}`}>
         <strong>Concepts</strong>
         <button className="primary" onClick={() => select('new')}>

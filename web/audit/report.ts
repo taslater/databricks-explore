@@ -15,6 +15,8 @@ export const SEVERITY: Record<string, 'high' | 'medium' | 'low' | 'info'> = {
   'clipped-text': 'low',
   'small-target': 'info',
   'region-separation': 'medium',
+  'text-obscured': 'medium', // text cut off by an overflow-hidden box or with another element on top of it
+  'surface-order': 'medium', // the finding carries its own severity and confidence; a missing data-surface is low confidence
   contrast: 'high', // medium for text that is not on a control; the finding carries its own severity
   ...STYLE_SEVERITY,
 }
@@ -75,7 +77,7 @@ export function expectedMatches(x: Expected, f: Finding): boolean {
 
 
 /** What one crawl leaves for the merge: its findings in discovery order, its summary row and its graph. */
-export type Part = { order: number; findings: [string, Finding][]; crawl: Record<string, unknown>; graph: Record<string, unknown>; style?: StylePart }
+export type Part = { order: number; findings: [string, Finding][]; crawl: Record<string, unknown>; graph: Record<string, unknown>; style?: StylePart; surfaces?: { theme: string; root: string; viewport: string; role: string; bg: string }[] }
 
 /** Merges the parts of all crawls, in crawl order, into ui-findings.json and graph.json. Same dedupe, same scoring as one serial run. */
 export function mergeParts(OUT: string, wallSeconds: number, workers: number) {
@@ -95,8 +97,27 @@ export function mergeParts(OUT: string, wallSeconds: number, workers: number) {
       else for (const w of f.where) if (!have.where.some((x) => x.root === w.root && x.viewport === w.viewport && x.theme === w.theme)) have.where.push(w)
     }
   }
+  // Consistency across views: one role has one background per theme, whatever view it is in (within 2 per channel, so rounding does not count).
+  const near = (a: string, b: string) => [1, 3, 5].every((i) => Math.abs(parseInt(a.slice(i, i + 2), 16) - parseInt(b.slice(i, i + 2), 16)) <= 2)
+  const surfaceFindings: Finding[] = []
+  for (const th of ['light', 'dark']) {
+    for (const role of ['base', 'recessed', 'raised', 'overlay']) {
+      const seen = parts.flatMap((p) => p.surfaces ?? []).filter((s) => s.theme === th && s.role === role)
+      const groups: { bg: string; at: Set<string> }[] = []
+      for (const s of seen) {
+        const g = groups.find((x) => near(x.bg, s.bg)) ?? (groups.push({ bg: s.bg, at: new Set() }), groups[groups.length - 1])
+        g.at.add(s.root)
+      }
+      if (groups.length > 1)
+        surfaceFindings.push({
+          ruleId: 'surface-order', severity: SEVERITY['surface-order'], control: role + ' differs between views (' + th + ')',
+          detail: 'the ' + role + ' surface has ' + groups.length + ' backgrounds in the ' + th + ' theme: ' + groups.map((g) => g.bg + ' in ' + [...g.at].join(', ')).join('; '),
+          screenshot: '', repro: [], confidence: 'high', where: [...new Set(seen.map((s) => s.root + '|' + s.viewport))].map((k) => ({ root: k.split('|')[0], viewport: k.split('|')[1], theme: th, stateId: '' })),
+        })
+    }
+  }
   const style = mergeStyle(parts.flatMap((p) => (p.style ? [p.style] : [])))
-  const list = [...findings.values(), ...style.findings].map((f) => ({ ...f, seenIn: f.where.length, expected: false as boolean, expectedReason: undefined as string | undefined }))
+  const list = [...findings.values(), ...surfaceFindings, ...style.findings].map((f) => ({ ...f, seenIn: f.where.length, expected: false as boolean, expectedReason: undefined as string | undefined }))
   const used = new Set<number>()
   for (const f of list) {
     const i = expectedList.findIndex((x) => expectedMatches(x, f))

@@ -15,7 +15,7 @@ export function GraphEmpty() {
 
   return (
     <div className="graph-empty">
-      <div className="graph-empty-card">
+      <div className="graph-empty-card" data-surface="raised">
         <h3>Nothing on the graph yet</h3>
         <p>Add a table from the picker, then double-click it to bring in the tables it joins, reads from or feeds.</p>
         <button className="primary" onClick={findTable}>Find a table</button>

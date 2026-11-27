@@ -57,7 +57,7 @@ export function TableStatsDialog() {
   const errors = Object.entries(read.data?.errors ?? {})
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={close}>
-      <div className="modal mine-dialog" role="dialog" aria-modal="true" aria-label="Read size and history" onMouseDown={(e) => e.stopPropagation()}>
+      <div data-surface="overlay" className="modal mine-dialog" role="dialog" aria-modal="true" aria-label="Read size and history" onMouseDown={(e) => e.stopPropagation()}>
         <h3>Read size and history</h3>
         <p className="hint">
           Runs DESCRIBE DETAIL and DESCRIBE HISTORY for each table through the selected SQL warehouse

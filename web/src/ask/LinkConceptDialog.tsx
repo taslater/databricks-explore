@@ -39,7 +39,7 @@ export function LinkConceptDialog({ table, onClose }: { table: string; onClose: 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <div
-        className="modal ask-link-dialog"
+        data-surface="overlay" className="modal ask-link-dialog"
         role="dialog"
         aria-modal="true"
         aria-label="Link to concept"

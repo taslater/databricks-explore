@@ -34,7 +34,7 @@ function Frame({ title, onCancel, children }: { title: string; onCancel: () => v
   useModalBehavior(onCancel)
   return (
     <div className="modal-backdrop app-dialog-backdrop" role="presentation" onMouseDown={onCancel}>
-      <div className="modal app-dialog" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()}>
+      <div data-surface="overlay" className="modal app-dialog" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()}>
         <h3>{title}</h3>
         {children}
       </div>

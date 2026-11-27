@@ -25,8 +25,6 @@ import type { FlowEdge, FlowNode } from './types'
 
 /** Right panel for the graph: visibility filters, actions, and details for the selected node or edge. */
 export function GraphDetails() {
-  const filters = useGraphStore((s) => s.filters)
-  const setFilter = useGraphStore((s) => s.setFilter)
   const hasNodes = useGraphStore((s) => s.nodes.length > 0)
   const selectedNode = useGraphStore((s) =>
     s.selection?.kind === 'node' ? s.nodes.find((n) => n.id === s.selection?.id) : undefined,
@@ -48,87 +46,73 @@ export function GraphDetails() {
   const detailNode = several ? undefined : (allNodes.find((n) => n.id === pickedTables[0]) ?? selectedNode)
 
   return (
-    <aside className="details" aria-label="Details">
-      <section className="graph-controls">
-        <EdgeFilterBoxes />
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={filters.showRejected}
-            onChange={(e) => setFilter('showRejected', e.target.checked)}
-          />
-          rejected edges
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={filters.showSuperseded}
-            onChange={(e) => setFilter('showSuperseded', e.target.checked)}
-          />
-          superseded edges (no longer hold)
-        </label>
-        <EdgeLegend />
-        <ColorLegend />
-        <GroupsSection />
+    <aside className="details" data-surface="base" aria-label="Details">
+      <section className="panel-section actions" aria-label="Actions">
+        <h4 className="panel-heading">Actions</h4>
+        <div className="btns">
+          {/* These act on the picked tables, so they appear with a selection. */}
+          {pickedTables.length > 0 || selectedNode ? (
+            <span className="selection-ui" data-selection-ui>
+              <button
+                onClick={() => actions.refreshSelected()}
+                disabled={!selectedNode}
+                title="Re-read this node's relationships from Databricks"
+              >
+                Refresh selected
+              </button>
+              <button
+                onClick={() => void actions.sendTables(pickedTables)}
+                title={
+                  several
+                    ? 'Add the selected tables to the canvas as cards, laid out left to right by dependency, with connectors for the known relationships among them'
+                    : 'Add a table card for this object to the canvas'
+                }
+              >
+                {several ? `Send ${pickedTables.length} tables to canvas` : 'Send to canvas'}
+              </button>
+              <button
+                onClick={() => void actions.sendPath(pickedTables[0], 'downstream')}
+                disabled={pickedTables.length !== 1}
+                title="Send this table and everything built from it that the graph shows (lineage and view dependencies), with connectors. Select one table."
+              >
+                Send downstream path
+              </button>
+              <button
+                onClick={() => void actions.sendPath(pickedTables[0], 'upstream')}
+                disabled={pickedTables.length !== 1}
+                title="Send this table and everything it is built from that the graph shows (lineage and view dependencies), with connectors. Select one table."
+              >
+                Send upstream path
+              </button>
+              <button
+                onClick={() => void actions.queryTables(pickedTables)}
+                title="Write a SELECT that joins the selected tables along known relationships, and open it on the canvas"
+              >
+                Query {pickedTables.length > 1 ? 'these tables' : 'this table'}
+              </button>
+              <RemoveButton />
+            </span>
+          ) : null}
+          <button onClick={() => useGraphStore.getState().requestLayout()} disabled={!hasNodes}>
+            Reset layout
+          </button>
+          {hasNodes && (
+            <button className="danger" onClick={() => useGraphStore.getState().clear()} title="Take every table off the graph and start again">
+              Clear
+            </button>
+          )}
+        </div>
+        <p className="hint">
+          Click a node or edge for details. Shift-click to select several{pickedTables.length > 0 ? '' : ', then send them to the canvas, query them or take them off the graph'}. Double-click a node to expand it. Drag to arrange. Delete removes the selected tables.
+        </p>
       </section>
 
-      <p className="hint">Click a node or edge for details. Shift-click to select several. Double-click a node to expand it. Drag to arrange. Delete removes the selected tables.</p>
-
-      <div className="btns">
-        {/* These act on the picked tables, so they appear with a selection; a hint holds their place until then. */}
-        {pickedTables.length > 0 || selectedNode ? (
-          <span className="selection-ui" data-selection-ui>
-            <button
-              onClick={() => actions.refreshSelected()}
-              disabled={!selectedNode}
-              title="Re-read this node's relationships from Databricks"
-            >
-              Refresh selected
-            </button>
-            <button
-              onClick={() => void actions.sendTables(pickedTables)}
-              title={
-                several
-                  ? 'Add the selected tables to the canvas as cards, laid out left to right by dependency, with connectors for the known relationships among them'
-                  : 'Add a table card for this object to the canvas'
-              }
-            >
-              {several ? `Send ${pickedTables.length} tables to canvas` : 'Send to canvas'}
-            </button>
-            <button
-              onClick={() => void actions.sendPath(pickedTables[0], 'downstream')}
-              disabled={pickedTables.length !== 1}
-              title="Send this table and everything built from it that the graph shows (lineage and view dependencies), with connectors. Select one table."
-            >
-              Send downstream path
-            </button>
-            <button
-              onClick={() => void actions.sendPath(pickedTables[0], 'upstream')}
-              disabled={pickedTables.length !== 1}
-              title="Send this table and everything it is built from that the graph shows (lineage and view dependencies), with connectors. Select one table."
-            >
-              Send upstream path
-            </button>
-            <button
-              onClick={() => void actions.queryTables(pickedTables)}
-              title="Write a SELECT that joins the selected tables along known relationships, and open it on the canvas"
-            >
-              Query {pickedTables.length > 1 ? 'these tables' : 'this table'}
-            </button>
-            <RemoveButton />
-          </span>
-        ) : (
-          <span className="hint">Select tables to send them to the canvas, query them or take them off the graph.</span>
-        )}
-        <button onClick={() => useGraphStore.getState().requestLayout()} disabled={!hasNodes}>
-          Reset layout
-        </button>
-        {hasNodes && (
-          <button className="danger" onClick={() => useGraphStore.getState().clear()} title="Take every table off the graph and start again">
-            Clear
-          </button>
-        )}
-      </div>
+      <section className="panel-section graph-controls">
+        <EdgeFilterBoxes />
+        <EdgeLegend />
+      </section>
+      <ColorLegend />
+      <GroupsSection />
 
       <div className="details-body">
         <CollapseDetails />

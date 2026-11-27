@@ -26,16 +26,23 @@
   --fs-xl: 20px;
   --fw-normal: 400;
   --fw-strong: 600;
-  /* Surface layers, from the back to the front:
-     shell (header, gutters) > panel (sidebars) > canvas (recessed, with a dot grid) > strip (a toolbar band) > surface (raised: cards, windows, dialogs, controls). */
-  --surface-shell: #ffffff;
-  --surface-panel: var(--grey-50);
-  --surface-canvas: #dbe1e9;
-  --surface-strip: var(--surface);
-  --surface: #ffffff;
-  --canvas-dot: #aeb8c4;
-  /* One neutral ramp. --muted is 5.2:1 on --surface-canvas, 6:1 on --surface. */
-  --grey-50: #eff2f6;
+  /* One elevation order in both themes (the audit checks it through data-surface):
+     recessed (the canvas floor and graph pane, with a dot grid) is not lighter than base; base (header, sidebars, toolbars, the gutters) is lighter than recessed;
+     raised (content panes, cards, windows, controls) and overlay (dialogs, menus) are lighter than base, and overlay at least as light as raised.
+     The older names (shell, panel, strip, canvas, surface) are aliases of these four. */
+  --surface-base: var(--grey-50);
+  --surface-raised: #ffffff;
+  --surface-recessed: #e4e9f0;
+  --surface-overlay: #ffffff;
+  --surface-shell: var(--surface-base);
+  --surface-panel: var(--surface-base);
+  --surface-strip: var(--surface-base);
+  --surface-canvas: var(--surface-recessed);
+  --surface: var(--surface-raised);
+  --canvas-dot: #c6cfda;
+  --disabled-opacity: 0.5;
+  /* One neutral ramp. --muted is 5.2:1 on --surface-recessed, 6:1 on --surface. */
+  --grey-50: #f1f4f8;
   --hover: var(--grey-50);
   --border: #cbd3dc;
   --grey-300: #a9b3be;
@@ -65,7 +72,7 @@
   /* Depth: a raised card rests on a soft shadow and lifts while selected or dragged; menus and dialogs float highest. */
   --shadow-card: 0 1px 2px rgba(31, 35, 40, 0.1), 0 2px 6px rgba(31, 35, 40, 0.08);
   --shadow-lift: 0 4px 10px rgba(31, 35, 40, 0.14), 0 12px 28px rgba(31, 35, 40, 0.16);
-  --shadow-pop: 0 8px 30px rgba(31, 35, 40, 0.28);
+  --shadow-pop: 0 12px 40px rgba(31, 35, 40, 0.32), 0 2px 8px rgba(31, 35, 40, 0.16);
   --shadow: var(--shadow-lift);
   --scrim: rgba(27, 31, 36, 0.4);
   --select-fill: rgba(9, 105, 218, 0.12);
@@ -77,9 +84,9 @@
   --edge-meaning: #8190a3;
   --edge-superseded: #a0a0a0;
   --edge-orphan: #d1242f;
-  --fill-table: #e3eaf2;
-  --fill-view: #ece4f7;
-  --fill-streaming: #e1f3e6;
+  --fill-table: #ffffff;
+  --fill-view: #efe8f8;
+  --fill-streaming: #e6f5ea;
   --fill-default: #eeeeee;
   --fill-other: #d9dde1;
   --pal-1: #f9d5d3;
@@ -100,16 +107,16 @@
 /* Dark values for every token above. The theme script in index.html and src/theme.ts set data-theme from the stored choice or the system. */
 [data-theme='dark'] {
   color-scheme: dark;
-  --surface-shell: #151a21;
-  --surface-panel: var(--grey-50);
-  --surface-canvas: #0d1117;
-  --surface: #222a35;
-  --canvas-dot: #2f3a48;
-  --grey-50: #1a2029;
+  --surface-raised: #232c38;
+  --surface-recessed: #10151c;
+  --surface-overlay: #2b3543;
+  --canvas-dot: #212a35;
+  --disabled-opacity: 0.7;
+  --grey-50: #1a212b;
   --hover: #2d3743;
-  --border: #3b4755;
-  --grey-300: #566474;
-  --muted: #9aa7b6;
+  --border: #4a5666;
+  --grey-300: #627184;
+  --muted: #a8b4c3;
   --grey-700: #c4cdd8;
   --text: #e6edf3;
   --accent: #58a6ff;
@@ -130,8 +137,8 @@
   --orange: #ffa657;
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.35);
   --shadow-lift: 0 4px 12px rgba(0, 0, 0, 0.55), 0 14px 32px rgba(0, 0, 0, 0.5);
-  --shadow-pop: 0 8px 30px rgba(0, 0, 0, 0.7);
-  --scrim: rgba(0, 0, 0, 0.6);
+  --shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 16px 48px rgba(0, 0, 0, 0.75), 0 2px 10px rgba(0, 0, 0, 0.5);
+  --scrim: rgba(3, 6, 10, 0.68);
   --select-fill: rgba(88, 166, 255, 0.18);
   --flash: rgba(88, 166, 255, 0.3);
   --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239aa7b6' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -252,7 +259,7 @@ button:disabled,
 select:disabled,
 input:disabled,
 textarea:disabled {
-  opacity: 0.5;
+  opacity: var(--disabled-opacity);
   cursor: default;
 }
 
@@ -310,8 +317,7 @@ button.compact {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-1) var(--space-3);
-  background: var(--surface-shell);
-  border-top: 3px solid var(--accent);
+  background: var(--surface-base);
   border-bottom: 1px solid var(--border);
 }
 
@@ -360,7 +366,7 @@ button.compact {
 .workspace {
   flex: 1;
   min-height: 0;
-  background: var(--surface-shell);
+  background: var(--surface-base);
 }
 
 /* A gutter in the shell colour between the panels, with a hairline on each side. */
@@ -397,16 +403,36 @@ button.compact {
   border-left: 1px solid var(--border);
 }
 
-/* The workspace is a page (raised surface) for Concepts and Ask, and the recessed canvas for Graph and Canvas. */
+/* The workspace is the base for Concepts and Ask, whose page is one raised card in it (as a Canvas window is), and the recessed floor for Graph and Canvas. */
 .main {
   position: relative;
   padding: 0;
-  background: var(--surface);
+  background: var(--surface-base);
+}
+
+.main[data-view='concepts'],
+.main[data-view='ask'] {
+  padding: var(--space-3);
 }
 
 .main[data-view='canvas'],
 .main[data-view='graph'] {
-  background: var(--surface-canvas);
+  background: var(--surface-recessed);
+}
+
+.main[data-view='concepts'] .show-picker,
+.main[data-view='ask'] .show-picker {
+  top: var(--space-4);
+  left: var(--space-4);
+}
+
+.concepts-view,
+.ask-view {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
 }
 
 .panel-header,
@@ -678,7 +704,11 @@ button.compact {
 }
 
 .graph-controls {
-  margin-bottom: var(--space-2);
+  margin-bottom: 0;
+}
+
+.ask-toolbar.with-picker-toggle {
+  padding-left: 40px;
 }
 
 .graph-controls .check {
@@ -778,6 +808,21 @@ button.compact {
   margin-right: var(--space-1);
   vertical-align: -1px;
   color: var(--grey-700);
+}
+
+/* The Graph panel: sections in one style, a heading each. */
+.panel-heading {
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-md);
+}
+
+.details .panel-section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.details .selection-ui {
+  display: contents;
 }
 
 .details .btns {
@@ -2295,11 +2340,12 @@ button.link {
   align-items: flex-start;
   justify-content: center;
   padding-top: var(--space-6);
+  backdrop-filter: blur(2px);
 }
 
 .modal {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--surface-overlay);
+  border: 1px solid var(--grey-300);
   border-radius: var(--radius-panel);
   padding: var(--space-4) var(--space-4);
   width: min(760px, 92vw);
@@ -2326,7 +2372,7 @@ button.link {
 .mine-sql {
   white-space: pre-wrap;
   font-size: var(--fs-sm);
-  background: var(--grey-50);
+  background: var(--surface-recessed);
   padding: var(--space-2);
   margin: var(--space-1) 0;
 }
@@ -3652,7 +3698,7 @@ button.as-link {
   word-break: normal;
   overflow-wrap: break-word;
   font-size: var(--fs-sm);
-  background: var(--grey-50);
+  background: var(--surface-recessed);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--space-3);
@@ -3946,8 +3992,12 @@ button.app-dialog-danger {
   justify-content: center;
   border-style: double;
   border-width: 4px;
-  background: var(--border);
+  background: var(--fill-other);
   font-weight: var(--fw-strong);
+}
+
+.tbl-node.group-summary .group-toggle {
+  color: var(--text);
 }
 
 .group-box {
@@ -3986,6 +4036,13 @@ button.app-dialog-danger {
   left: 8px;
 }
 
+/* The name of what a menu button holds, in small muted text beside its label. */
+.menu-hint {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-normal);
+}
+
 .edge-glyph.merged {
   white-space: nowrap;
 }
@@ -3998,7 +4055,7 @@ button.app-dialog-danger {
 
 .cm-editor .cm-activeLine,
 .cm-editor .cm-activeLineGutter {
-  background: var(--accent-soft);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .cm-editor .cm-gutters .cm-gutter .cm-gutterElement {

@@ -124,7 +124,7 @@ export function ImportDialog() {
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={close}>
       <div
-        className="modal suggest-dialog import-dialog"
+        data-surface="overlay" className="modal suggest-dialog import-dialog"
         role="dialog"
         aria-modal="true"
         aria-label="Import concepts from Databricks"

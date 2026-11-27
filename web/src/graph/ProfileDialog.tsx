@@ -62,7 +62,7 @@ export function ProfileDialog() {
   const errors = Object.entries(run.data?.errors ?? {})
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={close}>
-      <div className="modal mine-dialog" role="dialog" aria-modal="true" aria-label="Profile relationships" onMouseDown={(e) => e.stopPropagation()}>
+      <div data-surface="overlay" className="modal mine-dialog" role="dialog" aria-modal="true" aria-label="Profile relationships" onMouseDown={(e) => e.stopPropagation()}>
         <h3>Profile relationships</h3>
         <p className="hint">
           Runs one read-only statement per relationship through the selected SQL warehouse{p?.warehouse_id ? ` (${p.warehouse_id})` : ''}. It reads the key columns of both tables

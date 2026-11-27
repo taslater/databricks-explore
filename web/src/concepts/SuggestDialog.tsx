@@ -48,7 +48,7 @@ export function SuggestDialog() {
   const p = plan.data
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={close}>
-      <div className="modal suggest-dialog" role="dialog" aria-modal="true" aria-label="Suggest concepts from tags" onMouseDown={(e) => e.stopPropagation()}>
+      <div data-surface="overlay" className="modal suggest-dialog" role="dialog" aria-modal="true" aria-label="Suggest concepts from tags" onMouseDown={(e) => e.stopPropagation()}>
         <h3>Suggest concepts from Unity Catalog tags</h3>
         <p className="hint">
           Reads the tags on catalogs, schemas, tables and columns through the selected SQL warehouse{p?.warehouse_id ? ` (${p.warehouse_id})` : ''},

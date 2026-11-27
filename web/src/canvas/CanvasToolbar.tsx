@@ -219,7 +219,7 @@ export function CanvasToolbar({ onAddQuery, onAddNote, showMinimap, onToggleMini
             </button>
           )}
           <button onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen} title="New diagram and the layout Doctor">
-            More &#9662;
+            More{overflow < 3 && <span className="menu-hint" aria-hidden="true"> new diagram, layout check</span>} &#9662;
           </button>
         </div>
       </div>

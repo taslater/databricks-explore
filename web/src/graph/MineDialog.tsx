@@ -40,7 +40,7 @@ export function MineDialog() {
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={close}>
       <div
-        className="modal mine-dialog"
+        data-surface="overlay" className="modal mine-dialog"
         role="dialog"
         aria-modal="true"
         aria-label="Mine joins from query history"

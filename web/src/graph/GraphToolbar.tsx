@@ -274,7 +274,7 @@ export function GraphToolbar({ showPickerToggle }: GraphToolbarProps) {
           aria-expanded={toolsOpen}
           title="Mine joins, suggestions, usage, table size and history, relationship profiles, certification and export"
         >
-          Tools{proposed ? ` (${proposed})` : ''} &#9662;
+          Tools{proposed ? ` (${proposed})` : ''} {overflow < 2 && <span className="menu-hint" aria-hidden="true"> joins, size, export</span>} &#9662;
         </button>
       </div>
       {/* Opens inside the toolbar, like the Canvas More panel, so the graph below gives way and nothing is covered. */}

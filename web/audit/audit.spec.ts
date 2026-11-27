@@ -9,18 +9,22 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test as base, type Browser, type BrowserContext, type Page, type Request } from '@playwright/test'
-import { start } from '../e2e/helpers'
+import { more, node, openFact, positions, start, tables } from '../e2e/helpers'
 import { SEVERITY, type Finding, type Part } from './report'
 import { StyleAcc } from './style'
 import { contrastIssues } from './contrast'
 import { regionIssues } from './regions'
+import { surfaceCheck } from './surfaces'
+import { textIssues } from './textobscured'
 
 const OUT = fileURLToPath(new URL('../audit-out', import.meta.url))
 const num = (name: string, dflt: number) => Number(process.env[name] ?? dflt)
 const DENY = /export|download|save as|copy|png|svg|open in|databricks|github|theme/i // theme: the toggle is the crawl's own dimension, not something to explore
 const ONE_WAY = /delete|remove|close|clear/i
 const RETURN_WORDS = /delete|remove|close|clear|hide|undo|cancel|back|restore|dismiss|reset|minimi|collapse|toggle/i
-const ROOTS = ['Canvas', 'Graph', 'Concepts', 'Ask', 'Agent access']
+// 'Graph (populated)' is the Graph tab with the demo lakehouse's fact table opened and two more hops added: what the Graph looks like in use.
+const ROOTS = ['Canvas', 'Graph', 'Graph (populated)', 'Concepts', 'Ask', 'Agent access']
+const POPULATED = 'Graph (populated)'
 const THEMES = ['light', 'dark'] as const
 type Theme = (typeof THEMES)[number]
 const VIEWPORTS = [
@@ -31,9 +35,9 @@ const VIEWPORTS = [
 // (5 roots x 2 viewports, about 2 s per action) stays near 25 minutes. Override with AUDIT_ACTIONS etc.
 const MAX_DEPTH = num('AUDIT_DEPTH', 3)
 const MAX_STATES = num('AUDIT_STATES', 40)
-const MAX_ACTIONS = num('AUDIT_ACTIONS', 45)
-const EXTRA_ACTIONS = num('AUDIT_EXTRA', 20) // return attempts after the crawl
-const TOGGLE_CHECKS = num('AUDIT_TOGGLES', 8) // toggle-not-undoable replays per crawl
+const OUTER_ACTIONS = num('AUDIT_ACTIONS', 45)
+const OUTER_EXTRA = num('AUDIT_EXTRA', 20) // return attempts after the crawl
+const OUTER_TOGGLES = num('AUDIT_TOGGLES', 8) // toggle-not-undoable replays per crawl
 const PER_STATE_RETURN_TRIES = 10 // actions tried in B when looking for a way back
 // Folders under the data dir that hold what a user creates; the caches and logs are left alone.
 const USER_DATA = ['canvases', 'canvas_history', 'diagrams', 'diagram_history', 'relationships']
@@ -412,17 +416,35 @@ const test = base.extend<object, { server: Server }>({
   ],
 })
 
+/** Waits until the graph's node positions and the viewport (zoom and pan) have not changed for four checks in a row. */
+async function graphStill(page: Page) {
+  let last = ''
+  let same = 0
+  for (let i = 0; i < 80 && same < 4; i++) {
+    const now = JSON.stringify(await positions(page)) + (await page.evaluate(() => (document.querySelector('.react-flow__viewport') as HTMLElement | null)?.style.transform ?? ''))
+    same = now === last ? same + 1 : 0
+    last = now
+    await page.waitForTimeout(200)
+  }
+}
+
 async function crawl(browser: Browser, baseURL: string, dataDir: string, root: string, vp: { width: number; height: number }, theme: Theme, order: number) {
   const origin = new URL(baseURL).origin
+  // Every action of the populated Graph replays a 12-table layout, about seven times the cost of another root's: a smaller budget keeps the run near five minutes.
+  const small = root === POPULATED
+  const MAX_ACTIONS = small ? Math.min(OUTER_ACTIONS, 24) : OUTER_ACTIONS
+  const EXTRA_ACTIONS = small ? Math.min(OUTER_EXTRA, 8) : OUTER_EXTRA
+  const TOGGLE_CHECKS = small ? Math.min(OUTER_TOGGLES, 3) : OUTER_TOGGLES
   const t0 = Date.now()
   const findings = new Map<string, Finding>()
   const crawls: Record<string, unknown>[] = []
   const styleAcc = new StyleAcc()
   const graphs: Record<string, unknown>[] = []
+  const surfaces = new Map<string, { theme: string; root: string; viewport: string; role: string; bg: string }>()
 
   async function runCrawl(root: string, vp: { width: number; height: number }) {
     const vpName = vp.width + 'x' + vp.height
-    const slug = root.toLowerCase().replace(/[^a-z]+/g, '-')
+    const slug = root.toLowerCase().replace(/[^a-z]+/g, '-').replace(/-$/, '')
     const prefix = slug + '-' + vp.width + '-' + theme
     const tStart = Date.now()
     tm = newTiming()
@@ -478,7 +500,25 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       })
       await start(page)
       if (root === 'Agent access') await page.getByRole('button', { name: 'Agent access' }).click()
-      else {
+      else if (root === POPULATED) {
+        await page.getByRole('tab', { name: 'Graph', exact: true }).click()
+        // The same sequence every time, each step waiting for the ELK layout and the fit-view to stop moving: a layout that starts from a half-measured graph differs between runs.
+        await openFact(page)
+        await graphStill(page)
+        await more(page, 'gold.dim_product', 'up').click()
+        await expect(node(page, 'silver.products')).toBeVisible()
+        await graphStill(page)
+        await more(page, 'gold.dim_customer', 'up').click({ modifiers: ['Shift'] })
+        await expect(tables(page)).toHaveCount(12)
+        await expect(more(page, 'gold.dim_customer', 'up')).toHaveCount(0)
+        await graphStill(page)
+        await page.evaluate(() => document.fonts.ready)
+        for (let i = 0; i < 2; i++) {
+          await page.waitForTimeout(500)
+          await page.getByRole('button', { name: 'Fit View' }).click()
+          await graphStill(page)
+        }
+      } else {
         await page.getByRole('tab', { name: root }).click()
         if (root === 'Canvas') {
           await page.getByRole('button', { name: '+ Query window' }).click()
@@ -590,6 +630,11 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       for (const c of await contrastIssues(page))
         report('contrast', c.sel + ' "' + c.text + '"', 'text ' + c.fg + ' on ' + c.bg + ' is ' + c.ratio + ':1, needs ' + c.need + ':1' + (c.large ? ' (large text)' : ''), c.fg + c.bg, { id, shot, path }, undefined, 'high', c.control ? 'high' : 'medium')
       for (const g of await regionIssues(page)) report('region-separation', g.a + ' | ' + g.b, g.detail, g.kind, { id, shot, path })
+      for (const t of await textIssues(page)) report('text-obscured', t.kind + ': ' + t.el + ' / ' + t.by, t.detail, t.kind, { id, shot, path }, t.by)
+      const sf = await surfaceCheck(page)
+      for (const s of sf.samples) surfaces.set(theme + '|' + root + '|' + vpName + '|' + s.role + '|' + s.bg, { theme, root, viewport: vpName, role: s.role, bg: s.bg })
+      for (const i of sf.issues) report('surface-order', i.control + ' (' + theme + ')', i.detail, '', { id, shot, path })
+      for (const m of sf.missing) report('surface-order', 'no data-surface on ' + m, 'a region over 15% of the viewport declares no surface (data-surface=base|recessed|raised|overlay) on itself or an ancestor', '', { id, shot, path }, undefined, 'low')
       if (state.depth < MAX_DEPTH) queue.push(id)
       return id
     }
@@ -672,6 +717,14 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
     // Gallery: the root's start state, one picture per root, viewport and theme.
     mkdirSync(join(OUT, 'views'), { recursive: true })
     await page.screenshot({ path: join(OUT, 'views', slug + '-' + vpName + '-' + theme + '.png') }).catch(() => {})
+    if (root === POPULATED) {
+      // The same graph with one table selected and its details panel open; the next action replays from a reset, not from this page.
+      await node(page, 'gold.fact_order_lines').locator('.tbl-node').click().catch(() => {})
+      await settle(page, 300)
+      await page.screenshot({ path: join(OUT, 'views', slug + '-selected-' + vpName + '-' + theme + '.png') }).catch(() => {})
+      done = null
+      cur = null
+    }
     const crawl = { n: 0, max: MAX_ACTIONS }
     while (queue.length && states.size < MAX_STATES && crawl.n < crawl.max) {
       const s = states.get(queue.shift()!)!
@@ -697,9 +750,11 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
     }
     const candidates = () => edges.filter((e) => e.from !== e.to && e.action !== 'press|Escape' && !ONE_WAY.test(e.label) && !equiv(e.from, e.to))
     const controlName = (label: string) => /"(.*)"/.exec(label)?.[1] ?? label
+    /** A control A showed pressed that B shows unpressed: in a group where pressing one releases another (Flow, Model, All), pressing it again is the way back. */
+    const wasPressed = (e: Edge, a: Act) => states.get(e.from)!.controls.some((c) => c.key === a.key && c.pressed === 'true') && states.get(e.to)!.controls.some((c) => c.key === a.key && c.pressed === 'false')
     /** Likely ways back out of B first: the same control again (a toggle), its opposite (Hide/Show, Zoom In/Out), Escape, then controls named like an undo. */
     const returnRank = (e: Edge, a: Act) =>
-      a.key === e.action ? 0 : counterpart(controlName(e.label), a.name) ? 1 : a.key === 'press|Escape' ? 2 : RETURN_WORDS.test(a.name) || LABELLED_EXIT.test(a.name) ? 3 : 4
+      a.key === e.action ? 0 : counterpart(controlName(e.label), a.name) || wasPressed(e, a) ? 1 : a.key === 'press|Escape' ? 2 : RETURN_WORDS.test(a.name) || LABELLED_EXIT.test(a.name) ? 3 : 4
     async function tryReturn(e: Edge) {
       const B = states.get(e.to)!
       const order = [...B.actions].sort((x, y) => returnRank(e, x) - returnRank(e, y))
@@ -799,6 +854,8 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       if (!cA || !cB) continue
       // Only controls whose label or pressed/expanded state changed are toggles; an "add" button that looks the same afterwards is not.
       if (stable(cB.name) === stable(cA.name) && cB.pressed === cA.pressed && cB.expanded === cA.expanded) continue
+      // Pressing one control of a group released another one (A had it pressed, B does not): a choice among options, which pressing the pressed one again does not undo by design.
+      if (cB.pressed === 'true' && A.controls.some((x) => x.role !== 'label' && x.pressed === 'true' && x.key !== cA.key && B.controls.some((y) => y.key === x.key && y.pressed === 'false'))) continue
       const k = e.label + '|' + A.struct + '|' + B.struct
       if (seenTog.has(k)) continue
       seenTog.add(k)
@@ -846,7 +903,7 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
   }
 
   await runCrawl(root, vp)
-  const part: Part = { order, findings: [...findings.entries()], crawl: crawls[0], graph: graphs[0], style: styleAcc.part() }
+  const part: Part = { order, findings: [...findings.entries()], crawl: crawls[0], graph: graphs[0], style: styleAcc.part(), surfaces: [...surfaces.values()] }
   mkdirSync(join(OUT, 'parts'), { recursive: true })
   writeFileSync(join(OUT, 'parts', root.toLowerCase().replace(/[^a-z]+/g, '-') + '-' + vp.width + '-' + theme + '.json'), JSON.stringify(part))
 }

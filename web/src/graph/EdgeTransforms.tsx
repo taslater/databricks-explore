@@ -5,6 +5,7 @@ import { useEdgeTransformsFor, useReadStatements, useStatementPlan, type EdgeTra
 import { openSqlInCanvas } from '../ask/canvasAction'
 import { glyphSpot, glyphTitle, FILTER_KIND, howLines, isPassThrough, transformCandidates } from './transformText'
 import { fmtAge } from './format'
+import { useOnCard } from './NodeFacts'
 import { useGraphStore } from './graphStore'
 import type { FlowEdge } from './types'
 
@@ -40,21 +41,27 @@ export function EdgeTransformGlyphs({ id, transform, x, y, side, faded }: { id: 
     <EdgeLabelRenderer>
       {transform.glyphs.map((g, n) => {
         const spot = glyphSpot(x, y, side, n)
-        return (
-          <button
-            key={g}
-            className="edge-glyph transform nodrag nopan"
-            data-testid={`edge-glyph-${g}`}
-            style={{ transform: `translate(-50%, -50%) translate(${spot.x}px, ${spot.y}px)`, opacity: faded ? 0.2 : 1 }}
-            title={glyphTitle(g, transform)}
-            aria-label={glyphTitle(g, transform)}
-            onClick={() => useGraphStore.getState().setSelection({ kind: 'edge', id })}
-          >
-            <GlyphIcon glyph={g} />
-          </button>
-        )
+        return <TransformGlyphButton key={g} id={id} glyph={g} transform={transform} x={spot.x} y={spot.y} faded={faded} />
       })}
     </EdgeLabelRenderer>
+  )
+}
+
+/** One glyph button; none where it would sit on a card (a short edge), since it would cover the card's text. */
+function TransformGlyphButton({ id, glyph, transform, x, y, faded }: { id: string; glyph: TransformGlyph; transform: EdgeTransform; x: number; y: number; faded?: boolean }) {
+  const onCard = useOnCard(x, y)
+  if (onCard) return null
+  return (
+    <button
+      className="edge-glyph transform nodrag nopan"
+      data-testid={`edge-glyph-${glyph}`}
+      style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`, opacity: faded ? 0.2 : 1 }}
+      title={glyphTitle(glyph, transform)}
+      aria-label={glyphTitle(glyph, transform)}
+      onClick={() => useGraphStore.getState().setSelection({ kind: 'edge', id })}
+    >
+      <GlyphIcon glyph={glyph} />
+    </button>
   )
 }
 
