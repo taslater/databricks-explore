@@ -1,13 +1,8 @@
 [
   {
     "rule": "irreversible-transition",
-    "control": "Connect",
-    "root": "Graph",
-    "reason": "connecting to a workspace is one-way by design"
-  },
-  {
-    "rule": "only-obscure-exit",
-    "control": "/^(Hide|Show) picker$/",
-    "reason": "a collapsing sidebar moves its toggle; accepted pattern"
+    "control": "Run this query",
+    "root": "Concepts",
+    "reason": "Suggest from tags writes concepts to the local glossary after an explicit confirm; one-way by design"
   }
 ]
