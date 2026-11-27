@@ -17,7 +17,7 @@ export function ConceptList({
   const filtered = !!(filters.q || filters.domain || filters.status)
 
   return (
-    <aside className="concept-list" aria-label="Concepts">
+    <aside className="concept-list" data-surface="base" aria-label="Concepts">
       <div className="concept-filters">
         <input
           type="search"

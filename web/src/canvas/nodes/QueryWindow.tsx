@@ -231,7 +231,7 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
 
   return (
     <>
-      <div className={`qw-node${selected ? ' selected' : ''}`}>
+      <div className={`qw-node${selected ? ' selected' : ''}`} data-surface="raised">
         <NodeResizer
           isVisible={selected && !collapsed && !maximized}
           minWidth={360}

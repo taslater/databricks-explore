@@ -22,7 +22,7 @@ export function TopBar() {
   const warehouseName = warehouseId ? (warehouses.data?.find((w) => w.id === warehouseId)?.name ?? warehouseId) : 'none'
 
   return (
-    <header className="topbar">
+    <header className="topbar" data-surface="base">
       <strong className="app-title">Databricks Explorer</strong>
       <span className="chip" title="Connected profile">
         Profile: {connected ?? 'not connected'}

@@ -55,7 +55,7 @@ export function AskView() {
   )
 
   return (
-    <div className="ask-view">
+    <div className="ask-view" data-surface="raised">
       <div className="ask-toolbar">
         <strong>Ask Genie</strong>
         <span className="hint">

@@ -132,7 +132,7 @@ function TagsDialog({ tables, onClose, onRead }: { tables: string[]; onClose: ()
   const errors = Object.entries(read.data?.errors ?? {})
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <div className="modal mine-dialog" role="dialog" aria-modal="true" aria-label="Read tags" onMouseDown={(e) => e.stopPropagation()}>
+      <div data-surface="overlay" className="modal mine-dialog" role="dialog" aria-modal="true" aria-label="Read tags" onMouseDown={(e) => e.stopPropagation()}>
         <h3>Read tags</h3>
         <p className="hint">
           Reads the Unity Catalog tags of each table through the selected SQL warehouse{p?.warehouse_id ? ` (${p.warehouse_id})` : ''}. This can start a stopped

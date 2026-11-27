@@ -40,7 +40,7 @@ export function AgentAccessPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal agent-access" role="dialog" aria-label="Agent access" onClick={(e) => e.stopPropagation()}>
+      <div data-surface="overlay" className="modal agent-access" role="dialog" aria-label="Agent access" onClick={(e) => e.stopPropagation()}>
         <h3>Agent access</h3>
         <p>
           A coding agent such as Claude Code can explore the catalog and work on canvases next to you, through this app. It can read

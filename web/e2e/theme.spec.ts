@@ -20,21 +20,25 @@ test('the theme toggle follows the system by default, and a choice survives a re
   await page.emulateMedia({ colorScheme: 'light' })
   await page.goto('/')
   expect(await THEME(page)).toBe('light')
-  const group = page.getByRole('group', { name: 'Theme' })
-  await expect(group.getByRole('button', { name: 'System theme' })).toHaveAttribute('aria-pressed', 'true')
-
-  await group.getByRole('button', { name: 'Dark theme' }).click()
+  // One quiet icon button, labelled with the current mode; each click moves to the next (system, light, dark).
+  const toggle = page.getByRole('button', { name: /^Theme: / })
+  await expect(toggle).toHaveAttribute('aria-label', 'Theme: system')
+  await expect(toggle).toHaveAttribute('title', 'Theme: system. Click for light')
+  await toggle.click()
+  expect(await THEME(page)).toBe('light')
+  await expect(toggle).toHaveAttribute('aria-label', 'Theme: light')
+  await toggle.click()
   expect(await THEME(page)).toBe('dark')
   expect(await page.evaluate(() => localStorage.getItem('explore.theme'))).toBe('dark')
 
   // Applied by the script in index.html, before the app has rendered anything: the attribute is there at DOMContentLoaded.
   await page.reload({ waitUntil: 'domcontentloaded' })
   expect(await THEME(page)).toBe('dark')
-  await expect(page.getByRole('group', { name: 'Theme' }).getByRole('button', { name: 'Dark theme' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('button', { name: /^Theme: / })).toHaveAttribute('aria-label', 'Theme: dark')
   expect(await luminance(page.locator('body'))).toBeLessThan(0.2)
 
   // Back to the system: the stored choice goes, and the page follows the browser, live.
-  await page.getByRole('group', { name: 'Theme' }).getByRole('button', { name: 'System theme' }).click()
+  await page.getByRole('button', { name: /^Theme: / }).click() // dark -> system
   expect(await page.evaluate(() => localStorage.getItem('explore.theme'))).toBeNull()
   expect(await THEME(page)).toBe('light')
   await page.emulateMedia({ colorScheme: 'dark' })
@@ -76,6 +80,46 @@ test('in dark mode the Graph draws dark cards on a dark canvas', async ({ page }
   expect(await luminance(page.locator('.react-flow').first())).toBeLessThan(0.05)
   await expect(page.locator('.react-flow.dark')).toHaveCount(1)
   // Switching to light repaints the same cards.
-  await page.getByRole('group', { name: 'Theme' }).getByRole('button', { name: 'Light theme' }).click()
+  await page.getByRole('button', { name: /^Theme: / }).click() // system -> light
   expect(await luminance(card)).toBeGreaterThan(0.5)
 })
+
+/** The first element declaring a surface role (data-surface), by relative luminance of its background. */
+const surface = (page: Page, role: string) => luminance(page.locator(`[data-surface="${role}"]`).first())
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`one elevation order in ${scheme}: base < raised <= overlay, recessed beyond base, the same in every view`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme })
+    await start(page)
+    const lum: Record<string, number[]> = { base: [], raised: [], recessed: [], overlay: [] }
+    const take = async (...roles: string[]) => {
+      for (const r of roles) lum[r].push(await surface(page, r))
+    }
+    await page.getByRole('tab', { name: 'Canvas' }).click()
+    await page.getByRole('button', { name: '+ Query window' }).click()
+    await expect(page.locator('.react-flow__node-query .qw-node')).toBeVisible()
+    await take('base', 'recessed', 'raised')
+    await page.getByRole('tab', { name: 'Graph' }).click()
+    await take('recessed')
+    await page.getByRole('tab', { name: 'Concepts' }).click()
+    await expect(page.locator('.concepts-view')).toBeVisible()
+    await take('base', 'raised')
+    await page.getByRole('tab', { name: 'Ask' }).click()
+    await expect(page.locator('.ask-view')).toBeVisible()
+    await take('base', 'raised')
+    await page.getByRole('button', { name: 'Agent access' }).click()
+    await expect(page.getByRole('dialog', { name: 'Agent access' })).toBeVisible()
+    await take('overlay')
+    const same = (xs: number[]) => expect(Math.max(...xs) - Math.min(...xs)).toBeLessThan(0.002)
+    for (const role of Object.keys(lum)) same(lum[role])
+    const [base, raised, recessed, overlay] = ['base', 'raised', 'recessed', 'overlay'].map((r) => lum[r][0])
+    expect(raised).toBeGreaterThan(base)
+    expect(overlay).toBeGreaterThanOrEqual(raised)
+    if (scheme === 'dark') expect(recessed).toBeLessThan(base)
+    else expect(recessed).toBeLessThanOrEqual(base)
+    // The dialog sets itself apart: a border and a shadow, and a code block that differs from its body.
+    const dialog = page.getByRole('dialog', { name: 'Agent access' })
+    expect(await dialog.evaluate((e) => getComputedStyle(e).boxShadow)).not.toBe('none')
+    expect(Math.abs((await luminance(dialog.locator('.agent-command'))) - overlay)).toBeGreaterThan(0.002)
+  })
+}

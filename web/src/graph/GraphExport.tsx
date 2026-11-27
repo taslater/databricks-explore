@@ -138,7 +138,7 @@ function ExportDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="modal-backdrop app-dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <div className="modal app-dialog graph-export" role="dialog" aria-modal="true" aria-label="Export the graph" onMouseDown={(e) => e.stopPropagation()}>
+      <div data-surface="overlay" className="modal app-dialog graph-export" role="dialog" aria-modal="true" aria-label="Export the graph" onMouseDown={(e) => e.stopPropagation()}>
         <h3>Export the graph</h3>
         <label className="app-dialog-field">
           Title

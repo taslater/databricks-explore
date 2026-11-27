@@ -48,7 +48,7 @@ export function GraphDetails() {
   const detailNode = several ? undefined : (allNodes.find((n) => n.id === pickedTables[0]) ?? selectedNode)
 
   return (
-    <aside className="details" aria-label="Details">
+    <aside className="details" data-surface="base" aria-label="Details">
       <section className="graph-controls">
         <EdgeFilterBoxes />
         <label className="check">

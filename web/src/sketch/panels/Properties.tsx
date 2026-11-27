@@ -280,7 +280,7 @@ export function SketchProperties({ canvasName }: { canvasName: string | null }) 
   }
 
   return (
-    <aside className="details sk-props-panel" aria-label="Properties">
+    <aside className="details sk-props-panel" data-surface="base" aria-label="Properties">
       <div className="panel-header">
         <strong>Properties</strong>
       </div>
