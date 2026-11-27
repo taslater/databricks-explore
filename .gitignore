@@ -12,6 +12,8 @@ web/dist/
 web/test-results/
 web/audit-out/
 web/audit-baseline/
+web/audit-baseline-design/
+web/audit-design-shots/
 web/playwright-report/
 dist/
 build/

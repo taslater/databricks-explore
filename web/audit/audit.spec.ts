@@ -12,6 +12,7 @@ import { expect, test as base, type Browser, type BrowserContext, type Page, typ
 import { start } from '../e2e/helpers'
 import { SEVERITY, type Finding, type Part } from './report'
 import { StyleAcc } from './style'
+import { contrastIssues } from './contrast'
 
 const OUT = fileURLToPath(new URL('../audit-out', import.meta.url))
 const num = (name: string, dflt: number) => Number(process.env[name] ?? dflt)
@@ -141,11 +142,13 @@ function collect() {
     const h = document.elementFromPoint(Math.min(Math.max(r.left + r.width / 2, 0), vw - 1), Math.min(Math.max(r.top + r.height / 2, 0), vh - 1))
     if (h && m.contains(h)) topModal = m
   }
-  /** Selection-related: aria-selected, a selected class or a resize handle on the element or an ancestor. Comparing states loosely ignores these. */
+  /** Selection-related: aria-selected, a data-selection-ui attribute (UI that exists only while something is selected), a selected class or a resize handle on the element or an ancestor. Comparing states loosely ignores these. */
   const selFlag = (e: Element) => {
     if (e.getAttribute('aria-selected') === 'true') return true
-    for (let n: Element | null = e; n && n !== document.body; n = n.parentElement)
-      if (typeof (n as HTMLElement).className === 'string' && (n as HTMLElement).className.split(/\s+/).some((t) => /^selected$|^is-selected$|[-_]selected$|resize/i.test(t))) return true
+    for (let n: Element | null = e; n && n !== document.body; n = n.parentElement) {
+      if (n.hasAttribute('data-selection-ui')) return true
+      if (typeof (n as HTMLElement).className === 'string' && (n as HTMLElement).className.split(/\s+/).some((t) => /^selected$|^is-selected$|resize/i.test(t))) return true
+    }
     return false
   }
   const off: Off[] = []
@@ -535,7 +538,7 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
     const reproOf = (path: Act[]) => ['root "' + root + '" at ' + vpName, ...path.map((p) => p.label)]
 
     /** Records a finding once across all roots and viewports, remembering where else it showed up. */
-    function report(ruleId: string, control: string, detail: string, dedupe: string, st: { id: string; shot: string; path: Act[] }, occluder?: string, confidence: 'high' | 'low' = 'high') {
+    function report(ruleId: string, control: string, detail: string, dedupe: string, st: { id: string; shot: string; path: Act[] }, occluder?: string, confidence: 'high' | 'low' = 'high', severity: string = SEVERITY[ruleId]) {
       const k = ruleId + '|' + control + '|' + dedupe
       const where = { root, viewport: vpName, stateId: prefix + '-' + st.id }
       const f = findings.get(k)
@@ -543,7 +546,7 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
         if (!f.where.some((w) => w.root === root && w.viewport === vpName)) f.where.push(where)
         return
       }
-      findings.set(k, { ruleId, severity: SEVERITY[ruleId], control, detail, occluder, screenshot: st.shot, repro: reproOf(st.path), confidence, where: [where] })
+      findings.set(k, { ruleId, severity, control, detail, occluder, screenshot: st.shot, repro: reproOf(st.path), confidence, where: [where] })
     }
 
     function addFindings(state: State, snap: Snap) {
@@ -577,6 +580,8 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       addFindings(state, snap)
       tm.styleMs += await styleAcc.visit(page, { id: prefix + '-' + id, shot, repro: reproOf(path), root, viewport: vpName })
       tm.styles++
+      for (const c of await contrastIssues(page))
+        report('contrast', c.sel + ' "' + c.text + '"', 'text ' + c.fg + ' on ' + c.bg + ' is ' + c.ratio + ':1, needs ' + c.need + ':1' + (c.large ? ' (large text)' : ''), c.fg + c.bg, { id, shot, path }, undefined, 'high', c.control ? 'high' : 'medium')
       if (state.depth < MAX_DEPTH) queue.push(id)
       return id
     }

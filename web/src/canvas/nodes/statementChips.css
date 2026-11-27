@@ -1,44 +1,44 @@
 .qw-chips {
   display: flex;
-  gap: 4px;
-  padding: 4px 8px 0;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2) 0;
 }
 
 .qw-chip {
   min-width: 24px;
-  padding: 1px 8px;
-  font-size: 12px;
+  padding: 1px var(--space-2);
+  font-size: var(--fs-sm);
 }
 
 .qw-chip.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--white);
 }
 
 .qw-chip.bad {
-  border-color: var(--error);
-  color: var(--error);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .qw-chip.active.bad {
-  background: var(--error);
-  color: #fff;
+  background: var(--danger);
+  color: var(--white);
 }
 
 /* The line about a saved result: when it ran, and that Run refreshes it. Stale (the SQL changed) stands out. */
 .qw-saved-note {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
-  font-size: 12px;
-  color: #57606a;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--muted);
 }
 
 .qw-saved-note.stale {
-  background: #fff8c5;
-  color: #6e4b00;
-  border-bottom: 1px solid #d4a72c;
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-bottom: 1px solid var(--warn-line);
 }
 

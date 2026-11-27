@@ -59,13 +59,16 @@ export function ArrangeMenu() {
     }
   }
 
+  // Arranging needs a selection, so the button appears with one instead of sitting disabled.
+  if (selectedIds.length < 2) return null
+
   return (
-    <div className="ld-menu" ref={ref}>
+    <div className="ld-menu" data-selection-ui ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
-        disabled={busy || selectedIds.length < 2}
+        disabled={busy}
         aria-expanded={open}
-        title={selectedIds.length < 2 ? 'Select two or more nodes to arrange' : 'Lay the selected nodes out'}
+        title="Lay the selected nodes out"
       >
         Arrange selection &#9662;
       </button>

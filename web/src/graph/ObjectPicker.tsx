@@ -8,7 +8,7 @@ import { openSqlInCanvas } from '../ask/canvasAction'
 import { describeFunctionSql } from '../shared/scriptAs'
 import { useUiStore, type PickMode } from '../store/uiStore'
 import { messageOf, useGraphActions } from './actions'
-import { shortType } from './format'
+import { shortStamp, shortType } from './format'
 import { useGraphStore } from './graphStore'
 import { tableDragProps } from '../shared/tableDrag'
 import { countText, isFunction, passesTypes, presentGroups, type TypeGroup } from './objectTypes'
@@ -408,7 +408,8 @@ function DrillDown({
       <ListStatus
         loading={active.isPending}
         error={active.isError ? messageOf(active.error) : null}
-        text={res?.problem ?? `${shown} ${level} · cached ${active.data?.fetched_at ?? ''}${functionsNote}`}
+        text={res?.problem ?? `${shown} ${level} · cached ${shortStamp(active.data?.fetched_at)}${functionsNote}`}
+        title={active.data?.fetched_at ? `Cached ${active.data.fetched_at}` : undefined}
       />
       {level === 'objects' && <PickerTypes present={present} />}
       <ul className="pick-list" ref={listRef}>
@@ -421,10 +422,14 @@ function DrillDown({
   )
 }
 
-function ListStatus({ loading, error, text }: { loading: boolean; error: string | null; text: string }) {
+function ListStatus({ loading, error, text, title }: { loading: boolean; error: string | null; text: string; title?: string }) {
   if (error) return <div className="pick-status error">{error}</div>
   if (loading) return <div className="pick-status">loading…</div>
-  return <div className="pick-status">{text}</div>
+  return (
+    <div className="pick-status" title={title}>
+      {text}
+    </div>
+  )
 }
 
 // ---- Tree -----------------------------------------------------------------
@@ -482,7 +487,8 @@ function TreeBrowser({ filter, regex }: { filter: string; regex: boolean }) {
       <ListStatus
         loading={catalogs.isPending}
         error={catalogs.isError ? messageOf(catalogs.error) : null}
-        text={`${catalogs.data?.data.length ?? 0} catalogs · cached ${catalogs.data?.fetched_at ?? ''}`}
+        text={`${catalogs.data?.data.length ?? 0} catalogs · cached ${shortStamp(catalogs.data?.fetched_at)}`}
+        title={catalogs.data?.fetched_at ? `Cached ${catalogs.data.fetched_at}` : undefined}
       />
       <ul className="tree">
         {(catalogs.data?.data ?? []).map((c) => (

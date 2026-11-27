@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test'
-import { node, openFact, settled, start } from './helpers'
+import { node, openFact, reveal, settled, start } from './helpers'
 
 test('tracing a column draws its sources, and Esc puts the graph back', async ({ page }) => {
   await start(page)
   await openFact(page)
-  await page.getByRole('button', { name: 'Show columns', exact: true }).click()
+  const showColumns = page.getByRole('button', { name: 'Show columns', exact: true })
+  await reveal(page, showColumns, 'Tools')
+  await showColumns.click()
   const fact = node(page, 'gold.fact_order_lines')
   const column = fact.locator('.tbl-col', { hasText: 'net_amount' })
   await expect(column).toBeVisible()

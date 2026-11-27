@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { hasWrapped, useOverflowLevel } from '../shared/useOverflowLevel'
 import { useCanvases } from '../api/hooks'
 import { useCanvasStore } from '../store/canvasStore'
 import { useUiStore } from '../store/uiStore'
@@ -36,8 +37,15 @@ type DialogState =
   | { kind: 'discard-new' }
   | { kind: 'discard-open'; name: string }
 
-/** Save, Save as, Open, the canvas name, the save status, and the layout Doctor and Arrange buttons. Mounted in a React Flow panel. */
-export function CanvasToolbar() {
+interface CanvasToolbarProps {
+  onAddQuery: () => void
+  onAddNote: () => void
+  showMinimap: boolean
+  onToggleMinimap: () => void
+}
+
+/** Add a window, Run all windows, Save, the saved-canvases select with Open, Save as, Minimap and the More menu (New diagram, Doctor), the canvas name, the save status, and the layout Doctor and Arrange buttons. Mounted in a React Flow panel. */
+export function CanvasToolbar({ onAddQuery, onAddNote, showMinimap, onToggleMinimap }: CanvasToolbarProps) {
   const canvasName = useCanvasStore((s) => s.canvasName)
   const windowCount = useCanvasStore((s) => s.windows.length)
   const queryCount = useCanvasStore((s) => s.windows.filter((w) => w.type === 'query').length)
@@ -104,85 +112,166 @@ export function CanvasToolbar() {
     else void persistence.open(pick)
   }
 
+  const [moreOpen, setMoreOpen] = useState(false)
+  // When the strip would wrap (a wide font, a narrow window), Minimap, then Save, then + Note move into More; Save as and Open stay.
+  const barRef = useRef<HTMLDivElement>(null)
+  const overflow = useOverflowLevel(barRef, 3, hasWrapped)
+  const minimapInMore = overflow >= 1
+  const saveInMore = overflow >= 2
+  const noteInMore = overflow >= 3
+  useEffect(() => {
+    if (!moreOpen) return
+    const close = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMoreOpen(false)
+    }
+    window.addEventListener('keydown', close)
+    return () => window.removeEventListener('keydown', close)
+  }, [moreOpen])
+
+  const note = message ?? (!doctorOpen ? layoutNote?.text : undefined)
+  const noteIsError = message ? messageIsError : !!layoutNote?.error
+
   return (
     <div className="ld-wrap">
-      <div className="canvas-toolbar" role="toolbar" aria-label="Canvas">
-        <select
-          value={pick}
-          onChange={(e) => setPick(e.target.value)}
-          // An agent can add canvases at any time, so opening the list asks the server again.
-          onMouseDown={() => void canvases.refetch()}
-          onFocus={() => void canvases.refetch()}
-          aria-label="Saved canvases"
-          disabled={!canvases.data}
-        >
-          <option value="">— saved canvases —</option>
-          {canvases.data?.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
-        <button onClick={onOpen} disabled={!pick}>
-          Open
-        </button>
-        <button onClick={onNew} title="Start a blank sketch. No profile or warehouse needed.">
-          New diagram
-        </button>
-        <button onClick={onSave}>Save</button>
-        <button onClick={onSaveAs}>Save as</button>
-        <button
-          onClick={() => setDoctorOpen(!doctorOpen)}
-          aria-pressed={doctorOpen}
-          title="Check the layout for overlaps, near-misses and connectors through nodes"
-        >
-          Doctor
-        </button>
-        <ArrangeMenu />
-        <button
-          onClick={runAllWindows}
-          disabled={batch.active || queryCount === 0 || !connected}
-          title={
-            connected
-              ? 'Run every query window. A window that references another through {{title}} runs after it.'
-              : 'Connect to a profile to run queries.'
-          }
-        >
-          Run all windows
-        </button>
-        {batch.active && (
-          <>
-            <span className="hint canvas-message" role="status">
-              Running {batch.finished} of {batch.total}
-            </span>
-            <button onClick={stopRunAll} title="Cancel the statements still running and start no more">
-              Stop
+      <div className="canvas-toolbar" role="toolbar" aria-label="Canvas" ref={barRef}>
+        <div className="tb-group">
+          <button className="primary" onClick={onAddQuery} title="Add a query window (Q)">
+            + Query window
+          </button>
+          {!noteInMore && (
+            <button onClick={onAddNote} title="Add a Markdown note (N)">
+              + Note
             </button>
-          </>
-        )}
-        {!batch.active && batch.summary && (
-          <span className="hint canvas-message" role="status">
-            {batch.summary}
+          )}
+        </div>
+        <span className="toolbar-sep" />
+        <div className="tb-group">
+          <button
+            onClick={runAllWindows}
+            disabled={batch.active || queryCount === 0 || !connected}
+            title={
+              connected
+                ? 'Run every query window. A window that references another through {{title}} runs after it.'
+                : 'Connect to a profile to run queries.'
+            }
+          >
+            Run all windows
+          </button>
+          {batch.active && (
+            <>
+              <span className="hint canvas-message" role="status">
+                Running {batch.finished} of {batch.total}
+              </span>
+              <button onClick={stopRunAll} title="Cancel the statements still running and start no more">
+                Stop
+              </button>
+            </>
+          )}
+          {!batch.active && batch.summary && (
+            <span className="hint canvas-message" role="status" title={batch.summary}>
+              {batch.summary}
+            </span>
+          )}
+        </div>
+        <ArrangeMenu />
+        <span className="spacer" />
+        {note && (
+          <span className={noteIsError ? 'error canvas-message' : 'hint canvas-message'} role={noteIsError ? 'alert' : undefined} title={note}>
+            {note}
           </span>
         )}
+        {canvases.isError && <span className="error canvas-message">{canvases.error.message}</span>}
         <span className="canvas-name" title="Canvas name">
           {canvasName ?? 'Unnamed canvas'}
         </span>
         <span className={`canvas-phase ${phase}`} title={PHASE_TITLE[phase]}>
           {PHASE_LABEL[phase]}
         </span>
-        {message && (
-          <span className={messageIsError ? 'error canvas-message' : 'hint canvas-message'} role={messageIsError ? 'alert' : undefined}>
-            {message}
-          </span>
-        )}
-        {canvases.isError && <span className="error canvas-message">{canvases.error.message}</span>}
-        {!doctorOpen && layoutNote && (
-          <span className={layoutNote.error ? 'error canvas-message' : 'hint canvas-message'} role={layoutNote.error ? 'alert' : undefined}>
-            {layoutNote.text}
-          </span>
-        )}
+        <span className="toolbar-sep" />
+        <div className="tb-group">
+          <select
+            value={pick}
+            onChange={(e) => setPick(e.target.value)}
+            // An agent can add canvases at any time, so opening the list asks the server again.
+            onMouseDown={() => void canvases.refetch()}
+            onFocus={() => void canvases.refetch()}
+            aria-label="Saved canvases"
+            title="Pick a saved canvas to open"
+            disabled={!canvases.data}
+          >
+            <option value="">— saved canvases —</option>
+            {canvases.data?.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          {pick && (
+            <button data-selection-ui onClick={onOpen}>
+              Open
+            </button>
+          )}
+          {!saveInMore && <button onClick={onSave}>Save</button>}
+          <button onClick={onSaveAs}>Save as</button>
+          {!minimapInMore && (
+            <button onClick={onToggleMinimap} aria-pressed={showMinimap} title="Show or hide the minimap">
+              Minimap
+            </button>
+          )}
+          <button onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen} title="New diagram and the layout Doctor">
+            More &#9662;
+          </button>
+        </div>
       </div>
+      {moreOpen && (
+        <div className="canvas-more" role="group" aria-label="More canvas actions">
+          {saveInMore && (
+            <button
+              onClick={() => {
+                setMoreOpen(false)
+                onSave()
+              }}
+            >
+              Save
+            </button>
+          )}
+          {noteInMore && (
+            <button
+              onClick={() => {
+                setMoreOpen(false)
+                onAddNote()
+              }}
+              title="Add a Markdown note (N)"
+            >
+              + Note
+            </button>
+          )}
+          {minimapInMore && (
+            <button onClick={onToggleMinimap} aria-pressed={showMinimap} title="Show or hide the minimap">
+              Minimap
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setMoreOpen(false)
+              onNew()
+            }}
+            title="Start a blank sketch. No profile or warehouse needed."
+          >
+            New diagram
+          </button>
+          <button
+            onClick={() => {
+              setMoreOpen(false)
+              setDoctorOpen(!doctorOpen)
+            }}
+            aria-pressed={doctorOpen}
+            title="Check the layout for overlaps, near-misses and connectors through nodes"
+          >
+            Doctor
+          </button>
+        </div>
+      )}
       {doctorOpen && <LayoutDoctor />}
       {dialog?.kind === 'name' && (
         <NameDialog

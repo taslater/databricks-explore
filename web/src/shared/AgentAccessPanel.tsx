@@ -55,13 +55,12 @@ export function AgentAccessPanel({ onClose }: { onClose: () => void }) {
               {revealed ? data.command : maskToken(data.command, data.token)}
             </pre>
             <div className="agent-actions">
-              <button onClick={() => void copy()}>Copy command</button>
+              <button className="primary" onClick={() => void copy()}>
+                Copy command
+              </button>
               <label>
                 <input type="checkbox" checked={revealed} onChange={(e) => setRevealed(e.target.checked)} /> Show token
               </label>
-              <button onClick={() => setConfirmingToken(true)} disabled={rotate.isPending}>
-                New token
-              </button>
               <span className="spacer" />
               {copied === 'done' && <span role="status">Copied</span>}
               {copied === 'failed' && <span role="status">Could not copy: select the command and copy it</span>}
@@ -70,6 +69,12 @@ export function AgentAccessPanel({ onClose }: { onClose: () => void }) {
               {data.tools} tools at {data.url}. The token is stored in the data folder (mode 0600). Anyone with it can use these tools while the
               app runs, so do not share it.
             </p>
+            <div className="agent-token">
+              <button onClick={() => setConfirmingToken(true)} disabled={rotate.isPending}>
+                New token
+              </button>
+              <span className="muted">Revokes the current token: agents using it are refused until you give them the new command.</span>
+            </div>
           </>
         )}
         {rotate.isError && <p className="error">{(rotate.error as Error).message}</p>}

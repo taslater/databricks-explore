@@ -11,7 +11,8 @@ test('a selected table comes off the graph with the Remove button or the Delete 
   await page.getByRole('button', { name: 'Remove from graph' }).click()
   await expect(node(page, 'silver.order_lines')).toHaveCount(0)
   await expect(tables(page)).toHaveCount(8)
-  await expect(page.getByRole('button', { name: 'Remove from graph' })).toBeDisabled()
+  // With nothing selected the selection actions are not shown, not shown disabled.
+  await expect(page.getByRole('button', { name: 'Remove from graph' })).toHaveCount(0)
 
   // The fact now counts it as a neighbor that is not on the graph; a click adds it back.
   await expect(more(page, 'gold.fact_order_lines', 'up')).toHaveText('1')

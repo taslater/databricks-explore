@@ -20,7 +20,7 @@ export function GroupControl() {
   const { setGroupBy, setChains } = useGraphStore.getState()
   return (
     <>
-      <label style={NOWRAP} title="Draw the tables of a schema (or the value of a tag) as one box. A big group collapses to one node.">
+      <label style={NOWRAP} title={hasNodes ? 'Draw the tables of a schema (or the value of a tag) as one box. A big group collapses to one node.' : 'Add a table to the graph first'}>
         Group by{' '}
         <select value={grouping.by} onChange={(e) => setGroupBy(e.target.value as typeof grouping.by)} aria-label="Group by" disabled={!hasNodes}>
           <option value="schema">Schema</option>
@@ -37,7 +37,7 @@ export function GroupControl() {
         aria-pressed={grouping.chains}
         disabled={!hasNodes}
         onClick={() => setChains(!grouping.chains)}
-        title="Leave out a view with one flow edge in and one out, and draw its neighbors as one edge marked 'via 1 view'"
+        title={hasNodes ? "Leave out a view with one flow edge in and one out, and draw its neighbors as one edge marked 'via 1 view'" : 'Add a table to the graph first'}
       >
         Chains
       </button>
