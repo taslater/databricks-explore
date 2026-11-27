@@ -9,12 +9,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test as base, type Browser, type BrowserContext, type Page, type Request } from '@playwright/test'
-import { more, node, openFact, start, tables } from '../e2e/helpers'
+import { more, node, openFact, positions, start, tables } from '../e2e/helpers'
 import { SEVERITY, type Finding, type Part } from './report'
 import { StyleAcc } from './style'
 import { contrastIssues } from './contrast'
 import { regionIssues } from './regions'
 import { surfaceCheck } from './surfaces'
+import { textIssues } from './textobscured'
 
 const OUT = fileURLToPath(new URL('../audit-out', import.meta.url))
 const num = (name: string, dflt: number) => Number(process.env[name] ?? dflt)
@@ -415,13 +416,25 @@ const test = base.extend<object, { server: Server }>({
   ],
 })
 
+/** Waits until the graph's node positions and the viewport (zoom and pan) have not changed for four checks in a row. */
+async function graphStill(page: Page) {
+  let last = ''
+  let same = 0
+  for (let i = 0; i < 80 && same < 4; i++) {
+    const now = JSON.stringify(await positions(page)) + (await page.evaluate(() => (document.querySelector('.react-flow__viewport') as HTMLElement | null)?.style.transform ?? ''))
+    same = now === last ? same + 1 : 0
+    last = now
+    await page.waitForTimeout(200)
+  }
+}
+
 async function crawl(browser: Browser, baseURL: string, dataDir: string, root: string, vp: { width: number; height: number }, theme: Theme, order: number) {
   const origin = new URL(baseURL).origin
   // Every action of the populated Graph replays a 12-table layout, about seven times the cost of another root's: a smaller budget keeps the run near five minutes.
   const small = root === POPULATED
-  const MAX_ACTIONS = small ? Math.min(OUTER_ACTIONS, 30) : OUTER_ACTIONS
-  const EXTRA_ACTIONS = small ? Math.min(OUTER_EXTRA, 10) : OUTER_EXTRA
-  const TOGGLE_CHECKS = small ? Math.min(OUTER_TOGGLES, 4) : OUTER_TOGGLES
+  const MAX_ACTIONS = small ? Math.min(OUTER_ACTIONS, 24) : OUTER_ACTIONS
+  const EXTRA_ACTIONS = small ? Math.min(OUTER_EXTRA, 8) : OUTER_EXTRA
+  const TOGGLE_CHECKS = small ? Math.min(OUTER_TOGGLES, 3) : OUTER_TOGGLES
   const t0 = Date.now()
   const findings = new Map<string, Finding>()
   const crawls: Record<string, unknown>[] = []
@@ -489,12 +502,22 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       if (root === 'Agent access') await page.getByRole('button', { name: 'Agent access' }).click()
       else if (root === POPULATED) {
         await page.getByRole('tab', { name: 'Graph', exact: true }).click()
+        // The same sequence every time, each step waiting for the ELK layout and the fit-view to stop moving: a layout that starts from a half-measured graph differs between runs.
         await openFact(page)
+        await graphStill(page)
         await more(page, 'gold.dim_product', 'up').click()
         await expect(node(page, 'silver.products')).toBeVisible()
+        await graphStill(page)
         await more(page, 'gold.dim_customer', 'up').click({ modifiers: ['Shift'] })
         await expect(tables(page)).toHaveCount(12)
         await expect(more(page, 'gold.dim_customer', 'up')).toHaveCount(0)
+        await graphStill(page)
+        await page.evaluate(() => document.fonts.ready)
+        for (let i = 0; i < 2; i++) {
+          await page.waitForTimeout(500)
+          await page.getByRole('button', { name: 'Fit View' }).click()
+          await graphStill(page)
+        }
       } else {
         await page.getByRole('tab', { name: root }).click()
         if (root === 'Canvas') {
@@ -607,6 +630,7 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       for (const c of await contrastIssues(page))
         report('contrast', c.sel + ' "' + c.text + '"', 'text ' + c.fg + ' on ' + c.bg + ' is ' + c.ratio + ':1, needs ' + c.need + ':1' + (c.large ? ' (large text)' : ''), c.fg + c.bg, { id, shot, path }, undefined, 'high', c.control ? 'high' : 'medium')
       for (const g of await regionIssues(page)) report('region-separation', g.a + ' | ' + g.b, g.detail, g.kind, { id, shot, path })
+      for (const t of await textIssues(page)) report('text-obscured', t.kind + ': ' + t.el + ' / ' + t.by, t.detail, t.kind, { id, shot, path }, t.by)
       const sf = await surfaceCheck(page)
       for (const s of sf.samples) surfaces.set(theme + '|' + root + '|' + vpName + '|' + s.role + '|' + s.bg, { theme, root, viewport: vpName, role: s.role, bg: s.bg })
       for (const i of sf.issues) report('surface-order', i.control + ' (' + theme + ')', i.detail, '', { id, shot, path })

@@ -15,6 +15,7 @@ export const SEVERITY: Record<string, 'high' | 'medium' | 'low' | 'info'> = {
   'clipped-text': 'low',
   'small-target': 'info',
   'region-separation': 'medium',
+  'text-obscured': 'medium', // text cut off by an overflow-hidden box or with another element on top of it
   'surface-order': 'medium', // the finding carries its own severity and confidence; a missing data-surface is low confidence
   contrast: 'high', // medium for text that is not on a control; the finding carries its own severity
   ...STYLE_SEVERITY,
