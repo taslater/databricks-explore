@@ -704,7 +704,11 @@ button.compact {
 }
 
 .graph-controls {
-  margin-bottom: var(--space-2);
+  margin-bottom: 0;
+}
+
+.ask-toolbar.with-picker-toggle {
+  padding-left: 40px;
 }
 
 .graph-controls .check {
@@ -804,6 +808,21 @@ button.compact {
   margin-right: var(--space-1);
   vertical-align: -1px;
   color: var(--grey-700);
+}
+
+/* The Graph panel: sections in one style, a heading each. */
+.panel-heading {
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-md);
+}
+
+.details .panel-section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.details .selection-ui {
+  display: contents;
 }
 
 .details .btns {
@@ -4022,11 +4041,6 @@ button.app-dialog-danger {
   color: var(--muted);
   font-size: var(--fs-sm);
   font-weight: var(--fw-normal);
-}
-
-/* Edge labels (the sigma on a GROUP BY edge) stay on top of the cards, where a short edge ends under one. */
-.react-flow__edgelabel-renderer {
-  z-index: 5;
 }
 
 .edge-glyph.merged {

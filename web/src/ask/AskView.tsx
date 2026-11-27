@@ -15,6 +15,7 @@ const EXAMPLES = [
 export function AskView() {
   const turns = useAskStore((s) => s.turns)
   const conversationId = useAskStore((s) => s.conversationId)
+  const pickerCollapsed = useUiStore((s) => s.pickerCollapsed)
   const connected = useUiStore((s) => s.connectedProfile)
   const warehouseId = useUiStore((s) => s.warehouseId)
   const [text, setText] = useState('')
@@ -56,7 +57,7 @@ export function AskView() {
 
   return (
     <div className="ask-view" data-surface="raised">
-      <div className="ask-toolbar">
+      <div className={`ask-toolbar${pickerCollapsed ? ' with-picker-toggle' : ''}`}>
         <strong>Ask Genie</strong>
         <span className="hint">
           {conversationId ? 'Follow-up questions stay in this conversation.' : 'Ask about your data in plain language.'}

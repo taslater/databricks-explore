@@ -190,8 +190,8 @@ export function ColorLegend() {
     selfRef: nodes.some((n) => n.data.selfRef),
   }
   return (
-    <div className="color-legend legend-kinds" aria-label="Color legend">
-      <div className="legend-group">Color by {colorByLabel(colorBy)}</div>
+    <section className="panel-section color-legend legend-kinds" aria-label="Color legend">
+      <h4 className="panel-heading">Color by {colorByLabel(colorBy)}</h4>
       {entries.map((e) => (
         <span key={e.value}>
           <span className="k" style={{ background: e.fill }} title={`${e.count} on the graph`}>
@@ -218,6 +218,6 @@ export function ColorLegend() {
           {marks.selfRef && <span className="k">↻ self-ref</span>}
         </div>
       )}
-    </div>
+    </section>
   )
 }

@@ -1,4 +1,4 @@
-import { EdgeLabelRenderer } from '@xyflow/react'
+import { EdgeLabelRenderer, useStore } from '@xyflow/react'
 import { useNodeFacts, type NodeFacts, type TableStats } from '../api/nodeFacts'
 import { ago, grainChange, shortBytes, sizeBadge, spanLabel } from './cardFacts'
 import { useStatsDialog } from './TableStatsDialog'
@@ -6,6 +6,9 @@ import { useGraphStore } from './graphStore'
 import type { FlowEdge } from './types'
 
 type Facts = NodeFacts | undefined
+
+/** Half the Σ button, in flow units. */
+const GLYPH_HALF = 12
 
 /** "Late: no write for 3 d, usually every 1 d". Empty when the table is not late. */
 function lateText(stats: TableStats): string {
@@ -46,9 +49,25 @@ export function GrainLine({ facts }: { facts: Facts }) {
   )
 }
 
+/** Is a glyph button centred at this flow position on a table card? Edge glyphs are left out there (what they say is in the edge's details). */
+export function useOnCard(x: number, y: number): boolean {
+  return useStore((s) => {
+    const half = GLYPH_HALF / s.transform[2] // the button is the same size on screen at any zoom
+    for (const n of s.nodeLookup.values()) {
+      if (n.type !== 'table') continue
+      const { x: nx, y: ny } = n.internals.positionAbsolute
+      const w = n.measured.width ?? 0
+      const h = n.measured.height ?? 0
+      if (x + half > nx && x - half < nx + w && y + half > ny && y - half < ny + h) return true
+    }
+    return false
+  })
+}
+
 /** The Σ on a flow edge whose target is a GROUP BY of a different grain. Click selects the edge. */
 export function EdgeGrainGlyph({ id, change, x, y, faded }: { id: string; change?: string; x: number; y: number; faded?: boolean }) {
-  if (!change) return null
+  const onCard = useOnCard(x, y) // a short edge puts its glyph on a card, where it would cover the card's text
+  if (!change || onCard) return null
   return (
     <EdgeLabelRenderer>
       <button

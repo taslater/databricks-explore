@@ -52,8 +52,8 @@ export function GroupsSection() {
   if (view.groups.length === 0 && view.chains.length === 0) return null
   const elided = view.chains.filter((c) => c.elided)
   return (
-    <div data-testid="groups-section">
-      <h4>Groups</h4>
+    <section className="panel-section" data-testid="groups-section">
+      <h4 className="panel-heading">Groups</h4>
       <ul className="constraints">
         {view.groups.map((g) => (
           <li key={g.key}>
@@ -71,7 +71,7 @@ export function GroupsSection() {
         </p>
       )}
       {elided.length > 0 && <p className="hint">{countText(elided.reduce((n, c) => n + c.views.length, 0), 'view')} left out in {countText(elided.length, 'chain')}. Click a "via" pill to draw them.</p>}
-    </div>
+    </section>
   )
 }
 
