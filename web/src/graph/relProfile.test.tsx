@@ -79,7 +79,7 @@ describe('the words and the marks of orphans', () => {
     )
     expect(html).toContain('data-testid="orphan-tick"')
     expect(html).toContain('translate(5 7) rotate(180)')
-    expect(html).toContain('#d1242f')
+    expect(html).toContain('var(--edge-orphan)')
     expect(html).toContain('1.2% of orders (3,410 rows, 212 keys) have no match in customers')
   })
 })

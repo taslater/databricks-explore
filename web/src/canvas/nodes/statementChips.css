@@ -13,7 +13,7 @@
 .qw-chip.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--white);
+  color: var(--on-accent);
 }
 
 .qw-chip.bad {
@@ -23,7 +23,7 @@
 
 .qw-chip.active.bad {
   background: var(--danger);
-  color: var(--white);
+  color: var(--on-accent);
 }
 
 /* The line about a saved result: when it ran, and that Run refreshes it. Stale (the SQL changed) stands out. */

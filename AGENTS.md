@@ -34,6 +34,14 @@ An agent worktree should symlink the main checkout's `web/node_modules` rather t
 unless `package.json` changed. It saves about 160 MB per worktree. Start a branch from the remote, not from
 whatever the worktree was created on: `git fetch origin && git checkout -B <branch> origin/main`.
 
+## Themes and colours
+Every colour is a token in `web/src/index.css`: a light value in `:root` and a dark one in `[data-theme='dark']`. Name a layer, not a colour: `--surface-shell` (header), `--surface-panel`
+(sidebars), `--surface-canvas` (recessed, dot grid), `--surface` (raised cards, windows, dialogs, controls), `--shadow-card` / `--shadow-lift` / `--shadow-pop`. Do not write a hex,
+`rgb()` or `white`/`black` anywhere else (use `color-mix(in srgb, var(--x) N%, transparent)` for a translucent one). `web/src/theme.ts` holds the system/light/dark choice
+(localStorage `explore.theme`, applied by a script in `index.html` before the first paint). Embedded components read the tokens: React Flow gets `colorMode`, the SQL editor uses
+`canvas/editor/cmTheme.ts`, ag-Grid params are `var(--...)`, Vega reads them in `canvas/chart/vegaTheme.ts`. Exports (graph picture, sketch PNG/SVG) are always light: the capture runs
+inside `inLightTheme`. The sketch palette in `sketch/model.ts` is user data and the one place hex values remain. `npm run audit` checks contrast and region separation in both themes.
+
 ## Keeping it current
 After you add, remove, rename, or change the signature of anything, run `python map_project.py` again
 so your own copy stays accurate. Never commit `PROJECT_MAP.md`; it is git-ignored so branches cannot

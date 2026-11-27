@@ -3,7 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Databricks Explorer</title>
+    <script>
+      // Sets the theme before the first paint, so a dark page never flashes white. Keep in step with src/theme.ts (same key, same rule).
+      ;(function () {
+        try {
+          var pref = localStorage.getItem('explore.theme')
+          var dark = pref === 'dark' || (pref !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+        } catch (e) {
+          /* storage blocked: the stylesheet's light values apply */
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

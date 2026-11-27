@@ -3,6 +3,7 @@ import { useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { useObject } from '../../api/hooks'
 import type { TableInfo } from '../../api/types'
 import { useUiStore } from '../../store/uiStore'
+import { DEFAULT_PLACEHOLDER_STROKE } from '../model'
 import { useSketchStore } from '../sketchStore'
 import { diffColumns, summarize, type ColumnRow, type RealColumn } from '../tables'
 import type { KeyMarker, PlaceholderColumn, SketchNode } from '../types'
@@ -125,7 +126,7 @@ function PlaceholderBody({ node, selected }: { node: SketchNode; selected: boole
   for (const r of diff?.rows ?? []) statusOf.set(r.name.toLowerCase(), r)
   const existing = (diff?.rows ?? []).filter((r) => r.status === 'existing')
   const summary = diff ? summarize(diff.rows) : null
-  const stroke = node.stroke ?? '#2563eb'
+  const stroke = node.stroke ?? DEFAULT_PLACEHOLDER_STROKE
 
   return (
     <div

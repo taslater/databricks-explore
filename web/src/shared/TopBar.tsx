@@ -3,6 +3,7 @@ import { useWarehouses } from '../api/hooks'
 import { AgentCanvasSync } from '../canvas/persistence/AgentCanvasSync'
 import { useUiStore, type MainView } from '../store/uiStore'
 import { AgentAccessPanel } from './AgentAccessPanel'
+import { ThemeToggle } from './ThemeToggle'
 
 const VIEWS: { id: MainView; label: string }[] = [
   { id: 'graph', label: 'Graph' },
@@ -34,6 +35,7 @@ export function TopBar() {
       <button onClick={() => setAgentPanelOpen(true)} title="Let a coding agent use this app through MCP">
         Agent access
       </button>
+      <ThemeToggle />
       <div className="segmented" role="tablist" aria-label="Main view">
         {VIEWS.map((v) => (
           <button

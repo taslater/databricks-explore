@@ -15,6 +15,7 @@ import '@xyflow/react/dist/style.css'
 import type { CanvasWindow } from '../api/types'
 import { useCanvasStore, DEFAULT_NOTE_SIZE, DEFAULT_QUERY_SIZE, type CanvasSize } from '../store/canvasStore'
 import { useUiStore } from '../store/uiStore'
+import { useTheme } from '../theme'
 import { TABLE_DRAG_MIME } from '../shared/Picker'
 import { anchorEdges } from '../sketch/anchors'
 import { sketchEdgeTypes, sketchNodeTypes, toSketchFlowEdge, toSketchFlowNode } from '../sketch/flow'
@@ -130,6 +131,7 @@ export function CanvasView() {
 }
 
 function CanvasInner() {
+  const { theme } = useTheme()
   const windows = useCanvasStore((s) => s.windows)
   const viewport = useCanvasStore((s) => s.viewport)
   const canvasName = useCanvasStore((s) => s.canvasName)
@@ -286,7 +288,7 @@ function CanvasInner() {
         selectable: false,
         focusable: false,
         style: dashed ? { strokeDasharray: '4 4' } : undefined,
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#9aa4b2' },
+        markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--edge-meaning)' },
       }
     }
     const picked = new Set(selectedEdgeIds)
@@ -376,6 +378,7 @@ function CanvasInner() {
         onPointerDownCapture={interactions.onPointerDownCapture}
       >
         <ReactFlow
+          colorMode={theme}
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
@@ -410,7 +413,7 @@ function CanvasInner() {
           zoomOnPinch={!maximized}
           proOptions={{ hideAttribution: false }}
         >
-          <Background gap={GRID} />
+          <Background gap={GRID} size={1.5} color="var(--canvas-dot)" />
           {!maximized && <Controls orientation="horizontal" showInteractive={false} className="canvas-controls" />}
           {showMinimap && !maximized && <MiniMap pannable zoomable />}
           <Panel position="top-left" className="sk-palette-panel">

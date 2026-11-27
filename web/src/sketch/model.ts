@@ -54,8 +54,21 @@ export const FONT_SIZES: { label: string; px: number }[] = [
 ]
 
 export const DEFAULT_FONT_SIZE = 14
+/** The sketch palette above is the user's data: hex values saved with the sketch. The two that mean paper and ink follow the theme when drawn;
+ *  every other colour is drawn as chosen, with dark ink (--on-paper) on a chosen fill. */
 export const DEFAULT_STROKE = '#1f2328'
 export const DEFAULT_EDGE_COLOR = '#1f2328'
+export const DEFAULT_FILL = '#ffffff'
+export const DEFAULT_FRAME_STROKE = '#6b7280'
+export const DEFAULT_FRAME_FILL = '#e5e7eb'
+export const DEFAULT_PLACEHOLDER_STROKE = '#2563eb'
+
+/** A stored fill as drawn: white is the page's raised surface. */
+export const paperOf = (fill: string): string => (fill === DEFAULT_FILL ? 'var(--surface)' : fill)
+/** A stored stroke or connector colour as drawn: the default ink is the page's text colour. */
+export const inkOf = (color: string): string => (color === DEFAULT_STROKE ? 'var(--text)' : color)
+/** The colour of text on a stored fill: the page's text on white or no fill, dark ink on a chosen colour. */
+export const textOn = (fill: string): string => (fill === 'none' || fill === DEFAULT_FILL ? 'var(--text)' : 'var(--on-paper)')
 
 export const SHAPE_NAMES: Record<ShapeKind, string> = {
   rect: 'Rectangle',
@@ -151,7 +164,7 @@ export function newSketchNode(
   const base: SketchNode = { id, type, position: { x: position.x, y: position.y }, size: { ...size } }
   switch (type) {
     case 'shape':
-      return { ...base, shape: opts.shape ?? 'rect', label: '', fill: '#ffffff', stroke: DEFAULT_STROKE, font_size: DEFAULT_FONT_SIZE }
+      return { ...base, shape: opts.shape ?? 'rect', label: '', fill: DEFAULT_FILL, stroke: DEFAULT_STROKE, font_size: DEFAULT_FONT_SIZE }
     case 'text':
       return { ...base, label: '', fill: 'none', stroke: 'none', font_size: 16 }
     case 'sticky':

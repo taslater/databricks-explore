@@ -27,7 +27,7 @@ export function Picker({ onCollapse }: PickerProps) {
   else if (connected) status = `Connected to ${connected}`
 
   return (
-    <div className="picker">
+    <aside className="picker" aria-label="Picker">
       <div className="panel-header">
         <strong>Picker</strong>
         <button onClick={onCollapse} title="Hide picker" aria-label="Hide picker">
@@ -93,6 +93,6 @@ export function Picker({ onCollapse }: PickerProps) {
       <section className="panel-section">
         <ObjectPicker />
       </section>
-    </div>
+    </aside>
   )
 }

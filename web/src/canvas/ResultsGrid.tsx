@@ -35,12 +35,19 @@ import { computeStats, formatStat, type SelectionStats } from './grid/stats'
 // so the selection is built in grid/selection.ts and grid/useGridSelection.ts.
 ModuleRegistry.registerModules([AllCommunityModule])
 
-// Quartz's default border colour is ~#dcdddd (15% ink on white), which is too faint.
-// #c5c6c7 is ~25% ink on white: a clearly visible neutral gray, not black.
+// Quartz's default border colour is ~15% ink, which is too faint: the grid uses the --grey-300 token, a clearly visible neutral.
 // Quartz also draws no vertical column lines by default (columnBorder is transparent),
 // so columnBorder is set explicitly to the same colour.
-const GRID_LINE_COLOR = '#c5c6c7'
+// Every colour is a CSS variable from index.css, so one theme object follows light and dark with no re-render.
+const GRID_LINE_COLOR = 'var(--grey-300)'
 const resultsTheme = themeQuartz.withParams({
+  browserColorScheme: 'inherit',
+  backgroundColor: 'var(--surface)',
+  foregroundColor: 'var(--text)',
+  headerBackgroundColor: 'var(--grey-50)',
+  headerTextColor: 'var(--text)',
+  rowHoverColor: 'var(--hover)',
+  accentColor: 'var(--accent)',
   borderColor: GRID_LINE_COLOR,
   columnBorder: { style: 'solid', width: 1, color: GRID_LINE_COLOR },
   // Compact rows: Quartz defaults are 42px rows and 48px headers. The header has two lines: name and type.

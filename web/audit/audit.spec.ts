@@ -13,13 +13,16 @@ import { start } from '../e2e/helpers'
 import { SEVERITY, type Finding, type Part } from './report'
 import { StyleAcc } from './style'
 import { contrastIssues } from './contrast'
+import { regionIssues } from './regions'
 
 const OUT = fileURLToPath(new URL('../audit-out', import.meta.url))
 const num = (name: string, dflt: number) => Number(process.env[name] ?? dflt)
-const DENY = /export|download|save as|copy|png|svg|open in|databricks|github/i
+const DENY = /export|download|save as|copy|png|svg|open in|databricks|github|theme/i // theme: the toggle is the crawl's own dimension, not something to explore
 const ONE_WAY = /delete|remove|close|clear/i
 const RETURN_WORDS = /delete|remove|close|clear|hide|undo|cancel|back|restore|dismiss|reset|minimi|collapse|toggle/i
 const ROOTS = ['Canvas', 'Graph', 'Concepts', 'Ask', 'Agent access']
+const THEMES = ['light', 'dark'] as const
+type Theme = (typeof THEMES)[number]
 const VIEWPORTS = [
   { width: 1500, height: 900 },
   { width: 1280, height: 720 },
@@ -409,7 +412,7 @@ const test = base.extend<object, { server: Server }>({
   ],
 })
 
-async function crawl(browser: Browser, baseURL: string, dataDir: string, root: string, vp: { width: number; height: number }, order: number) {
+async function crawl(browser: Browser, baseURL: string, dataDir: string, root: string, vp: { width: number; height: number }, theme: Theme, order: number) {
   const origin = new URL(baseURL).origin
   const t0 = Date.now()
   const findings = new Map<string, Finding>()
@@ -419,7 +422,8 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
 
   async function runCrawl(root: string, vp: { width: number; height: number }) {
     const vpName = vp.width + 'x' + vp.height
-    const prefix = root.toLowerCase().replace(/[^a-z]+/g, '-') + '-' + vp.width
+    const slug = root.toLowerCase().replace(/[^a-z]+/g, '-')
+    const prefix = slug + '-' + vp.width + '-' + theme
     const tStart = Date.now()
     tm = newTiming()
     let ctx: BrowserContext | undefined
@@ -457,7 +461,7 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       tm.resetWipeMs += Date.now() - tW
       // One browser context per crawl; each reset gets a new page in it (new sessionStorage) after the origin's stored data is cleared.
       if (!ctx) {
-        ctx = await browser.newContext({ baseURL, viewport: vp })
+        ctx = await browser.newContext({ baseURL, viewport: vp, colorScheme: theme })
         await ctx.addInitScript(MUTATION_WATCH)
       }
       await ctx.clearCookies()
@@ -535,15 +539,15 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       return true
     }
 
-    const reproOf = (path: Act[]) => ['root "' + root + '" at ' + vpName, ...path.map((p) => p.label)]
+    const reproOf = (path: Act[]) => ['root "' + root + '" at ' + vpName + ' (' + theme + ' theme)', ...path.map((p) => p.label)]
 
     /** Records a finding once across all roots and viewports, remembering where else it showed up. */
     function report(ruleId: string, control: string, detail: string, dedupe: string, st: { id: string; shot: string; path: Act[] }, occluder?: string, confidence: 'high' | 'low' = 'high', severity: string = SEVERITY[ruleId]) {
       const k = ruleId + '|' + control + '|' + dedupe
-      const where = { root, viewport: vpName, stateId: prefix + '-' + st.id }
+      const where = { root, viewport: vpName, theme, stateId: prefix + '-' + st.id }
       const f = findings.get(k)
       if (f) {
-        if (!f.where.some((w) => w.root === root && w.viewport === vpName)) f.where.push(where)
+        if (!f.where.some((w) => w.root === root && w.viewport === vpName && w.theme === theme)) f.where.push(where)
         return
       }
       findings.set(k, { ruleId, severity, control, detail, occluder, screenshot: st.shot, repro: reproOf(st.path), confidence, where: [where] })
@@ -578,10 +582,14 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       states.set(id, state)
       bySig.set(snap.sig, id)
       addFindings(state, snap)
-      tm.styleMs += await styleAcc.visit(page, { id: prefix + '-' + id, shot, repro: reproOf(path), root, viewport: vpName })
-      tm.styles++
+      // Style consistency is measured once, in light: the dark values are the same tokens, and pooling both themes would double the distinct colours.
+      if (theme === 'light') {
+        tm.styleMs += await styleAcc.visit(page, { id: prefix + '-' + id, shot, repro: reproOf(path), root, viewport: vpName, theme })
+        tm.styles++
+      }
       for (const c of await contrastIssues(page))
         report('contrast', c.sel + ' "' + c.text + '"', 'text ' + c.fg + ' on ' + c.bg + ' is ' + c.ratio + ':1, needs ' + c.need + ':1' + (c.large ? ' (large text)' : ''), c.fg + c.bg, { id, shot, path }, undefined, 'high', c.control ? 'high' : 'medium')
+      for (const g of await regionIssues(page)) report('region-separation', g.a + ' | ' + g.b, g.detail, g.kind, { id, shot, path })
       if (state.depth < MAX_DEPTH) queue.push(id)
       return id
     }
@@ -661,6 +669,9 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
     const first = await reset() // the second reset must give the same start; goTo checks it every time from here on
     if (first.sig !== startSig) throw new Error('the start state of ' + root + ' is not stable across resets: ' + brief(diffStates(startSnap, first, false)))
     await discover(first, [])
+    // Gallery: the root's start state, one picture per root, viewport and theme.
+    mkdirSync(join(OUT, 'views'), { recursive: true })
+    await page.screenshot({ path: join(OUT, 'views', slug + '-' + vpName + '-' + theme + '.png') }).catch(() => {})
     const crawl = { n: 0, max: MAX_ACTIONS }
     while (queue.length && states.size < MAX_STATES && crawl.n < crawl.max) {
       const s = states.get(queue.shift()!)!
@@ -831,22 +842,29 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
       edges: edges.map((e) => ({ ...e, from: prefix + '-' + e.from, to: prefix + '-' + e.to })),
     })
     await ctx?.close().catch(() => {})
-    console.log('audit crawl ' + root + ' ' + vpName + ': ' + states.size + ' states, ' + edges.length + ' edges, ' + actionCount + ' actions, ' + unverified.length + ' unverified, ' + seconds + 's')
+    console.log('audit crawl ' + root + ' ' + vpName + ' ' + theme + ': ' + states.size + ' states, ' + edges.length + ' edges, ' + actionCount + ' actions, ' + unverified.length + ' unverified, ' + seconds + 's')
   }
 
   await runCrawl(root, vp)
   const part: Part = { order, findings: [...findings.entries()], crawl: crawls[0], graph: graphs[0], style: styleAcc.part() }
   mkdirSync(join(OUT, 'parts'), { recursive: true })
-  writeFileSync(join(OUT, 'parts', root.toLowerCase().replace(/[^a-z]+/g, '-') + '-' + vp.width + '.json'), JSON.stringify(part))
+  writeFileSync(join(OUT, 'parts', root.toLowerCase().replace(/[^a-z]+/g, '-') + '-' + vp.width + '-' + theme + '.json'), JSON.stringify(part))
 }
 
 const onlyRoots = (process.env.AUDIT_ROOTS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
 const onlyWidths = (process.env.AUDIT_VIEWPORTS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
-VIEWPORTS.forEach((vp, vi) =>
-  ROOTS.forEach((root, ri) => {
-    if ((onlyRoots.length && !onlyRoots.includes(root.toLowerCase())) || (onlyWidths.length && !onlyWidths.includes(String(vp.width)))) return
-    test('crawl ' + root + ' at ' + vp.width + 'x' + vp.height, async ({ browser, server }) => {
-      await crawl(browser, server.baseURL, server.dataDir, root, vp, vi * ROOTS.length + ri)
-    })
-  }),
+const onlyThemes = (process.env.AUDIT_THEMES ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+// Light is crawled at both viewports, dark at 1500x900 only (AUDIT_DARK_ALL=1 adds 1280x720): the small viewport adds layout findings,
+// which do not depend on the theme, so a dark crawl of it costs run time (about 40% more) for little. Dark at 1500 covers every root.
+const darkAll = process.env.AUDIT_DARK_ALL === '1'
+THEMES.forEach((theme, ti) =>
+  VIEWPORTS.forEach((vp, vi) =>
+    ROOTS.forEach((root, ri) => {
+      if ((onlyRoots.length && !onlyRoots.includes(root.toLowerCase())) || (onlyWidths.length && !onlyWidths.includes(String(vp.width)))) return
+      if ((onlyThemes.length && !onlyThemes.includes(theme)) || (theme === 'dark' && vi > 0 && !darkAll)) return
+      test('crawl ' + root + ' at ' + vp.width + 'x' + vp.height + ' ' + theme, async ({ browser, server }) => {
+        await crawl(browser, server.baseURL, server.dataDir, root, vp, theme, (ti * VIEWPORTS.length + vi) * ROOTS.length + ri)
+      })
+    }),
+  ),
 )

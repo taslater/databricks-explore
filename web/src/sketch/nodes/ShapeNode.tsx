@@ -1,6 +1,6 @@
 import { NodeResizer, type Node, type NodeProps } from '@xyflow/react'
 import type { ShapeKind, SketchNode } from '../types'
-import { DEFAULT_FONT_SIZE, DEFAULT_STROKE } from '../model'
+import { DEFAULT_FILL, DEFAULT_FONT_SIZE, DEFAULT_STROKE, inkOf, paperOf, textOn } from '../model'
 import { useSketchStore } from '../sketchStore'
 import { InlineText } from './InlineText'
 import { SideHandles } from './SideHandles'
@@ -73,8 +73,9 @@ function ShapeBody({ node, selected }: { node: SketchNode; selected: boolean }) 
   const setLabel = useSketchStore((s) => s.setLabel)
   const resize = useResizeHandlers(id)
   const locked = node.locked === true
-  const fill = node.fill ?? '#ffffff'
-  const stroke = node.stroke ?? DEFAULT_STROKE
+  const storedFill = node.fill ?? DEFAULT_FILL
+  const fill = paperOf(storedFill)
+  const stroke = inkOf(node.stroke ?? DEFAULT_STROKE)
   const fontSize = node.font_size ?? DEFAULT_FONT_SIZE
   const { w, h } = node.size
   const isShape = node.type === 'shape'
@@ -82,6 +83,7 @@ function ShapeBody({ node, selected }: { node: SketchNode; selected: boolean }) 
 
   const labelStyle = {
     fontSize,
+    color: textOn(storedFill),
     padding: isShape ? labelInset(node.shape) : isSticky ? '10px' : '2px 4px',
     textAlign: isShape ? ('center' as const) : ('left' as const),
     alignItems: isShape ? 'center' : isSticky ? 'flex-start' : 'center',

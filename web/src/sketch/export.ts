@@ -3,6 +3,7 @@
 // editors that ignore foreignObject (some vector editors) show it empty. PNG renders everywhere.
 import { getNodesBounds, type Edge, type Node as FlowNode } from '@xyflow/react'
 import { toPng, toSvg } from 'html-to-image'
+import { inLightTheme, lightTokens } from '../theme'
 
 export type ExportFormat = 'png' | 'svg'
 
@@ -72,7 +73,7 @@ export async function exportDiagram(req: ExportRequest, filename: string): Promi
   req.root.setAttribute('data-exporting', '1')
   try {
     const options = {
-      backgroundColor: '#ffffff',
+      backgroundColor: lightTokens(['surface']).surface,
       width: Math.round(frame.width * frame.scale),
       height: Math.round(frame.height * frame.scale),
       pixelRatio: req.format === 'png' ? 2 : 1,
@@ -84,7 +85,8 @@ export async function exportDiagram(req: ExportRequest, filename: string): Promi
         transformOrigin: '0 0',
       },
     }
-    const href = req.format === 'png' ? await toPng(viewport, options) : await toSvg(viewport, options)
+    // A picture is always light, whatever the page shows: the viewport is drawn in the light theme for the length of the capture.
+    const href = await inLightTheme(viewport, () => (req.format === 'png' ? toPng(viewport, options) : toSvg(viewport, options)))
     await download(href, filename)
   } finally {
     req.root.removeAttribute('data-exporting')

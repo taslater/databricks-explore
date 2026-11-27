@@ -56,7 +56,7 @@ function collectContrast(): ContrastIssue[] {
         if (c[3] >= 1) break
       }
     }
-    let acc: C = [255, 255, 255, 1] // the canvas
+    let acc: C = /dark/.test(getComputedStyle(document.documentElement).colorScheme) ? [18, 18, 18, 1] : [255, 255, 255, 1] // the canvas: the browser's, by color-scheme
     for (let i = layers.length - 1; i >= 0; i--) acc = over(layers[i], acc)
     return acc
   }

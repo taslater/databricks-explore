@@ -27,7 +27,7 @@ export const FLASH_MS = 700
 export const flashExtension: Extension = [
   flashField,
   EditorView.baseTheme({
-    '.cm-ran-flash': { backgroundColor: 'rgba(9, 105, 218, 0.22)', borderRadius: '2px' },
+    '.cm-ran-flash': { backgroundColor: 'var(--flash)', borderRadius: '2px' },
   }),
 ]
 

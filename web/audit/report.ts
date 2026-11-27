@@ -14,6 +14,7 @@ export const SEVERITY: Record<string, 'high' | 'medium' | 'low' | 'info'> = {
   'escape-does-nothing': 'low',
   'clipped-text': 'low',
   'small-target': 'info',
+  'region-separation': 'medium',
   contrast: 'high', // medium for text that is not on a control; the finding carries its own severity
   ...STYLE_SEVERITY,
 }
@@ -21,7 +22,7 @@ export const WEIGHT = { high: 10, medium: 4, low: 1, info: 0 }
 export const LOW_CONFIDENCE_FACTOR = 0.25 // a finding the rule labels low-confidence counts a quarter of its weight
 export const LOW_CONFIDENCE_CAP = 15 // and all of them together never weigh more than this
 
-export type Where = { root: string; viewport: string; stateId: string }
+export type Where = { root: string; viewport: string; theme: string; stateId: string }
 export type Finding = {
   ruleId: string
   severity: string
@@ -91,7 +92,7 @@ export function mergeParts(OUT: string, wallSeconds: number, workers: number) {
     for (const [k, f] of p.findings) {
       const have = findings.get(k)
       if (!have) findings.set(k, f)
-      else for (const w of f.where) if (!have.where.some((x) => x.root === w.root && x.viewport === w.viewport)) have.where.push(w)
+      else for (const w of f.where) if (!have.where.some((x) => x.root === w.root && x.viewport === w.viewport && x.theme === w.theme)) have.where.push(w)
     }
   }
   const style = mergeStyle(parts.flatMap((p) => (p.style ? [p.style] : [])))
@@ -142,8 +143,29 @@ export function mergeParts(OUT: string, wallSeconds: number, workers: number) {
   const lowCounted = Math.min(lowRaw, LOW_CONFIDENCE_CAP)
   total += lowCounted
   const score = Math.round(100 * Math.exp(-total / 50))
+  // The same score and counts for the findings seen in each theme (a finding seen in both counts in both).
+  const byTheme: Record<string, { score: number; styleScore: number; findingsByRule: Record<string, number>; weightedCauses: number }> = {}
+  for (const th of [...new Set(list.flatMap((f) => f.where.map((w) => w.theme)))].sort()) {
+    const inTheme = list.filter((f) => !f.expected && f.where.some((w) => w.theme === th))
+    const fn = inTheme.filter((f) => f.category !== 'style')
+    const rules: Record<string, number> = {}
+    for (const f of fn) rules[f.ruleId] = (rules[f.ruleId] ?? 0) + 1
+    const occ = new Map<string, number>()
+    let t = 0
+    let low = 0
+    for (const f of fn) {
+      const w = WEIGHT[f.severity as keyof typeof WEIGHT]
+      if (f.occluder) occ.set(f.occluder, Math.max(occ.get(f.occluder) ?? 0, w))
+      else if (f.confidence === 'low') low += w * LOW_CONFIDENCE_FACTOR
+      else t += w
+    }
+    for (const w of occ.values()) t += w
+    t += Math.min(low, LOW_CONFIDENCE_CAP)
+    const st = inTheme.filter((f) => f.category === 'style').reduce((n, f) => n + WEIGHT[f.severity as keyof typeof WEIGHT], 0)
+    byTheme[th] = { score: Math.round(100 * Math.exp(-t / 50)), styleScore: Math.round(100 * Math.exp(-st / 50)), findingsByRule: rules, weightedCauses: t }
+  }
   const summary = {
-    crawls: crawls.length, score, styleScore: style.section.summary.score, weightedCauses: total, lowConfidenceFindings: counted.filter((f) => f.confidence === 'low').length, lowConfidenceWeight: lowCounted, findingsByRule: byRule, expectedByRule, staleExpected, rootCauses, perCrawl: crawls,
+    crawls: crawls.length, score, byTheme, styleScore: style.section.summary.score, weightedCauses: total, lowConfidenceFindings: counted.filter((f) => f.confidence === 'low').length, lowConfidenceWeight: lowCounted, findingsByRule: byRule, expectedByRule, staleExpected, rootCauses, perCrawl: crawls,
     states: crawls.reduce((n, c) => n + (c.states as number), 0), actions: crawls.reduce((n, c) => n + (c.actions as number), 0),
     timing: (() => {
       const sum: Record<string, number> = {}

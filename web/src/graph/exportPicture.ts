@@ -1,6 +1,7 @@
 // Export of the Graph as a picture: the legend of what is on screen, the date its facts were read, and the frame (title,
 // caption, legend, date) drawn around the rendered canvas. Everything stays local; nothing is uploaded.
 import { toCanvas } from 'html-to-image'
+import { inLightTheme, lightColor, lightTokens } from '../theme'
 import type { Cardinality, GraphEdge } from '../api/types'
 import type { FactsByTable } from '../api/nodeFacts'
 import { typeLegend, type NodeColors } from './colorBy'
@@ -136,7 +137,7 @@ export interface Frame {
   date: string
 }
 
-/** Draws the image under a title and caption and above the legend and date, on a white canvas of the same width. */
+/** Draws the image under a title and caption and above the legend and date, on a light canvas of the same width. A picture is always light, whatever theme the page shows: the colours are the light values of the tokens. */
 export function composePicture(image: CanvasImageSource, imageWidth: number, height: number, frame: Frame, scale: number): HTMLCanvasElement {
   const width = Math.max(imageWidth, MIN_WIDTH) // room for the title and the legend even when the graph is small
   const legend = legendRows(frame.legend)
@@ -147,20 +148,21 @@ export function composePicture(image: CanvasImageSource, imageWidth: number, hei
   const c = canvas.getContext('2d')
   if (!c) throw new Error('This browser cannot draw the picture.')
   c.scale(scale, scale)
-  c.fillStyle = '#ffffff'
+  const paper = lightTokens(['surface', 'text', 'muted', 'border', 'grey-300'])
+  c.fillStyle = paper.surface
   c.fillRect(0, 0, m.width, m.height)
   c.textBaseline = 'top'
-  c.fillStyle = '#1f2328'
+  c.fillStyle = paper.text
   c.font = '600 20px system-ui, sans-serif'
   c.fillText(frame.title, PAD, 14, width - 2 * PAD)
   if (frame.caption.trim()) {
-    c.fillStyle = '#6b7280'
+    c.fillStyle = paper.muted
     c.font = '13px system-ui, sans-serif'
     c.fillText(frame.caption, PAD, 44, width - 2 * PAD)
   }
   c.drawImage(image, (width - imageWidth) / 2, m.header, imageWidth, height)
   const top = m.header + height + 8
-  c.strokeStyle = '#d0d7de'
+  c.strokeStyle = paper.border
   c.beginPath()
   c.moveTo(PAD, top)
   c.lineTo(width - PAD, top)
@@ -171,7 +173,7 @@ export function composePicture(image: CanvasImageSource, imageWidth: number, hei
     const y = top + 8 + r * LINE
     let textX = x
     if (item.kind === 'line') {
-      c.strokeStyle = item.stroke
+      c.strokeStyle = lightColor(item.stroke)
       c.lineWidth = item.width
       c.setLineDash(item.dash ? item.dash.split(/[ ,]+/).map(Number) : [])
       c.beginPath()
@@ -181,17 +183,17 @@ export function composePicture(image: CanvasImageSource, imageWidth: number, hei
       c.setLineDash([])
       textX = x + 36
     } else if (item.kind === 'swatch') {
-      c.fillStyle = item.fill
-      c.strokeStyle = '#9aa4b2'
+      c.fillStyle = lightColor(item.fill)
+      c.strokeStyle = paper['grey-300']
       c.lineWidth = 1
       c.fillRect(x, y + 1, 14, 12)
       c.strokeRect(x, y + 1, 14, 12)
       textX = x + 22
     }
-    c.fillStyle = '#1f2328'
+    c.fillStyle = paper.text
     c.fillText(item.text, textX, y, (row.length === 1 && item.text.length > 36 ? width - 2 * PAD : m.columnWidth) - (textX - x) - 8)
   }))
-  c.fillStyle = '#6b7280'
+  c.fillStyle = paper.muted
   c.fillText(frame.date, PAD, top + 8 + m.rows * LINE)
   return canvas
 }
@@ -226,13 +228,13 @@ export async function renderPicture(root: HTMLElement, scope: PictureScope, fram
   const h = whole ? Math.ceil(bounds.height + PADDING * 2) : Math.round(bounds.viewH)
   const shrink = Math.min(1, MAX_SIDE / Math.max(w, h))
   const transform = whole ? `scale(${shrink}) translate(${PADDING - bounds.x}px, ${PADDING - bounds.y}px)` : `translate(${bounds.tx}px, ${bounds.ty}px) scale(${bounds.zoom})`
-  const drawn = await toCanvas(viewport, {
-    backgroundColor: '#ffffff',
+  const drawn = await inLightTheme(viewport, () => toCanvas(viewport, {
+    backgroundColor: lightTokens(['surface']).surface,
     width: Math.round(w * (whole ? shrink : 1)),
     height: Math.round(h * (whole ? shrink : 1)),
     pixelRatio: 2,
     style: { width: `${w}px`, height: `${h}px`, transform, transformOrigin: '0 0' },
-  })
+  }))
   const outW = Math.round(w * (whole ? shrink : 1))
   const outH = Math.round(h * (whole ? shrink : 1))
   return composePicture(drawn, outW, outH, frame, 2)

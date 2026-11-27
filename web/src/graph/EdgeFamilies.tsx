@@ -118,7 +118,7 @@ export function EdgeLegend() {
       )}
       {orphans && (
         <div className="kind-filter" title="Measured: some keys have no match in the referenced table. Click the edge for the numbers.">
-          <span style={{ color: '#d1242f', fontWeight: 700 }}>/</span> orphans: keys with no match
+          <span style={{ color: 'var(--edge-orphan)', fontWeight: 700 }}>/</span> orphans: keys with no match
         </div>
       )}
       {superseded && (

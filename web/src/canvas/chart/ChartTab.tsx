@@ -1,5 +1,7 @@
 import { useMemo, useState, type ComponentProps } from 'react'
 import { VegaEmbed } from 'react-vega'
+import { useTheme } from '../../theme'
+import { vegaOptions } from './vegaTheme'
 import type { QueryResult } from '../../api/types'
 import { useCanvasStore } from '../../store/canvasStore'
 import { ChartPickerFields } from './ChartPicker'
@@ -15,7 +17,6 @@ import {
 
 type VegaProps = ComponentProps<typeof VegaEmbed>
 
-const VEGA_OPTIONS: VegaProps['options'] = { renderer: 'canvas' }
 const TEMPLATE_SPEC = { mark: 'bar', encoding: {} }
 
 interface ChartTabProps {
@@ -32,6 +33,10 @@ export function ChartTab({ windowId, result }: ChartTabProps) {
   const spec = useCanvasStore((s) => s.windows.find((w) => w.id === windowId)?.chart?.vega_lite ?? null)
   const setChartSpec = useCanvasStore((s) => s.setChartSpec)
   const columns = useMemo(() => chartColumns(result?.columns ?? []), [result])
+  const { theme } = useTheme()
+  // The chart's colours come from the tokens in force, so it is drawn again when the theme changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const vegaOpts = useMemo<VegaProps['options']>(() => vegaOptions(), [theme])
 
   const [mode, setMode] = useState<'picker' | 'json'>('picker')
   const [picker, setPicker] = useState<PickerState>(() => pickerFromSpec(spec, columns))
@@ -130,7 +135,7 @@ export function ChartTab({ windowId, result }: ChartTabProps) {
             <VegaEmbed
               className="qw-chart-canvas"
               spec={rendered as VegaProps['spec']}
-              options={VEGA_OPTIONS}
+              options={vegaOpts}
               onError={(err: unknown) =>
                 setRenderError({ spec: rendered, message: err instanceof Error ? err.message : String(err) })
               }

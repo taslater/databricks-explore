@@ -1,5 +1,5 @@
 import { NodeResizer, type NodeProps } from '@xyflow/react'
-import { DEFAULT_FONT_SIZE } from '../model'
+import { DEFAULT_FONT_SIZE, DEFAULT_FRAME_FILL, DEFAULT_FRAME_STROKE, inkOf, paperOf } from '../model'
 import { useSketchStore } from '../sketchStore'
 import { InlineText } from './InlineText'
 import { SideHandles } from './SideHandles'
@@ -19,8 +19,8 @@ export function FrameNode({ id, selected }: NodeProps<SketchFlowNode>) {
   const resize = useResizeHandlers(id)
   if (!node) return null
   const locked = node.locked === true
-  const stroke = node.stroke ?? '#6b7280'
-  const fill = node.fill ?? '#e5e7eb'
+  const stroke = inkOf(node.stroke ?? DEFAULT_FRAME_STROKE)
+  const fill = paperOf(node.fill ?? DEFAULT_FRAME_FILL)
   return (
     <div
       className={`sk-node sk-frame${selected ? ' selected' : ''}${locked ? ' locked' : ''}`}

@@ -6,6 +6,8 @@ import CodeMirror from '@uiw/react-codemirror'
 import { Prec } from '@codemirror/state'
 import { keymap, type EditorView } from '@codemirror/view'
 import { sql, type SQLConfig } from '@codemirror/lang-sql'
+import { cmTheme } from '../editor/cmTheme'
+import { useTheme } from '../../theme'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCancelQuery, useQueryStatus } from '../../api/hooks'
 import type { CanvasWindow, QueryBody, QueryResult, QueryStatus, StatementState } from '../../api/types'
@@ -118,10 +120,11 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
   )
 
   // Inside an open `{{` the popup shows only window titles (an override replaces the SQL sources there).
+  const { theme } = useTheme()
   const extensions = useMemo(() => {
     const config: SQLConfig = { schema: namespace }
-    return [sql(config), windowRefCompletion(id, config, remoteNameSource(qc, profile)), runKeys, flashExtension]
-  }, [namespace, id, qc, profile, runKeys])
+    return [sql(config), windowRefCompletion(id, config, remoteNameSource(qc, profile)), runKeys, flashExtension, cmTheme(theme === 'dark')]
+  }, [namespace, id, qc, profile, runKeys, theme])
 
   function submitSql(statement: string, token: number) {
     // Read the store at submit time so every window's SQL is current.
@@ -324,7 +327,7 @@ function QueryWindowBody({ win, selected }: { win: CanvasWindow; selected: boole
                       viewRef.current = view
                     }}
                     height="100%"
-                    theme="light"
+                    theme="none"
                     placeholder="SELECT ...  (Cmd/Ctrl+Enter runs the statement or selection)"
                   />
                 </div>
