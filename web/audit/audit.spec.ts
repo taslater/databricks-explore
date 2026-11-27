@@ -431,7 +431,7 @@ async function crawl(browser: Browser, baseURL: string, dataDir: string, root: s
 
   async function runCrawl(root: string, vp: { width: number; height: number }) {
     const vpName = vp.width + 'x' + vp.height
-    const slug = root.toLowerCase().replace(/[^a-z]+/g, '-')
+    const slug = root.toLowerCase().replace(/[^a-z]+/g, '-').replace(/-$/, '')
     const prefix = slug + '-' + vp.width + '-' + theme
     const tStart = Date.now()
     tm = newTiming()
