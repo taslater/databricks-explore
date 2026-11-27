@@ -124,3 +124,12 @@ test('primary buttons keep white text in every state', async ({ page }) => {
   await btn.evaluate((el) => ((el as HTMLButtonElement).disabled = true))
   await expect(btn).toHaveCSS('color', white)
 })
+
+test('the More and Tools menu buttons say what they hold when the strip has room', async ({ page }) => {
+  await page.setViewportSize({ width: 1500, height: 900 })
+  await start(page)
+  await page.getByRole('tab', { name: 'Canvas' }).click()
+  await expect(page.getByRole('button', { name: 'More' }).locator('.menu-hint')).toContainText('new diagram')
+  await page.getByRole('tab', { name: 'Graph' }).click()
+  await expect(page.getByRole('button', { name: /^Tools/ }).locator('.menu-hint')).toContainText('export')
+})
